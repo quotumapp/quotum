@@ -233,6 +233,11 @@ Operator routes:
 - `POST /v1/admin/provider-customer-unlinks/:billingAccountId` removes an account's Stripe
   customer link and `GET` on the same path lists the receipts; see
   [Unlinking a Stripe customer](providers.md#unlinking-a-stripe-customer).
+- `POST /v1/admin/customer-erasures` erases a billing account, `POST
+  /v1/admin/customer-erasures/preview` shows what it would do and `GET
+  /v1/admin/customer-erasures/:erasureId` reads the receipt. The billing account id travels in the
+  body, because the id is what an erasure forgets; see
+  [Customer erasure](operations.md#customer-erasure).
 - `POST /v1/admin/store-events/:eventId/replay`: an event of another project, or none, answers
   `404 NOT_FOUND`; one already processed, or leased by a worker that is still live, answers
   `409 STORE_EVENT_NOT_REPLAYABLE`.

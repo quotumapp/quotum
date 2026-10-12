@@ -66,6 +66,7 @@ import { createProviderRegistry } from "./providers/registry";
 import type { StripeBillingConfig } from "./providers/stripe/client";
 import type { StripeBillingClientDependency } from "./providers/stripe/service";
 import { AutoTopupWorker } from "./workers/auto-topup";
+import { CustomerErasureWorker } from "./workers/customer-erasure";
 import { MeteringMaintenanceWorker } from "./workers/metering-maintenance";
 import { ProjectionSyncWorker } from "./workers/projection-sync";
 import { PromotionMaintenanceWorker } from "./workers/promotion-maintenance";
@@ -202,6 +203,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		logger,
 		metrics,
 	});
+	const customerErasureWorker = new CustomerErasureWorker({
+		workerId: env.workerId,
+		repository: billingRepository.customerErasures,
+		logger,
+	});
 	const usagePartitionUpkeepWorker = new UsagePartitionUpkeepWorker({
 		repository: billingRepository,
 		logger,
@@ -325,6 +331,13 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		name: "auto_topup",
 		runOnce: () => autoTopupWorker.runOnce(),
 		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
+	});
+	jobs.push({
+		name: "customer_erasure",
+		runOnce: () => customerErasureWorker.runOnce(),
+		// Erasure is rare and its batches are bounded, so the fast worker cadence keeps one moving
+		// without a long wait between claims.
+		pollIntervalMs: env.workerPollIntervalMs,
 	});
 	jobs.push({
 		name: "promotion_maintenance",
@@ -461,7 +474,7 @@ export function createBillingRuntime(
 			configureDefaultConnection(env);
 			if (dependencies.sentry) initializeSentry(dependencies.sentry, env.sentry);
 			await initializePostgresHealth();
-			configureErasureKeyring(env.erasure?.keyring ?? null);
+			configureErasureKeyring(env.erasure?.keyring ?? null, env.erasure?.tombstoneDays);
 			await assertErasureKeyringCoversTombstones(sql, env.erasure?.keyring ?? null);
 		},
 		compose: () => {

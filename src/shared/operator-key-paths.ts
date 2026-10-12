@@ -29,6 +29,8 @@ export const operatorKeyPaths = {
 	/** Removing a provider customer link, and the receipts of it. */
 	providerCustomerUnlinks: (path: string): boolean =>
 		path.startsWith("/v1/admin/provider-customer-unlinks/"),
+	/** Erasing a billing account, its preview and its receipts. */
+	customerErasures: (path: string): boolean => path.startsWith("/v1/admin/customer-erasures"),
 } as const satisfies Record<string, (path: string) => boolean>;
 
 /** Whether a `/v1` path needs the operator key, as the contract documents it. */

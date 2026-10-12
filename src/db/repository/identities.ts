@@ -146,6 +146,8 @@ export async function resolveUsageCustomer(
 	`,
 	);
 	if (existing !== null) return existing;
+	// An erased id answers as erased for the length of its tombstone, not as one never created.
+	await assertBillingAccountNotErased(executor, projectId, billingAccountId);
 	throw new NotFoundBillingError(
 		"Billing account was not found; create it before recording usage",
 		"BILLING_ACCOUNT_NOT_FOUND",

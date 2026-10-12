@@ -6,6 +6,7 @@ import { registerCapabilityRoutes } from "./app/capability-routes";
 import { registerCatalogRoutes } from "./app/catalog-routes";
 import { registerControlsRoutes } from "./app/controls-routes";
 import { createCredentialAccessGate } from "./app/credential-access";
+import { registerCustomerErasureRoutes } from "./app/customer-erasure-routes";
 import { registerCustomerRoutes } from "./app/customer-routes";
 import { registerInsightsRoutes } from "./app/insights-routes";
 import { registerMeteringRoutes } from "./app/metering-routes";
@@ -117,6 +118,7 @@ export function createApp({
 	trialService,
 	balanceAdjustmentService,
 	providerCustomerUnlinkService,
+	customerErasureService,
 	catalogControlPlane,
 	catalogBindings,
 	billingInsightsService,
@@ -638,6 +640,13 @@ export function createApp({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		service: providerCustomerUnlinkService ?? getRepository().providerCustomerUnlinks,
+		billingLogger,
+		registerPostAuthGuard,
+	});
+	registerCustomerErasureRoutes({
+		app,
+		operatorApiKey: env.operatorApiKey,
+		service: customerErasureService ?? getRepository().customerErasures,
 		billingLogger,
 		registerPostAuthGuard,
 	});

@@ -76,6 +76,7 @@ import { BalanceAdjustmentRepository } from "./repository/balance-adjustments";
 import { CommercialActionRepository } from "./repository/commercial-actions";
 import { ControlsEnterpriseRepository } from "./repository/controls-enterprise";
 import { CoreBillingRepository } from "./repository/core";
+import { CustomerErasureRepository } from "./repository/customer-erasures";
 import { GoogleBillingRepository } from "./repository/google";
 import { BillingInsightsRepository } from "./repository/insights";
 import { type GrantAllocationInput, MeteringBillingRepository } from "./repository/metering";
@@ -213,6 +214,7 @@ export class BillingRepository {
 	readonly balanceAdjustments: BalanceAdjustmentRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
 	readonly providerCustomerUnlinks: ProviderCustomerUnlinkRepository;
+	readonly customerErasures: CustomerErasureRepository;
 	readonly providerOperations: ProviderOperationRepository;
 	readonly paddle: PaddleBillingRepository;
 	readonly paddleCheckouts: PaddleCheckoutRepository;
@@ -245,6 +247,7 @@ export class BillingRepository {
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 		this.providerCustomerUnlinks = new ProviderCustomerUnlinkRepository(database);
+		this.customerErasures = new CustomerErasureRepository(database);
 		this.providerOperations = new ProviderOperationRepository(database);
 		this.paddle = new PaddleBillingRepository(database);
 		this.paddleCheckouts = new PaddleCheckoutRepository(database);
@@ -481,6 +484,14 @@ export class BillingRepository {
 		workerId: string,
 	): Promise<void> {
 		await this.storeEventReplay.renewStoreEventReplayJobLease(projectId, eventId, workerId);
+	}
+
+	async markStoreEventReplayJobErased(
+		projectId: string,
+		eventId: string,
+		workerId: string,
+	): Promise<void> {
+		await this.storeEventReplay.markStoreEventReplayJobErased(projectId, eventId, workerId);
 	}
 
 	async markStoreEventReplayJobFailed(

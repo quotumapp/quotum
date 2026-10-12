@@ -20,6 +20,14 @@ const allowlisted = [
 		reason: "maintenance sweep",
 	},
 	{
+		snippet: "SELECT ctid FROM customer_erasure_tombstones WHERE expires_at",
+		reason: "maintenance sweep of expired tombstones across projects",
+	},
+	{
+		snippet: "SELECT ctid FROM customer_erasures WHERE state = 'completed'",
+		reason: "maintenance sweep of expired receipts across projects",
+	},
+	{
 		snippet: "SELECT id FROM catalog_drafts WHERE status = 'expired'",
 		reason: "maintenance sweep",
 	},

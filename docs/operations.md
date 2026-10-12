@@ -303,6 +303,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | [Provider operation recovery](#provider-write-recovery-foundation) | Fixed, every 10 seconds |
+| [Customer erasure](#customer-erasure) | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
 | [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | Fixed, every 15 minutes |
 | [Merchant platform retention](#merchant-platform-retention), only when `QUOTUM_CONSOLE_ENABLED=true` | Fixed, every 15 minutes |
@@ -705,3 +706,66 @@ need an operator:
 [Unlinking a Stripe customer](providers.md#unlinking-a-stripe-customer) has the request, the
 refusals and what the unlink leaves in place. Do not edit `provider_customers` rows by hand: the
 unlink is the only change that leaves a receipt.
+
+### Customer erasure
+
+An operator erases a billing account on the merchant's instruction, such as a data subject request.
+It needs the [erasure keys](deployment.md#customer-erasure-keys); without them the three routes
+answer `501 CUSTOMER_ERASURE_NOT_CONFIGURED`. All of them take the operator key and `X-Billing-Actor`,
+and a read-only credential is refused.
+
+1. `POST /v1/admin/customer-erasures/preview` with `{"billingAccountId": "…"}` returns `blockers`,
+   the `forfeits` (features with purchased or granted balance still unspent, and lifetime purchases
+   that still grant access), the `requiredAcknowledgements` those need and the rows it will touch.
+2. Let the blockers finish. Every provider counts, and a subscription that funds a base plan blocks
+   until it ends, including a store subscription Quotum cannot cancel. The other blockers are open
+   provider operations, payment setups, checkouts and commercial actions, pending subscription
+   changes and catalog migrations, reserved promotion redemptions, held usage reservations, top-up
+   jobs, usage invoices and a projection delivery in flight.
+3. `POST /v1/admin/customer-erasures` with an `Idempotency-Key` and
+   `{"billingAccountId": "…", "basis": "data_subject_request", "reference": "ticket-4411",
+   "acknowledge": ["forfeit_paid_balances"]}`. `basis` is one of `data_subject_request`,
+   `merchant_offboarding`, `legal_order` and `other`. `reference` is optional and kept in the
+   receipt, so put a ticket number there, never a name. `409
+   CUSTOMER_ERASURE_ACKNOWLEDGEMENT_REQUIRED` names what must be acknowledged and `409
+   CUSTOMER_ERASURE_BLOCKED` what is still open. A replay of the same key and body answers `200`;
+   the same key with another body answers `409 IDEMPOTENCY_CONFLICT`.
+4. Read `GET /v1/admin/customer-erasures/:erasureId` until `state` is `completed`. The receipt has
+   no billing account id and carries `counts` of the rows deleted or scrubbed per table.
+
+The request freezes the account at once, in one transaction: its row becomes an anonymized stub
+(the id is rewritten, the email and metadata cleared, `erased_at` set) and a tombstone is written.
+For `BILLING_ERASURE_TOMBSTONE_DAYS` (30) every path that would create the id again answers
+`409 BILLING_ACCOUNT_ERASED`, and a provider event that names it is dropped with its payload blanked;
+after that the id is an ordinary new account. The `customer-erasure` worker then works in bounded
+batches under a lease and resumes after a stop:
+
+- deletes the account's provider links, checkout requests, payment setup sessions, idempotency
+  claims, entitlements, projection jobs and closed Paddle reservations;
+- rewrites ids, actors and free text on entities, provider operations, commercial action previews,
+  promotion codes, plan grants, redemptions, operator grants, debits and balance allocation keys;
+- blanks provider payloads and error text on store events, purchases, subscriptions and invoices,
+  and the receipt, window keys and caller metadata of usage events;
+- verifies that nothing still carries the original id, then completes and drops the id from the
+  operation row, the only place it lived until then.
+
+Quantities, ledger entries, usage windows and the purchase, subscription and invoice rows stay,
+because the ledger must keep its integrity; only what names the person goes.
+
+An operation in `failed` with `lastError: RESIDUAL_ROWS` found rows that still carried the id;
+`counts` lists them as `residual.<table>`. Send the same `POST` again with the same key to queue it
+once more. Any other failure backs off and retries by itself, and `lastError` holds a stable code,
+never a message.
+
+What an erasure does not do:
+
+- It does not delete the customer in Stripe, Apple, Google or Paddle. Until the provider's customer
+  is deleted, the provider can keep sending events; they are dropped when they name the id, but a
+  payload that does not is stored like any other event.
+- It does not reach platform copies: MCP change proposals, platform audit events and Stripe App
+  events belong to the merchant platform.
+- It does not reach backups. A database restored from before an erasure brings the account back,
+  with its receipt rolled back too, so keep the list of erasures outside the database and run them
+  again after a restore.
+- It keeps caller-supplied dimension values on usage rows (`filters`, rate inputs). They must not
+  carry personal data.

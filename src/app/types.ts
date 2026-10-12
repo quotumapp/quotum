@@ -2,6 +2,7 @@ import type { AdminBillingReader } from "../admin/types";
 import type { ApplePromotionSigner } from "../billing/apple-promotions";
 import type { BalanceAdjustmentServiceLike } from "../billing/balance-adjustments";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
+import type { CustomerErasureServiceLike } from "../billing/customer-erasures";
 import type { EntitlementService } from "../billing/entitlements";
 import type {
 	CustomerBillingSummary,
@@ -152,6 +153,7 @@ export interface AppDependencies {
 	trialService?: TrialServiceLike;
 	balanceAdjustmentService?: BalanceAdjustmentServiceLike;
 	providerCustomerUnlinkService?: ProviderCustomerUnlinkServiceLike;
+	customerErasureService?: CustomerErasureServiceLike;
 	catalogControlPlane?: CatalogControlPlaneLike;
 	catalogBindings?: CatalogBindingsLike;
 	billingInsightsService?: BillingInsightsServiceLike;

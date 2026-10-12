@@ -587,10 +587,10 @@ export async function enqueueProjectionSyncJob(
 	},
 ): Promise<boolean> {
 	requireNonBlank(input.idempotencyKey, "p_idempotency_key");
-	const customer = await executeOne<{ project_id: string }>(
+	const customer = await executeOne<{ project_id: string; erased_at: Date | string | null }>(
 		executor,
 		drizzleSql`
-		SELECT c.project_id
+		SELECT c.project_id, c.erased_at
 		FROM customers c
 		WHERE c.id = ${input.customerId}
 	`,
@@ -598,6 +598,8 @@ export async function enqueueProjectionSyncJob(
 	if (customer === null) {
 		throw new Error(`projection sync job customer ${input.customerId} was not found`);
 	}
+	// An erased account is an anonymized stub: the product backend must never be told about it.
+	if (customer.erased_at !== null && customer.erased_at !== undefined) return false;
 	const [{ sequence }, balances] = await Promise.all([
 		nextProjectionSequence(executor, customer.project_id, input.customerId),
 		readProjectionBalances(executor, customer.project_id, input.customerId),

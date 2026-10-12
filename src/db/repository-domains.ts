@@ -90,6 +90,11 @@ export interface StoreEventReplayJobRepositorySource {
 		eventId: string,
 		workerId: string,
 	): Promise<void>;
+	markStoreEventReplayJobErased?(
+		projectId: string,
+		eventId: string,
+		workerId: string,
+	): Promise<void>;
 }
 
 export class StoreEventReplayJobRepository implements StoreEventReplayJobRepositorySource {
@@ -140,6 +145,14 @@ export class StoreEventReplayJobRepository implements StoreEventReplayJobReposit
 		workerId: string,
 	): Promise<void> {
 		await this.source.renewStoreEventReplayJobLease?.(projectId, eventId, workerId);
+	}
+
+	async markStoreEventReplayJobErased(
+		projectId: string,
+		eventId: string,
+		workerId: string,
+	): Promise<void> {
+		await this.source.markStoreEventReplayJobErased?.(projectId, eventId, workerId);
 	}
 }
 

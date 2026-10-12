@@ -897,6 +897,7 @@ async function reconcileDefaultPlanSlice(
 						SELECT c.id, c.billing_account_id
 						FROM customers c
 						WHERE c.project_id = ${projectId}
+							AND c.erased_at IS NULL
 							AND c.id IN (
 								SELECT jsonb_array_elements_text(${jsonb(scanned.map((row) => row.id))})::uuid
 							)

@@ -65784,6 +65784,1016 @@
         ]
       }
     },
+    "/v1/admin/customer-erasures": {
+      "post": {
+        "operationId": "postV1AdminCustomerErasures",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "acknowledge": {
+                    "default": [],
+                    "items": {
+                      "enum": [
+                        "forfeit_paid_balances",
+                        "forfeit_lifetime_purchases"
+                      ],
+                      "type": "string"
+                    },
+                    "maxItems": 2,
+                    "type": "array"
+                  },
+                  "basis": {
+                    "enum": [
+                      "data_subject_request",
+                      "merchant_offboarding",
+                      "legal_order",
+                      "other"
+                    ],
+                    "type": "string"
+                  },
+                  "billingAccountId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "reference": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "billingAccountId",
+                  "basis"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "duplicate": {
+                          "type": "boolean"
+                        },
+                        "erasure": {
+                          "properties": {
+                            "acknowledged": {
+                              "items": {
+                                "enum": [
+                                  "forfeit_paid_balances",
+                                  "forfeit_lifetime_purchases"
+                                ],
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "actor": {
+                              "type": "string"
+                            },
+                            "basis": {
+                              "enum": [
+                                "data_subject_request",
+                                "merchant_offboarding",
+                                "legal_order",
+                                "other"
+                              ],
+                              "type": "string"
+                            },
+                            "completedAt": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "counts": {
+                              "additionalProperties": {
+                                "type": "number"
+                              },
+                              "type": "object"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "lastError": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "reference": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "requestedAt": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "requested",
+                                "running",
+                                "verifying",
+                                "completed",
+                                "failed"
+                              ],
+                              "type": "string"
+                            },
+                            "step": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "tombstoneExpiresAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "state",
+                            "basis",
+                            "reference",
+                            "actor",
+                            "acknowledged",
+                            "step",
+                            "counts",
+                            "lastError",
+                            "requestedAt",
+                            "completedAt",
+                            "tombstoneExpiresAt"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "duplicate",
+                        "erasure"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "duplicate": {
+                          "type": "boolean"
+                        },
+                        "erasure": {
+                          "properties": {
+                            "acknowledged": {
+                              "items": {
+                                "enum": [
+                                  "forfeit_paid_balances",
+                                  "forfeit_lifetime_purchases"
+                                ],
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "actor": {
+                              "type": "string"
+                            },
+                            "basis": {
+                              "enum": [
+                                "data_subject_request",
+                                "merchant_offboarding",
+                                "legal_order",
+                                "other"
+                              ],
+                              "type": "string"
+                            },
+                            "completedAt": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "counts": {
+                              "additionalProperties": {
+                                "type": "number"
+                              },
+                              "type": "object"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "lastError": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "reference": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "requestedAt": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "enum": [
+                                "requested",
+                                "running",
+                                "verifying",
+                                "completed",
+                                "failed"
+                              ],
+                              "type": "string"
+                            },
+                            "step": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "tombstoneExpiresAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "state",
+                            "basis",
+                            "reference",
+                            "actor",
+                            "acknowledged",
+                            "step",
+                            "counts",
+                            "lastError",
+                            "requestedAt",
+                            "completedAt",
+                            "tombstoneExpiresAt"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "duplicate",
+                        "erasure"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/customer-erasures",
+        "tags": [
+          "customer-erasures"
+        ]
+      }
+    },
+    "/v1/admin/customer-erasures/{erasureId}": {
+      "get": {
+        "operationId": "getV1AdminCustomerErasuresByErasureId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "erasureId",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "acknowledged": {
+                          "items": {
+                            "enum": [
+                              "forfeit_paid_balances",
+                              "forfeit_lifetime_purchases"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "actor": {
+                          "type": "string"
+                        },
+                        "basis": {
+                          "enum": [
+                            "data_subject_request",
+                            "merchant_offboarding",
+                            "legal_order",
+                            "other"
+                          ],
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "counts": {
+                          "additionalProperties": {
+                            "type": "number"
+                          },
+                          "type": "object"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "lastError": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "reference": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "requestedAt": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "enum": [
+                            "requested",
+                            "running",
+                            "verifying",
+                            "completed",
+                            "failed"
+                          ],
+                          "type": "string"
+                        },
+                        "step": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "tombstoneExpiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "state",
+                        "basis",
+                        "reference",
+                        "actor",
+                        "acknowledged",
+                        "step",
+                        "counts",
+                        "lastError",
+                        "requestedAt",
+                        "completedAt",
+                        "tombstoneExpiresAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "GET /v1/admin/customer-erasures/{erasureId}",
+        "tags": [
+          "customer-erasures"
+        ]
+      }
+    },
+    "/v1/admin/customer-erasures/preview": {
+      "post": {
+        "operationId": "postV1AdminCustomerErasuresPreview",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "billingAccountId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "billingAccountId"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "blockers": {
+                          "items": {
+                            "properties": {
+                              "count": {
+                                "type": "number"
+                              },
+                              "kind": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "count"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "forfeits": {
+                          "properties": {
+                            "lifetimePurchases": {
+                              "type": "number"
+                            },
+                            "paidBalanceFeatures": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "paidBalanceFeatures",
+                            "lifetimePurchases"
+                          ],
+                          "type": "object"
+                        },
+                        "requiredAcknowledgements": {
+                          "items": {
+                            "enum": [
+                              "forfeit_paid_balances",
+                              "forfeit_lifetime_purchases"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "rows": {
+                          "additionalProperties": {
+                            "type": "number"
+                          },
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "blockers",
+                        "forfeits",
+                        "requiredAcknowledgements",
+                        "rows"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/customer-erasures/preview",
+        "tags": [
+          "customer-erasures"
+        ]
+      }
+    },
     "/v1/admin/customers/{customerId}": {
       "get": {
         "operationId": "getV1AdminCustomersByCustomerId",
@@ -90240,6 +91250,10 @@
     {
       "description": "Implemented customer operations.",
       "name": "customer"
+    },
+    {
+      "description": "Implemented customer-erasures operations.",
+      "name": "customer-erasures"
     },
     {
       "description": "Implemented insights operations.",
