@@ -39,6 +39,7 @@ import {
 	type PromotionValidation,
 	type PromotionValidationInput,
 	promotionCodeUnavailability,
+	promotionEffectRedeemable,
 	promotionError,
 	promotionQuantity,
 	type StripeCheckoutPromotionFacts,
@@ -540,25 +541,34 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 							offer.desiredActive,
 					)
 				: undefined;
+		const unavailable = promotionCodeUnavailability(
+			{
+				promotionStatus: promotion.status,
+				allowedChannels: promotion.allowedChannels,
+				active: code.active,
+				startsAt: code.startsAt === null ? null : new Date(code.startsAt),
+				expiresAt: code.expiresAt === null ? null : new Date(code.expiresAt),
+				billingAccountId: code.billingAccountId,
+				maxRedemptions: code.maxRedemptions,
+				redeemedCount: code.redeemedCount,
+				reservedCount: code.reservedCount,
+			},
+			{
+				now: clock === null ? new Date() : new Date(toIso(clock.now)),
+				billingAccountId: input.billingAccountId,
+				channel: input.channel,
+			},
+		);
+		// An effect no channel redeems is refused whatever else is true of the code, the same
+		// answer redemption gives. A code restricted to another account stays hidden first.
+		const effectRefusal =
+			unavailable !== "PROMOTION_CODE_NOT_FOUND" &&
+			!promotionEffectRedeemable(promotion.effect.kind)
+				? "PROMOTION_CODE_NOT_APPLICABLE"
+				: null;
 		const reason =
-			promotionCodeUnavailability(
-				{
-					promotionStatus: promotion.status,
-					allowedChannels: promotion.allowedChannels,
-					active: code.active,
-					startsAt: code.startsAt === null ? null : new Date(code.startsAt),
-					expiresAt: code.expiresAt === null ? null : new Date(code.expiresAt),
-					billingAccountId: code.billingAccountId,
-					maxRedemptions: code.maxRedemptions,
-					redeemedCount: code.redeemedCount,
-					reservedCount: code.reservedCount,
-				},
-				{
-					now: clock === null ? new Date() : new Date(toIso(clock.now)),
-					billingAccountId: input.billingAccountId,
-					channel: input.channel,
-				},
-			) ??
+			effectRefusal ??
+			unavailable ??
 			(input.channel === "ios" && (promotion.effect.kind !== "discount" || !appleOffers?.length)
 				? "PROMOTION_CODE_CHANNEL_NOT_SUPPORTED"
 				: null) ??
@@ -808,6 +818,9 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 					resolved.code.billingAccountId !== input.billingAccountId)
 			) {
 				throw promotionError("PROMOTION_CODE_NOT_FOUND");
+			}
+			if (!promotionEffectRedeemable(resolved.promotion.effect.kind)) {
+				throw promotionError("PROMOTION_CODE_NOT_APPLICABLE");
 			}
 			if (input.channel === "ios") throw promotionError("PROMOTION_CODE_CHANNEL_NOT_SUPPORTED");
 			if (resolved.promotion.effect.kind === "discount") {
