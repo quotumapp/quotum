@@ -27,6 +27,22 @@ describe("supersedeBasePlanGrants", () => {
 	});
 });
 
+describe("plan grant ending notices", () => {
+	it("claims trials and promotional grants near their end, and never the default plan", async () => {
+		const database = new FakeDatabase([[]], { strict: true });
+
+		const outcome = await new PlanGrantRepository(database as never).enqueuePlanGrantEndingNotices(
+			25,
+		);
+
+		database.assertConsumed();
+		expect(outcome).toEqual({ noticedTrials: 0, affectedCustomers: 0, projectionJobs: 0 });
+		expect(database.queries[0]).toContain("g.origin IN ('trial', 'promotion')");
+		expect(database.queries[0]).toContain("g.ending_notified_at IS NULL");
+		expect(database.queries[0]).toContain("FOR UPDATE OF g SKIP LOCKED");
+	});
+});
+
 describe("default-plan passes", () => {
 	it("backs a pass off by its own id and project after a slice fails, and moves on", async () => {
 		const writes: string[] = [];

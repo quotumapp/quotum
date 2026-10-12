@@ -24,6 +24,30 @@
           "reversal"
         ]
       }
+    },
+    {
+      "not": {
+        "required": [
+          "planGrant",
+          "purchase"
+        ]
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "planGrant",
+          "reversal"
+        ]
+      }
+    },
+    {
+      "not": {
+        "required": [
+          "planGrant",
+          "trial"
+        ]
+      }
     }
   ],
   "description": "Body of the signed POST to <projectionUrl>/internal/billing/projections. Ignore fields this schema does not name.",
@@ -148,13 +172,59 @@
       "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
       "type": "string"
     },
+    "planGrant": {
+      "description": "A plan grant from a redeemed promotion code that is ending or has ended. Never sent with purchase, reversal or trial.",
+      "properties": {
+        "endsAt": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "event": {
+          "enum": [
+            "ending",
+            "ended"
+          ],
+          "type": "string"
+        },
+        "origin": {
+          "const": "promotion",
+          "type": "string"
+        },
+        "planGrantId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "planKey": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "promotionRedemptionId": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "startsAt": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event",
+        "origin",
+        "planGrantId",
+        "planKey",
+        "promotionRedemptionId",
+        "startsAt",
+        "endsAt"
+      ],
+      "type": "object"
+    },
     "projectKey": {
       "description": "Key of the project instance the delivery is for.",
       "minLength": 1,
       "type": "string"
     },
     "purchase": {
-      "description": "A purchase to record once by transactionId. Never sent with reversal or trial.",
+      "description": "A purchase to record once by transactionId. Never sent with reversal, trial or planGrant.",
       "properties": {
         "channel": {
           "enum": [
@@ -237,7 +307,7 @@
       "type": "string"
     },
     "reversal": {
-      "description": "A refund or dispute to record once by transactionId. With a subscription fact it reports a returned subscription payment and reverses nothing. Never sent with purchase or trial.",
+      "description": "A refund or dispute to record once by transactionId. With a subscription fact it reports a returned subscription payment and reverses nothing. Never sent with purchase, trial or planGrant.",
       "properties": {
         "channel": {
           "enum": [
@@ -412,7 +482,7 @@
       "type": "object"
     },
     "trial": {
-      "description": "A trial that is ending or has ended. Never sent with purchase or reversal.",
+      "description": "A trial that is ending or has ended. Never sent with purchase, reversal or planGrant.",
       "else": {
         "not": {
           "anyOf": [

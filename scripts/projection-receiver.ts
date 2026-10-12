@@ -159,6 +159,7 @@ function summarize(value: unknown): {
 	purchase?: string;
 	reversal?: string;
 	trial?: string;
+	planGrant?: string;
 } {
 	if (typeof value !== "object" || value === null) {
 		return { reason: "n/a", billingAccountId: "n/a", sequence: null };
@@ -178,7 +179,11 @@ function summarize(value: unknown): {
 			: undefined;
 	const trial =
 		typeof obj.trial === "object" && obj.trial !== null ? JSON.stringify(obj.trial) : undefined;
-	return { reason, billingAccountId, sequence, purchase, reversal, trial };
+	const planGrant =
+		typeof obj.planGrant === "object" && obj.planGrant !== null
+			? JSON.stringify(obj.planGrant)
+			: undefined;
+	return { reason, billingAccountId, sequence, purchase, reversal, trial, planGrant };
 }
 
 const server = Bun.serve({
@@ -284,7 +289,8 @@ const server = Bun.serve({
 		acceptedCount += 1;
 		const summary = summarize(parsed);
 		// A lower sequence than one already applied for the account is an older snapshot: a real
-		// receiver keeps its newer state, records any purchase, reversal or trial facts, and still acks.
+		// receiver keeps its newer state, records any purchase, reversal, trial or planGrant facts, and
+		// still acks.
 		const applied = lastSequenceByAccount[summary.billingAccountId];
 		const stale = summary.sequence !== null && applied !== undefined && summary.sequence < applied;
 		if (summary.sequence !== null && !stale) {

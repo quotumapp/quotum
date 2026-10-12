@@ -104,6 +104,98 @@
     },
     "description": "A Google Play subscription verified through POST /v1/purchases/verify. Like the App Store case it carries no fact; externalSubscriptionId is the purchase token."
   },
+  "promotion_plan_grant_ended": {
+    "delivery": {
+      "balances": [],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": false,
+            "expiresAt": "2026-10-31T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "origin": "promotion",
+              "planGrantId": "5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10",
+              "planKey": "premium",
+              "promotionRedemptionId": "0192f3a1-8e00-7b00-9c00-1d2e3f405162",
+              "source": "plan_grant",
+              "status": "expired"
+            }
+          }
+        ],
+        "generatedAt": "2026-10-31T09:30:41.220Z"
+      },
+      "generatedAt": "2026-10-31T09:30:41.220Z",
+      "idempotencyKey": "expiry_reconciliation:plan_grant:5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10:2026-10-31T09:30:00.000Z",
+      "jobId": "0192f3a2-000f-7a10-8b20-c30d40e50f60",
+      "planGrant": {
+        "endsAt": "2026-10-31T09:30:00.000Z",
+        "event": "ended",
+        "origin": "promotion",
+        "planGrantId": "5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10",
+        "planKey": "premium",
+        "promotionRedemptionId": "0192f3a1-8e00-7b00-9c00-1d2e3f405162",
+        "startsAt": "2026-10-01T09:30:00.000Z"
+      },
+      "projectKey": "acme",
+      "reason": "expiry_reconciliation",
+      "schemaVersion": 1,
+      "sequence": 3
+    },
+    "description": "The plan a redeemed promotion code gave reached its end without a paid plan taking over. The entitlement is inactive and the grant's allowance no longer counts. A revoked redemption delivers the same fact with reason usage_changed and the earlier endsAt; a grant a paid subscription replaces sends none."
+  },
+  "promotion_plan_grant_ending": {
+    "delivery": {
+      "balances": [
+        {
+          "available": "1000",
+          "featureKey": "ai_credits",
+          "held": "0",
+          "periodEndsAt": "2026-10-31T09:30:00.000Z",
+          "unit": "credit"
+        }
+      ],
+      "billingAccountId": "user_42",
+      "entitlements": {
+        "billingAccountId": "user_42",
+        "entitlements": [
+          {
+            "active": true,
+            "expiresAt": "2026-10-31T09:30:00.000Z",
+            "key": "premium",
+            "metadata": {
+              "origin": "promotion",
+              "planGrantId": "5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10",
+              "planKey": "premium",
+              "promotionRedemptionId": "0192f3a1-8e00-7b00-9c00-1d2e3f405162",
+              "source": "plan_grant",
+              "status": "active"
+            }
+          }
+        ],
+        "generatedAt": "2026-10-28T09:31:07.412Z"
+      },
+      "generatedAt": "2026-10-28T09:31:07.412Z",
+      "idempotencyKey": "plan_grant_ending:5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10:2026-10-31T09:30:00.000Z",
+      "jobId": "0192f3a2-000e-7a10-8b20-c30d40e50f60",
+      "planGrant": {
+        "endsAt": "2026-10-31T09:30:00.000Z",
+        "event": "ending",
+        "origin": "promotion",
+        "planGrantId": "5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10",
+        "planKey": "premium",
+        "promotionRedemptionId": "0192f3a1-8e00-7b00-9c00-1d2e3f405162",
+        "startsAt": "2026-10-01T09:30:00.000Z"
+      },
+      "projectKey": "acme",
+      "reason": "expiry_reconciliation",
+      "schemaVersion": 1,
+      "sequence": 2
+    },
+    "description": "The plan a redeemed promotion code gave ends in about three days. Record the planGrant fact once by its key; it arrives once per grant. The entitlement metadata names the grant and its redemption."
+  },
   "stripe_one_time_purchase": {
     "delivery": {
       "balances": [],

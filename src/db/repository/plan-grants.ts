@@ -18,7 +18,11 @@ import {
 	trialStartRequestHash,
 } from "../../billing/plan-grants";
 import { trialEndingNoticeLeadMs } from "../../billing/trials";
-import type { BillingProvider, ProjectionTrialPayload } from "../../billing/types";
+import type {
+	BillingProvider,
+	ProjectionPayload,
+	ProjectionTrialPayload,
+} from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { sqlstateOf } from "../postgres-errors";
 import { RepositoryModule } from "./base";
@@ -361,7 +365,10 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 		}
 	}
 
-	/** Worker pass: one `ending` fact per trial grant within the notice lead of its end. */
+	/**
+	 * Worker pass: one `ending` fact per trial or promotional grant within the notice lead of its
+	 * end.
+	 */
 	async enqueuePlanGrantEndingNotices(
 		limit: number,
 	): Promise<{ noticedTrials: number; affectedCustomers: number; projectionJobs: number }> {
@@ -375,7 +382,7 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 					SELECT g.id, g.customer_id
 					FROM plan_grants g
 					WHERE g.status = 'active'
-						AND g.origin = 'trial'
+						AND g.origin IN ('trial', 'promotion')
 						AND g.ending_notified_at IS NULL
 						AND g.ends_at > now()
 						AND g.ends_at <= now() + make_interval(secs => ${leadSeconds})
@@ -420,13 +427,16 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 				);
 				const enqueued = await enqueueProjectionSyncJob(tx, {
 					customerId: grant.customer_id,
-					idempotencyKey: `trial_ending:plan_grant:${grant.id}:${formatUtcTimestamp(grant.ends_at)}`,
+					idempotencyKey:
+						grant.origin === "trial"
+							? `trial_ending:plan_grant:${grant.id}:${formatUtcTimestamp(grant.ends_at)}`
+							: `plan_grant_ending:${grant.id}:${formatUtcTimestamp(grant.ends_at)}`,
 					reason: "expiry_reconciliation",
 					payload: {
 						billingAccountId: grant.billing_account_id,
 						reason: "expiry_reconciliation",
 						entitlements: snapshot,
-						trial: planGrantTrialFact(grant, "ending"),
+						...planGrantFacts(grant, "ending"),
 					},
 				});
 				if (enqueued) projectionJobs += 1;
@@ -777,8 +787,8 @@ async function customerTrialIneligibility(
 
 /**
  * Records elapsed grants as expired, recomputes each account and delivers an
- * `expiry_reconciliation` projection; a trial's carries the `ended` fact. Readers already stop a
- * grant at its end, so this only makes the state explicit.
+ * `expiry_reconciliation` projection; a trial's or a promotional grant's carries its `ended` fact.
+ * Readers already stop a grant at its end, so this only makes the state explicit.
  */
 async function expirePlanGrantsWhere(
 	executor: QueryExecutor,
@@ -834,7 +844,7 @@ async function expirePlanGrantsWhere(
 				billingAccountId: grant.billing_account_id,
 				reason: "expiry_reconciliation",
 				entitlements: snapshot,
-				...(grant.origin === "trial" ? { trial: planGrantTrialFact(grant, "ended") } : {}),
+				...planGrantFacts(grant, "ended"),
 			},
 		});
 	}
@@ -1092,6 +1102,42 @@ function toTrialRecord(row: PlanGrantRow): TrialRecord {
 		actor: row.actor,
 		metadata: row.metadata,
 		createdAt: formatUtcTimestamp(row.created_at),
+	};
+}
+
+/** The `ended` fact of a grant that was just ended before its end, for the caller's delivery. */
+export async function endedPlanGrantFacts(
+	executor: QueryExecutor,
+	projectId: string,
+	grantId: string,
+	endedAt: Date | string,
+): Promise<PlanGrantFacts> {
+	return planGrantFacts(await requirePlanGrantRow(executor, projectId, grantId), "ended", endedAt);
+}
+
+type PlanGrantFacts = Pick<ProjectionPayload, "trial" | "planGrant">;
+
+/**
+ * What a grant's ending or end tells a receiver: a trial's as the `trial` fact, a promotional
+ * grant's as `planGrant`. The default plan has no end to report.
+ */
+function planGrantFacts(
+	grant: PlanGrantRow,
+	event: "ending" | "ended",
+	endedAt: Date | string | null = null,
+): PlanGrantFacts {
+	if (grant.origin === "trial") return { trial: planGrantTrialFact(grant, event, endedAt) };
+	if (grant.promotion_redemption_id === null || grant.ends_at === null) return {};
+	return {
+		planGrant: {
+			event,
+			origin: "promotion",
+			planGrantId: grant.id,
+			planKey: grant.plan_key,
+			promotionRedemptionId: grant.promotion_redemption_id,
+			startsAt: formatUtcTimestamp(grant.starts_at),
+			endsAt: formatUtcTimestamp(endedAt ?? grant.ends_at),
+		},
 	};
 }
 

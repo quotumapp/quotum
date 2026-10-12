@@ -143,6 +143,7 @@ export class ProjectionSyncWorker {
 			purchase,
 			reversal,
 			trial,
+			planGrant,
 			subscription,
 			sequence,
 		} = payload;
@@ -161,6 +162,7 @@ export class ProjectionSyncWorker {
 			...(purchase ? { purchase } : {}),
 			...(reversal ? { reversal } : {}),
 			...(trial ? { trial } : {}),
+			...(planGrant ? { planGrant } : {}),
 			...(subscription ? { subscription } : {}),
 			...(sequence === undefined ? {} : { sequence }),
 		});
