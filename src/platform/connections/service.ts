@@ -47,6 +47,13 @@ export class MerchantConnections {
 			organizationId: async (tx) =>
 				(await this.store.membership(tx, identity.principalId, scope.organizationSlug))
 					.organization_id,
+			admitDraft: (tx) =>
+				this.store.rateLimit(
+					`connection-draft:principal:${identity.principalId}`,
+					30,
+					60 * 60_000,
+					tx,
+				),
 		};
 	}
 	async scope(

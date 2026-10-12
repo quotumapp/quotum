@@ -902,11 +902,11 @@ export function createMerchantApp({
 			throw new MerchantError("INVALID_REQUEST", "Check the form fields and try again.");
 		const ip = request.headers.get("x-quotum-client-ip") ?? "unknown";
 		if (typeof input.email === "string") input.email = normalizeEmail(input.email);
+		let signupEmailBucket: string | null = null;
 		if (path === "/sign-up/email") {
 			if (!store.config.signupEnabled)
 				throw new MerchantError("SIGNUP_DISABLED", "Registration is not available yet.", 403);
 			await store.rateLimit(`signup:ip:${ip}`, 5, 60 * 60_000);
-			await store.rateLimit(`signup:email:${String(input.email)}`, 3, 24 * 60 * 60_000);
 			const intent = cookieValue(request.headers, SIGNUP_COOKIE);
 			if (!intent || !(await store.readLink(intent, "signup")))
 				throw new MerchantError(
@@ -914,6 +914,13 @@ export function createMerchantApp({
 					"Accept the current terms and privacy policy first.",
 				);
 			input.name = userNameSchema.parse(input.name);
+			// The address budget bounds the verification mail its owner receives, so a request that
+			// is refused must not spend it: anyone could otherwise lock an address out of
+			// registration for a day. It is charged only once our own checks have passed, which keeps
+			// the cap atomic for the requests that go on to send mail, and given back below when the
+			// library refuses.
+			signupEmailBucket = `signup:email:${String(input.email)}`;
+			await store.rateLimit(signupEmailBucket, 3, 24 * 60 * 60_000);
 		}
 		if (path === "/sign-in/email") {
 			await store.rateLimit(`password:ip:${ip}`, 20, 15 * 60_000);
@@ -959,6 +966,8 @@ export function createMerchantApp({
 				body: JSON.stringify(input),
 			}),
 		);
+		// A sign-up the library refused, including with its own rate limit, sent no mail.
+		if (signupEmailBucket !== null && !response.ok) await store.releaseRateLimit(signupEmailBucket);
 		const rateLimited = authRateLimitError(response);
 		if (rateLimited !== null) throw rateLimited;
 		const headers = new Headers(response.headers);
