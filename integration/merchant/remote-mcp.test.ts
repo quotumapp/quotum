@@ -317,7 +317,7 @@ describe("remote MCP browser authorization", () => {
 	it("connects, serves read tools and refreshes after deleting the transient proof", async () => {
 		const browser = await owner();
 		const tokens = await redeem(browser);
-		expect(tokens.expires_in).toBe(900);
+		expect(tokens.expires_in).toBe(3600);
 		const claims = JSON.parse(
 			Buffer.from(tokens.access_token.split(".")[1] ?? "", "base64url").toString(),
 		);
