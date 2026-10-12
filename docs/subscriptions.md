@@ -195,6 +195,15 @@ Stripe's view of a subscription decides its plan version. When Quotum records a 
   and changes nothing when it arrives later, while an event created after it still applies. The
   minute keeps a newer event from being dropped when the host's clock runs ahead of Stripe's; an
   older event from that last minute before the read can still apply until the next update.
+- Events Stripe created in the same second have no order of their own, so the state that cannot be
+  undone wins. A cancellation or expiry applies over the live state it ties with, even when it ends
+  ahead of the period that was paid through, as an immediate cancellation does, and a live update of
+  the same second never revives it. A copy of an earlier period, one that starts before the
+  recorded period, is stale whatever its status. Between live states the later period end wins.
+- A subscription Stripe ended expires when Stripe ended it, not at the period it was paid through.
+  A reconciliation read applies that ending as the webhook does, so a lost or dropped
+  `customer.subscription.deleted` for an immediate cancellation is repaired; a read that began
+  before an ending Quotum already recorded never moves the subscription back to a live state.
 - A Stripe price that no published version binds does not fail the update. The subscription's status,
   period and cancellation are recorded, it keeps its plan version and the items it already tracks,
   and the store event's `processingError` names the unbound prices, for example
@@ -246,8 +255,9 @@ there is nothing left to cancel or to uncancel; `ADDON_SUBSCRIPTIONS_ACTIVE` (40
 `SUBSCRIPTION_CHANGE_PENDING` (409) while a worker is applying that subscription's change, which is
 retryable; and `SUBSCRIPTION_PERIOD_MISSING` (409) for `period_end` without a known period end.
 
-Local subscription state still arrives only through the provider webhook, so `cancelAtPeriodEnd`
-and the subscription's status change when Stripe reports them, not when execution returns.
+Local subscription state still arrives only through the provider webhook, or through reconciliation
+when a webhook is lost, so `cancelAtPeriodEnd` and the subscription's status change when Stripe
+reports them, not when execution returns.
 
 Limitation: a Stripe subscription schedule attached outside Quotum is invisible here. Quotum
 cancels the subscription; it does not release or amend a schedule that may recreate it.

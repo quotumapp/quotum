@@ -32,7 +32,7 @@ import {
 	proratedReversedCreditAmount,
 } from "./invalidations";
 import { meterLimitScopeConflicts } from "./meter-limit-scope-guards";
-import { upsertPurchase, upsertSubscription } from "./mutations";
+import { isEndedSubscriptionStatus, upsertPurchase, upsertSubscription } from "./mutations";
 import { parseNullableNonnegativeInteger, parseStripeWebStoreProductRow } from "./parsers";
 import { planTrialUsedSql } from "./plan-grants";
 import {
@@ -1198,14 +1198,25 @@ export class StripeBillingRepository extends RepositoryModule {
 			}
 			const incomingPeriodEnd = input.currentPeriodEnd ?? input.expiresAt;
 			const incomingProviderOrder = input.providerEventCreated ?? 0;
+			const incomingState: SubscriptionOrderState = {
+				order: incomingProviderOrder,
+				status: input.subscriptionStatus,
+				periodStart: input.currentPeriodStart ?? input.startsAt,
+				periodEnd: incomingPeriodEnd,
+			};
 			const isStaleSubscriptionEvent =
-				input.externalEventId !== null &&
 				existingSubscription !== null &&
-				(incomingProviderOrder < existingSubscription.last_provider_event_created ||
-					(incomingProviderOrder === existingSubscription.last_provider_event_created &&
-						incomingPeriodEnd !== null &&
-						existingSubscription.current_period_end !== null &&
-						incomingPeriodEnd < existingSubscription.current_period_end));
+				(input.externalEventId !== null
+					? isStaleStripeSubscriptionEvent(incomingState, {
+							order: existingSubscription.last_provider_event_created,
+							status: existingSubscription.status,
+							periodStart: existingSubscription.current_period_start,
+							periodEnd: existingSubscription.current_period_end,
+						})
+					: revivesEndedSubscription(incomingState, {
+							order: existingSubscription.last_provider_event_created,
+							status: existingSubscription.status,
+						}));
 			if (isStaleSubscriptionEvent) {
 				// Invoice facts carry their own event order in billing_invoices, so an invoice that
 				// arrives after a newer subscription event is still recorded; only the subscription
@@ -1290,6 +1301,7 @@ export class StripeBillingRepository extends RepositoryModule {
 				}
 			}
 
+			const providerEnded = isEndedSubscriptionStatus(lifecycle.status);
 			const subscriptionRecordId = await upsertSubscription(tx, projectId, {
 				customerId: resolved.id,
 				productId: effectiveProduct.product_id,
@@ -1312,6 +1324,11 @@ export class StripeBillingRepository extends RepositoryModule {
 				latestProviderObjectId: input.invoiceId,
 				lastProviderEventCreated: input.providerEventCreated ?? 0,
 				enforceProviderEventOrder: input.externalEventId !== null,
+				// Stripe ends a subscription when it was cancelled, ahead of the period it was paid
+				// through. That moment is the expiry, and a reconciliation read, which carries no event
+				// order, applies it as the webhook does.
+				providerEnded,
+				replaceExpiresAt: providerEnded && input.expiresAt !== null,
 				rawState: stripNulls({
 					stripeCustomerId: input.stripeCustomerId,
 					stripeSubscriptionId: input.stripeSubscriptionId,
@@ -1778,6 +1795,71 @@ function isStripeInvoiceEvent(input: {
 	invoiceStatus?: string | null;
 }): boolean {
 	return typeof input.invoiceStatus === "string" || input.eventType.startsWith("invoice.");
+}
+
+/**
+ * Whether a subscription event is older than the state Quotum recorded. Events order by the second
+ * Stripe created them. Within one second their order is unknown, and two rules settle it:
+ *
+ * - A live state never revives an ending, so the delayed update of a cancellation's second changes
+ *   nothing.
+ * - An ending applies although it ends ahead of the period that was paid through, as an immediate
+ *   cancellation does, when it describes the period recorded. A copy of an earlier period, which
+ *   starts before the recorded one, is stale whatever its status.
+ *
+ * Otherwise the later period end wins, so a delayed copy of an earlier period does not move the
+ * subscription back.
+ */
+function isStaleStripeSubscriptionEvent(
+	incoming: SubscriptionOrderState,
+	recorded: SubscriptionOrderState,
+): boolean {
+	if (incoming.order !== recorded.order) {
+		return incoming.order < recorded.order;
+	}
+	const incomingEnded = isEndedSubscriptionStatus(incoming.status);
+	const recordedEnded = isEndedSubscriptionStatus(recorded.status);
+	if (recordedEnded && !incomingEnded) {
+		return true;
+	}
+	const endsEarlier =
+		incoming.periodEnd !== null &&
+		recorded.periodEnd !== null &&
+		incoming.periodEnd < recorded.periodEnd;
+	if (!endsEarlier) {
+		return false;
+	}
+	const endsRecordedPeriod =
+		incomingEnded &&
+		!recordedEnded &&
+		incoming.periodStart !== null &&
+		recorded.periodStart !== null &&
+		incoming.periodStart >= recorded.periodStart;
+	return !endsRecordedPeriod;
+}
+
+/**
+ * Whether a live read of the subscription would move an ended subscription back. A read counts as
+ * an update from the moment it began, so one that began before the state Quotum recorded describes
+ * the subscription as it was, however far its period end reads.
+ */
+function revivesEndedSubscription(
+	read: Pick<SubscriptionOrderState, "order" | "status">,
+	recorded: Pick<SubscriptionOrderState, "order" | "status">,
+): boolean {
+	return (
+		read.order < recorded.order &&
+		isEndedSubscriptionStatus(recorded.status) &&
+		!isEndedSubscriptionStatus(read.status)
+	);
+}
+
+interface SubscriptionOrderState {
+	/** The second Stripe created the event, or the live read began less a minute. */
+	order: number;
+	status: SubscriptionStatus;
+	periodStart: Date | null;
+	periodEnd: Date | null;
 }
 
 /**

@@ -3570,6 +3570,375 @@ localDescribe("Stripe route flows integration", () => {
 		await expectTableCounts(context.sql, { subscriptions: 1, billing_invoices: 1 });
 	});
 
+	describe("immediate cancellation order", () => {
+		/** A subscription paid through `end`, created `created`, as Stripe's events describe it. */
+		function paidSubscription(created: number, end: number) {
+			return stripeSubscriptionObject({
+				created,
+				...stripeSubscriptionPeriod(created, end),
+			});
+		}
+
+		/** The same subscription after Stripe ended it at `endedAt`, mid-period. */
+		function cancelledSubscription(created: number, end: number, endedAt: number) {
+			return stripeSubscriptionObject({
+				created,
+				status: "canceled",
+				ended_at: endedAt,
+				canceled_at: endedAt,
+				cancellation_details: { reason: "cancellation_requested" },
+				...stripeSubscriptionPeriod(created, end),
+			});
+		}
+
+		async function recordedExpiry(): Promise<{
+			status: string;
+			expires_at: Date | null;
+			current_period_end: Date | null;
+		}> {
+			const [row] = await context.sql<
+				Array<{ status: string; expires_at: Date | null; current_period_end: Date | null }>
+			>`
+				SELECT status, expires_at, current_period_end FROM subscriptions
+				WHERE provider = 'stripe' AND external_subscription_id = 'sub_1'
+			`;
+			if (!row) throw new Error("Missing subscription");
+			return row;
+		}
+
+		async function lastSubscriptionFact(): Promise<ProjectionPayload["subscription"]> {
+			const [job] = await context.sql<Array<{ payload: ProjectionPayload }>>`
+				SELECT payload FROM projection_sync_jobs
+				WHERE payload->'subscription'->>'externalSubscriptionId' = 'sub_1'
+				ORDER BY created_at DESC, id DESC LIMIT 1
+			`;
+			return job?.payload.subscription;
+		}
+
+		/** A service whose live read of sub_1 answers with `remote()`, and the recorded row it reconciles. */
+		async function reconcilerFor(remote: () => Record<string, unknown>) {
+			const fake = createFakeStripeBillingClient();
+			const service = new StripeBillingService({
+				config: {
+					projectKey: "acme",
+					checkoutSuccessUrl:
+						"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+					checkoutCancelUrl: "https://app.integration.test/billing",
+					portalReturnUrl: "https://app.integration.test/account/billing",
+				},
+				client: { ...fake.client, retrieveSubscription: async () => remote() as never },
+				repository: context.repository.forProject(integrationProjectContext("acme")),
+			});
+			const [row] = await context.sql<
+				Array<Parameters<StripeBillingService["reconcileSubscription"]>[0]>
+			>`SELECT * FROM subscriptions WHERE provider = 'stripe' AND external_subscription_id = 'sub_1'`;
+			if (!row) throw new Error("Missing subscription");
+			return { service, row };
+		}
+
+		// capability: subscription.sync
+		it("applies a cancellation Stripe created in the same second as the subscription", async () => {
+			const service = createVerifiedEventService();
+			const created = Math.floor(Date.now() / 1000) - 10;
+			const periodEnd = created + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.created",
+					paidSubscription(created, periodEnd),
+					created,
+					"evt_created",
+				),
+			);
+			expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({ status: "active" });
+
+			const result = await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.deleted",
+					cancelledSubscription(created, periodEnd, created),
+					created,
+					"evt_deleted_same_second",
+				),
+			);
+
+			expect(result).toMatchObject({ status: "processed" });
+			const snapshot = result.entitlements as EntitlementSnapshot;
+			expect(snapshot.entitlements.filter((item) => item.active)).toEqual([]);
+			expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+				status: "expired",
+				provider_status: "cancelled",
+				auto_renew: false,
+			});
+			// Stripe ended it then, ahead of the period it was paid through.
+			expect(await recordedExpiry()).toEqual({
+				status: "expired",
+				expires_at: new Date(created * 1000),
+				current_period_end: new Date(created * 1000),
+			});
+			expect(await lastSubscriptionFact()).toMatchObject({
+				status: "expired",
+				expiresAt: new Date(created * 1000).toISOString(),
+			});
+		});
+
+		// capability: subscription.sync
+		it("does not revive a cancellation with a live update created in the same second", async () => {
+			const service = createVerifiedEventService();
+			const created = Math.floor(Date.now() / 1000) - 100;
+			const endedAt = created + 90;
+			const periodEnd = created + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.created",
+					paidSubscription(created, periodEnd),
+					created,
+					"evt_created",
+				),
+			);
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.deleted",
+					cancelledSubscription(created, periodEnd, endedAt),
+					endedAt,
+					"evt_deleted",
+				),
+			);
+
+			// The portal's update of the same second arrives after the deletion, carrying the period
+			// that was paid through, which ends later than the cancellation.
+			const late = await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.updated",
+					paidSubscription(created, periodEnd),
+					endedAt,
+					"evt_updated_same_second",
+				),
+			);
+
+			expect(late).toMatchObject({ status: "processed" });
+			expect(await recordedExpiry()).toEqual({
+				status: "expired",
+				expires_at: new Date(endedAt * 1000),
+				current_period_end: new Date(endedAt * 1000),
+			});
+			expect(await lastSubscriptionFact()).toMatchObject({ status: "expired" });
+		});
+
+		// capability: subscription.sync
+		it("keeps ordering states of one rank in the same second by their period end", async () => {
+			const service = createVerifiedEventService();
+			const created = Math.floor(Date.now() / 1000) - 10;
+			const periodEnd = created + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.created",
+					paidSubscription(created, periodEnd),
+					created,
+					"evt_created",
+				),
+			);
+
+			// A delayed copy of an earlier period ties with the renewal and changes nothing.
+			const earlier = await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.updated",
+					paidSubscription(created, periodEnd - 5 * 86_400),
+					created,
+					"evt_earlier_period",
+				),
+			);
+			expect(earlier).toMatchObject({ status: "processed" });
+			expect(await recordedExpiry()).toMatchObject({
+				status: "active",
+				current_period_end: new Date(periodEnd * 1000),
+			});
+
+			// A later period of the same second still applies.
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.updated",
+					paidSubscription(created, periodEnd + 5 * 86_400),
+					created,
+					"evt_later_period",
+				),
+			);
+			expect(await recordedExpiry()).toMatchObject({
+				status: "active",
+				current_period_end: new Date((periodEnd + 5 * 86_400) * 1000),
+			});
+		});
+
+		// capability: subscription.sync
+		it("ignores an ending that describes an earlier period than the one recorded", async () => {
+			const service = createVerifiedEventService();
+			const created = Math.floor(Date.now() / 1000) - 10;
+			const periodEnd = created + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.created",
+					paidSubscription(created, periodEnd),
+					created,
+					"evt_created",
+				),
+			);
+
+			// The previous period's copy ended with its period, and carries this second by accident.
+			const previous = await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.deleted",
+					cancelledSubscription(created - 30 * 86_400, created - 60, created - 60),
+					created,
+					"evt_previous_period",
+				),
+			);
+
+			expect(previous).toMatchObject({ status: "processed" });
+			expect(await recordedExpiry()).toMatchObject({
+				status: "active",
+				current_period_end: new Date(periodEnd * 1000),
+			});
+		});
+
+		// capability: subscription.sync
+		it("applies a payment that recovers a retrying subscription in the second it failed", async () => {
+			const service = createVerifiedEventService();
+			const created = Math.floor(Date.now() / 1000) - 100;
+			const failedAt = created + 50;
+			const periodEnd = created + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.created",
+					paidSubscription(created, periodEnd),
+					created,
+					"evt_created",
+				),
+			);
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.updated",
+					stripeSubscriptionObject({
+						created,
+						status: "past_due",
+						...stripeSubscriptionPeriod(created, periodEnd),
+					}),
+					failedAt,
+					"evt_past_due",
+				),
+			);
+			expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+				status: "billing_retry",
+			});
+
+			// Live states are not ranked against each other: only an ending outranks a live state.
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.updated",
+					paidSubscription(created, periodEnd),
+					failedAt,
+					"evt_paid_same_second",
+				),
+			);
+			expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({ status: "active" });
+		});
+
+		// capability: subscription.reconcile
+		it("reconciliation applies an immediate cancellation", async () => {
+			const service = createVerifiedEventService();
+			const created = Math.floor(Date.now() / 1000) - 100;
+			const endedAt = created + 90;
+			const periodEnd = created + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.created",
+					paidSubscription(created, periodEnd),
+					created,
+					"evt_created",
+				),
+			);
+			expect(await recordedExpiry()).toMatchObject({ status: "active" });
+
+			// The deletion never arrived; Stripe's own record is the only fact left.
+			const { service: reconciler, row } = await reconcilerFor(() =>
+				cancelledSubscription(created, periodEnd, endedAt),
+			);
+			expect(await reconciler.reconcileSubscription(row)).toEqual({ status: "processed" });
+
+			expect(await stripeSubscriptionLifecycle(context.sql)).toMatchObject({
+				status: "expired",
+				provider_status: "cancelled",
+				auto_renew: false,
+			});
+			expect(await recordedExpiry()).toEqual({
+				status: "expired",
+				expires_at: new Date(endedAt * 1000),
+				current_period_end: new Date(endedAt * 1000),
+			});
+			expect(await lastSubscriptionFact()).toMatchObject({
+				status: "expired",
+				expiresAt: new Date(endedAt * 1000).toISOString(),
+			});
+			const [entitlements] = await context.sql<Array<{ count: string }>>`
+				SELECT count(*)::text AS count FROM entitlements WHERE active
+			`;
+			expect(entitlements?.count).toBe("0");
+
+			// The read repeats: an ended subscription stays as recorded.
+			expect(await reconciler.reconcileSubscription(row)).toEqual({ status: "processed" });
+			expect(await recordedExpiry()).toMatchObject({
+				status: "expired",
+				expires_at: new Date(endedAt * 1000),
+			});
+		});
+
+		// capability: subscription.reconcile
+		it("reconciliation does not revive an ended subscription from an older read", async () => {
+			const service = createVerifiedEventService();
+			const now = Math.floor(Date.now() / 1000);
+			const created = now - 3_600;
+			const endedAt = now - 5;
+			const periodEnd = created + 30 * 86_400;
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.created",
+					paidSubscription(created, periodEnd),
+					created,
+					"evt_created",
+				),
+			);
+			await service.handleVerifiedAppEvent(
+				verifiedStripeEvent(
+					"customer.subscription.deleted",
+					cancelledSubscription(created, periodEnd, endedAt),
+					endedAt,
+					"evt_deleted",
+				),
+			);
+			expect(await recordedExpiry()).toMatchObject({
+				status: "expired",
+				expires_at: new Date(endedAt * 1000),
+			});
+
+			// A read that began before the cancellation answers with the paid period, which ends
+			// after it.
+			const older = await reconcilerFor(() => paidSubscription(created, periodEnd));
+			expect(await older.service.reconcileSubscription(older.row)).toEqual({
+				status: "processed",
+			});
+			expect(await recordedExpiry()).toEqual({
+				status: "expired",
+				expires_at: new Date(endedAt * 1000),
+				current_period_end: new Date(endedAt * 1000),
+			});
+
+			// A read of an earlier period does not move it back either.
+			const earlier = await reconcilerFor(() => paidSubscription(created - 86_400, endedAt - 60));
+			expect(await earlier.service.reconcileSubscription(earlier.row)).toEqual({
+				status: "processed",
+			});
+			expect(await recordedExpiry()).toMatchObject({ status: "expired" });
+			expect(await lastSubscriptionFact()).toMatchObject({ status: "expired" });
+		});
+	});
+
 	// An existing subscription follows the product and price recorded for it, not whether that
 	// price is still on sale: retiring the mapping must not strand a paid renewal or a cancellation.
 	async function retireStripePrice(reason: "mapping" | "product", active: boolean): Promise<void> {
