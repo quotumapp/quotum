@@ -668,6 +668,53 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		});
 	});
 
+	it("counts a confirmation in the longer window of a limit that replaced its hold's", async () => {
+		const limit = await replaceableLimit("late-confirm");
+		await limit("100");
+		const hold = await context.repository.reserveUsage(project, {
+			billingAccountId: "late-confirm",
+			featureKey: "ai_credits",
+			quantity: "40",
+			idempotencyKey: "late-confirm:reserve",
+			expiresInSeconds: 300,
+		});
+		expect(hold.allowed).toBe(true);
+		// The hold was taken in yesterday's daily window, and a monthly limit now replaces the daily.
+		await context.sql`
+			UPDATE control_windows
+			SET window_start_at = window_start_at - interval '1 day',
+				window_end_at = window_end_at - interval '1 day'
+			WHERE customer_id = (SELECT id FROM customers WHERE billing_account_id = 'late-confirm')
+		`;
+		await context.repository.controlsEnterprise.upsertControl(project, {
+			billingAccountId: "late-confirm",
+			controlKind: "usage_limit",
+			featureKey: "ai_credits",
+			limitValue: "100",
+			interval: "month",
+			actor: "integration-test",
+		});
+		expect(
+			await context.repository.confirmUsageReservation(project, {
+				billingAccountId: "late-confirm",
+				reservationId: hold.reservationId ?? "",
+				quantity: "40",
+				idempotencyKey: "late-confirm:confirm",
+			}),
+		).toMatchObject({ allowed: true });
+
+		// The confirmation was charged to yesterday's daily window, which is not the month's, so the
+		// month's window starts from it: 40 are recorded in the month.
+		expect(await consume("late-confirm", "61", "late-confirm:over")).toMatchObject({
+			allowed: false,
+			reason: "control_limit_exceeded",
+			control: { limitValue: "100", currentValue: "40", requestedValue: "61" },
+		});
+		expect(await consume("late-confirm", "60", "late-confirm:fit")).toMatchObject({
+			allowed: true,
+		});
+	});
+
 	it("keeps an open hold's exposure through a control replacement and settles it once", async () => {
 		const limit = await replaceableLimit("replace-hold");
 		await limit("100");

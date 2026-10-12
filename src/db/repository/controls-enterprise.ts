@@ -38,6 +38,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { type Cadence, cadenceKey, calendarWindow } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
+import { sameStoredCadenceSql } from "./cadence-sql";
 import { readDefaultPlanTarget } from "./default-plan-grants";
 import { defaultPlanReadVersionSql } from "./default-plan-sql";
 import { featureNotMetered } from "./feature-errors";
@@ -1281,10 +1282,11 @@ export function carriedControlConsumptionSql(input: {
 
 /**
  * Whether the usage of the event `event` was charged to a window, of a control of the same kind,
- * feature and entity scope as `policy`, that does not contain the time the event was recorded: a
- * hold's confirmation charges the window the hold was taken in, which can be an earlier one. A
- * correction follows the event it corrects. For a row of `usage_events` aliased `event` beside a
- * row of `control_policies` aliased `policy`.
+ * feature, entity scope and cadence as `policy`, that does not contain the time the event was
+ * recorded: a hold's confirmation charges the window the hold was taken in, which can be an
+ * earlier one, and a correction follows the event it corrects. A window of another cadence is not
+ * that window: what a daily window was charged is still recorded in the month that contains it.
+ * For a row of `usage_events` aliased `event` beside a row of `control_policies` aliased `policy`.
  */
 export function chargedToEarlierWindowSql(): DrizzleSQL {
 	return drizzleSql`EXISTS (
@@ -1301,6 +1303,7 @@ export function chargedToEarlierWindowSql(): DrizzleSQL {
 			AND charged_policy.control_kind = policy.control_kind
 			AND charged_policy.feature_id = policy.feature_id
 			AND charged_policy.entity_id IS NOT DISTINCT FROM policy.entity_id
+			AND ${sameStoredCadenceSql("charged_policy", "policy")}
 			AND (COALESCE(event.original_event_recorded_at, event.recorded_at) < charged.window_start_at
 				OR (charged.window_end_at IS NOT NULL
 					AND COALESCE(event.original_event_recorded_at, event.recorded_at) >= charged.window_end_at))
@@ -1399,10 +1402,11 @@ export function eventInControlReachSql(): DrizzleSQL {
  * zero for a spend limit, which has no recorded charge to read, and once the window has its row,
  * so the aggregate runs once per window and not per request.
  *
- * Usage a hold's confirmation charged to an earlier window than the one it was recorded in is
- * not counted again: the window that held it already counted it. Only confirmations and the
- * corrections of them are looked up, a plain consumption is always charged where it is recorded.
- * Where a replaced control counted the same window, the larger of the two counts is the usage.
+ * Usage a hold's confirmation charged to an earlier window of the same cadence than the one it
+ * was recorded in is not counted again: the window that held it already counted it. Only
+ * confirmations and the corrections of them are looked up, a plain consumption is always charged
+ * where it is recorded. Where a replaced control counted the same window, the larger of the two
+ * counts is the usage.
  */
 export function recordedControlConsumptionSql(
 	input: {
