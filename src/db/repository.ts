@@ -1079,8 +1079,8 @@ export class BillingRepository {
 		return await this.metering.expireReservations(limit);
 	}
 
-	async runMeteringMaintenance(limit: number) {
-		return await this.metering.runMaintenance(limit);
+	async runMeteringMaintenance(limit: number, options?: { retentionBudgetMs?: number }) {
+		return await this.metering.runMaintenance(limit, options);
 	}
 
 	async ensureUsageEventPartitions(

@@ -1244,6 +1244,11 @@ CREATE INDEX IF NOT EXISTS idx_billing_usage_invoice_adjustments_stale
 	ON usage_invoice_adjustments (locked_at, id)
 	WHERE status = 'processing';
 
+-- The foreign key to usage_events is checked on every raw-usage delete by the event alone, and
+-- the unique above leads with project_id, so without this each check skip-scans it once per project.
+CREATE INDEX IF NOT EXISTS idx_billing_usage_invoice_adjustments_event
+	ON usage_invoice_adjustments (usage_event_recorded_at, usage_event_id);
+
 CREATE INDEX IF NOT EXISTS idx_billing_plan_versions_customer
 	ON plan_versions (project_id, customer_id, status)
 	WHERE customer_id IS NOT NULL;

@@ -363,11 +363,12 @@ function compactReceipt(result: UsageOperationResult): UsageOperationReceipt {
 	};
 }
 
+/** Drops stored outcomes past their result window and returns how many it cleared. */
 export async function expireUsageOperationResults(
 	executor: QueryExecutor,
 	limit: number,
-): Promise<void> {
-	await executeRows(
+): Promise<number> {
+	const rows = await executeRows(
 		executor,
 		sql`
   WITH targets AS (
@@ -377,6 +378,8 @@ export async function expireUsageOperationResults(
   )
   UPDATE client_idempotency_claims claim SET outcome = NULL
   FROM targets WHERE claim.id = targets.id
+  RETURNING claim.id
  `,
 	);
+	return rows.length;
 }

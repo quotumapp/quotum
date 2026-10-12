@@ -3590,6 +3590,10 @@ export const usageInvoiceAdjustments = pgTable(
 		index("idx_billing_usage_invoice_adjustments_stale")
 			.on(table.lockedAt, table.id)
 			.where(sql`${table.status} = 'processing'`),
+		index("idx_billing_usage_invoice_adjustments_event").on(
+			table.usageEventRecordedAt,
+			table.usageEventId,
+		),
 	],
 );
 
