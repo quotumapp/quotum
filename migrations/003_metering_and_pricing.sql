@@ -2116,6 +2116,70 @@ CREATE TABLE IF NOT EXISTS promotion_grant_items (
 		REFERENCES features(project_id, id) ON DELETE RESTRICT
 );
 
+-- A gift sells codes for one plan grant promotion. Like topup_options it is rewritten for every
+-- catalog revision; the promotion itself is not versioned.
+CREATE TABLE IF NOT EXISTS gift_options (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	catalog_revision_id BIGINT NOT NULL REFERENCES catalog_revisions(id) ON DELETE RESTRICT,
+	key TEXT COLLATE "C" NOT NULL,
+	name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 200),
+	promotion_id UUID NOT NULL,
+	code_count INTEGER NOT NULL CHECK (code_count BETWEEN 1 AND 100),
+	code_valid_days INTEGER NOT NULL CHECK (code_valid_days BETWEEN 1 AND 730),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT gift_options_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT gift_options_project_revision_key_unique UNIQUE (project_id, catalog_revision_id, key),
+	CONSTRAINT gift_options_project_revision_fk FOREIGN KEY (project_id, catalog_revision_id)
+		REFERENCES catalog_revisions(project_id, id),
+	CONSTRAINT gift_options_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_gift_options_promotion
+	ON gift_options (project_id, promotion_id);
+
+CREATE TABLE IF NOT EXISTS provider_gift_bindings (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	gift_option_id BIGINT NOT NULL REFERENCES gift_options(id) ON DELETE RESTRICT,
+	store_product_id UUID NOT NULL REFERENCES store_products(id) ON DELETE RESTRICT,
+	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
+	channel TEXT NOT NULL CHECK (channel IN ('ios', 'android', 'web')),
+	status TEXT NOT NULL CHECK (status IN ('validating', 'syncing', 'ready', 'published', 'failed')),
+	error TEXT,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT provider_gift_bindings_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT provider_gift_bindings_project_store_unique UNIQUE (project_id, store_product_id),
+	CONSTRAINT provider_gift_bindings_project_option_fk FOREIGN KEY (project_id, gift_option_id)
+		REFERENCES gift_options(project_id, id),
+	CONSTRAINT provider_gift_bindings_project_store_fk FOREIGN KEY (project_id, store_product_id)
+		REFERENCES store_products(project_id, id)
+);
+
+-- One row per completed gift purchase. It snapshots the terms at sale time so a replayed event or a
+-- republished catalog never changes how many codes the purchase yields, and it anchors the codes.
+CREATE TABLE IF NOT EXISTS gift_purchases (
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	purchase_id UUID NOT NULL,
+	promotion_id UUID NOT NULL,
+	code_count INTEGER NOT NULL CHECK (code_count BETWEEN 1 AND 100),
+	codes_expire_at TIMESTAMPTZ NOT NULL,
+	reversed_at TIMESTAMPTZ,
+	reversal_reason TEXT CHECK (reversal_reason IS NULL OR reversal_reason IN ('refund', 'dispute')),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT gift_purchases_pkey PRIMARY KEY (project_id, purchase_id),
+	CONSTRAINT gift_purchases_project_purchase_fk FOREIGN KEY (project_id, purchase_id)
+		REFERENCES purchases(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT gift_purchases_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT gift_purchases_reversal_check CHECK ((reversed_at IS NULL) = (reversal_reason IS NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_gift_purchases_promotion
+	ON gift_purchases (project_id, promotion_id);
+
 CREATE TABLE IF NOT EXISTS promotion_codes (
 	id UUID PRIMARY KEY DEFAULT uuidv7(),
 	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
@@ -2139,12 +2203,28 @@ CREATE TABLE IF NOT EXISTS promotion_codes (
 	created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 200),
 	deactivated_by TEXT CHECK (deactivated_by IS NULL OR char_length(deactivated_by) BETWEEN 1 AND 200),
 	deactivated_at TIMESTAMPTZ,
+	-- Set for a code a gift purchase minted; null for an operator code.
+	gift_purchase_id UUID,
+	gift_ordinal INTEGER,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT promotion_codes_project_id_id_unique UNIQUE (project_id, id),
 	CONSTRAINT promotion_codes_project_code_unique UNIQUE (project_id, normalized_code),
 	CONSTRAINT promotion_codes_project_promotion_fk FOREIGN KEY (project_id, promotion_id)
 		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT promotion_codes_project_gift_purchase_fk FOREIGN KEY (project_id, gift_purchase_id)
+		REFERENCES gift_purchases(project_id, purchase_id) ON DELETE RESTRICT,
+	-- Minting is idempotent by (purchase, ordinal). NULLs are distinct, so operator codes never collide.
+	CONSTRAINT promotion_codes_gift_ordinal_unique UNIQUE (project_id, gift_purchase_id, gift_ordinal),
+	CONSTRAINT promotion_codes_gift_ordinal_check CHECK (
+		(gift_purchase_id IS NULL AND gift_ordinal IS NULL)
+		OR (gift_purchase_id IS NOT NULL AND gift_ordinal BETWEEN 1 AND 100)
+	),
+	-- A gift code is single use, never account-restricted and never a hosted Stripe code.
+	CONSTRAINT promotion_codes_gift_terms_check CHECK (
+		gift_purchase_id IS NULL
+		OR (max_redemptions = 1 AND billing_account_id IS NULL AND NOT hosted_checkout_enabled)
+	),
 	CONSTRAINT promotion_codes_normalized_check CHECK (normalized_code = upper(code)),
 	CONSTRAINT promotion_codes_window_check CHECK (
 		starts_at IS NULL OR expires_at IS NULL OR expires_at > starts_at

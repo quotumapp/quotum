@@ -4785,6 +4785,144 @@ export const promotionGrantItems = pgTable(
 	],
 );
 
+export const giftOptions = pgTable(
+	"gift_options",
+	{
+		id: meteringId(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		catalogRevisionId: bigint("catalog_revision_id", { mode: "number" })
+			.notNull()
+			.references(() => catalogRevisions.id, { onDelete: "restrict" }),
+		key: text("key").notNull(),
+		name: text("name").notNull(),
+		promotionId: uuid("promotion_id").notNull(),
+		codeCount: integer("code_count").notNull(),
+		codeValidDays: integer("code_valid_days").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"gift_options_name_check",
+			sql`(((char_length(name) >= 1) AND (char_length(name) <= 200)))`,
+		),
+		check("gift_options_code_count_check", sql`(((code_count >= 1) AND (code_count <= 100)))`),
+		check(
+			"gift_options_code_valid_days_check",
+			sql`(((code_valid_days >= 1) AND (code_valid_days <= 730)))`,
+		),
+		unique("gift_options_project_id_id_unique").on(table.projectId, table.id),
+		unique("gift_options_project_revision_key_unique").on(
+			table.projectId,
+			table.catalogRevisionId,
+			table.key,
+		),
+		foreignKey({
+			name: "gift_options_project_revision_fk",
+			columns: [table.projectId, table.catalogRevisionId],
+			foreignColumns: [catalogRevisions.projectId, catalogRevisions.id],
+		}),
+		foreignKey({
+			name: "gift_options_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}).onDelete("restrict"),
+		index("idx_billing_gift_options_promotion").on(table.projectId, table.promotionId),
+	],
+);
+
+export const providerGiftBindings = pgTable(
+	"provider_gift_bindings",
+	{
+		id: meteringId(),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		giftOptionId: bigint("gift_option_id", { mode: "number" })
+			.notNull()
+			.references(() => giftOptions.id, { onDelete: "restrict" }),
+		storeProductId: uuid("store_product_id")
+			.notNull()
+			.references(() => storeProducts.id, { onDelete: "restrict" }),
+		provider: text("provider").$type<BillingProvider>().notNull(),
+		channel: text("channel").$type<BillingChannel>().notNull(),
+		status: text("status")
+			.$type<"validating" | "syncing" | "ready" | "published" | "failed">()
+			.notNull(),
+		error: text("error"),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"provider_gift_bindings_provider_check",
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text, 'paddle'::text])))`,
+		),
+		check(
+			"provider_gift_bindings_channel_check",
+			sql`((channel = ANY (ARRAY['ios'::text, 'android'::text, 'web'::text])))`,
+		),
+		check(
+			"provider_gift_bindings_status_check",
+			sql`((status = ANY (ARRAY['validating'::text, 'syncing'::text, 'ready'::text, 'published'::text, 'failed'::text])))`,
+		),
+		foreignKey({
+			name: "provider_gift_bindings_project_option_fk",
+			columns: [table.projectId, table.giftOptionId],
+			foreignColumns: [giftOptions.projectId, giftOptions.id],
+		}),
+		foreignKey({
+			name: "provider_gift_bindings_project_store_fk",
+			columns: [table.projectId, table.storeProductId],
+			foreignColumns: [storeProducts.projectId, storeProducts.id],
+		}),
+		unique("provider_gift_bindings_project_id_id_unique").on(table.projectId, table.id),
+		unique("provider_gift_bindings_project_store_unique").on(table.projectId, table.storeProductId),
+	],
+);
+
+export const giftPurchases = pgTable(
+	"gift_purchases",
+	{
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		purchaseId: uuid("purchase_id").notNull(),
+		promotionId: uuid("promotion_id").notNull(),
+		codeCount: integer("code_count").notNull(),
+		codesExpireAt: timestamp("codes_expire_at", { withTimezone: true }).notNull(),
+		reversedAt: timestamp("reversed_at", { withTimezone: true }),
+		reversalReason: text("reversal_reason").$type<"refund" | "dispute">(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check("gift_purchases_code_count_check", sql`(((code_count >= 1) AND (code_count <= 100)))`),
+		check(
+			"gift_purchases_reversal_reason_check",
+			sql`(((reversal_reason IS NULL) OR (reversal_reason = ANY (ARRAY['refund'::text, 'dispute'::text]))))`,
+		),
+		check(
+			"gift_purchases_reversal_check",
+			sql`(${table.reversedAt} IS NULL) = (${table.reversalReason} IS NULL)`,
+		),
+		primaryKey({
+			name: "gift_purchases_pkey",
+			columns: [table.projectId, table.purchaseId],
+		}),
+		foreignKey({
+			name: "gift_purchases_project_purchase_fk",
+			columns: [table.projectId, table.purchaseId],
+			foreignColumns: [purchases.projectId, purchases.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "gift_purchases_project_promotion_fk",
+			columns: [table.projectId, table.promotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}).onDelete("restrict"),
+		index("idx_billing_gift_purchases_promotion").on(table.projectId, table.promotionId),
+	],
+);
+
 export const promotionCodes = pgTable(
 	"promotion_codes",
 	{
@@ -4808,6 +4946,8 @@ export const promotionCodes = pgTable(
 		createdBy: text("created_by").notNull(),
 		deactivatedBy: text("deactivated_by"),
 		deactivatedAt: timestamp("deactivated_at", { withTimezone: true }),
+		giftPurchaseId: uuid("gift_purchase_id"),
+		giftOrdinal: integer("gift_ordinal"),
 		...timestampColumns(),
 	},
 	(table): PgTableExtraConfigValue[] => [
@@ -4863,6 +5003,24 @@ export const promotionCodes = pgTable(
 		check(
 			"promotion_codes_hosted_check",
 			sql`NOT ${table.hostedCheckoutEnabled} OR (${table.billingAccountId} IS NULL AND ${table.maxRedemptionsPerCustomer} IS NULL)`,
+		),
+		foreignKey({
+			name: "promotion_codes_project_gift_purchase_fk",
+			columns: [table.projectId, table.giftPurchaseId],
+			foreignColumns: [giftPurchases.projectId, giftPurchases.purchaseId],
+		}).onDelete("restrict"),
+		unique("promotion_codes_gift_ordinal_unique").on(
+			table.projectId,
+			table.giftPurchaseId,
+			table.giftOrdinal,
+		),
+		check(
+			"promotion_codes_gift_ordinal_check",
+			sql`(${table.giftPurchaseId} IS NULL AND ${table.giftOrdinal} IS NULL) OR (${table.giftPurchaseId} IS NOT NULL AND ${table.giftOrdinal} BETWEEN 1 AND 100)`,
+		),
+		check(
+			"promotion_codes_gift_terms_check",
+			sql`${table.giftPurchaseId} IS NULL OR (${table.maxRedemptions} = 1 AND ${table.billingAccountId} IS NULL AND NOT ${table.hostedCheckoutEnabled})`,
 		),
 	],
 );

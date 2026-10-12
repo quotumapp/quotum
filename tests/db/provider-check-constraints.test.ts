@@ -25,6 +25,7 @@ const providerTables = [
 	"catalog_provider_operations",
 	"provider_plan_bindings",
 	"provider_topup_bindings",
+	"provider_gift_bindings",
 	"provider_price_bindings",
 	"subscription_changes",
 	"usage_invoice_periods",
