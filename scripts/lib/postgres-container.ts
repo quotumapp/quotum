@@ -19,8 +19,11 @@ export function createPostgresContainer(options: EphemeralPostgresOptions): Post
 			.withPassword(postgresPassword)
 			// The database is disposable. PostgreSQL 18 keeps its versioned data
 			// below /var/lib/postgresql, so put that directory on bounded tmpfs and
-			// avoid the storage-constrained nested-Docker overlay in CI.
-			.withTmpFs({ "/var/lib/postgresql": "rw,nosuid,nodev,size=512m" })
+			// avoid the storage-constrained nested-Docker overlay in CI. The unsharded
+			// integration lane peaks near 570 MB; at 512m it ran out of space and
+			// PostgreSQL PANICked. The size is a ceiling: tmpfs pages cost memory only
+			// while they are in use.
+			.withTmpFs({ "/var/lib/postgresql": "rw,nosuid,nodev,size=2g" })
 			.withHealthCheck({
 				// The image starts a temporary server during initdb. PID 1 becomes
 				// postgres only after the entrypoint hands off to the final server.
