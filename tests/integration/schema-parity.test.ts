@@ -17,15 +17,18 @@ type Key = {
 };
 type Column = { name: string; type: string; not_null: boolean; has_default: boolean };
 type Index = { name: string; unique: boolean; columns: string[]; predicate: string | null };
+// `definition` is `pg_get_constraintdef` output, so a mirror expression must be canonicalized by
+// Postgres before it can be compared with the migrated database.
+type Check = { name: string; definition: string };
 type Table = {
 	name: string;
 	columns: Column[];
 	constraints: Key[];
 	indexes: Index[];
-	checks: string[];
+	checks: Check[];
 };
 type CatalogColumn = Column & { table_name: string };
-type CatalogKey = Key & { table_name: string; name: string };
+type CatalogKey = Key & { table_name: string; name: string; definition: string };
 type CatalogIndex = Index & { table_name: string };
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
@@ -88,7 +91,7 @@ function normalize(tables: Table[]): Table[] {
 					columns: index.columns.map(normalizeExpression),
 				})),
 			),
-			checks: table.checks.sort(),
+			checks: table.checks.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
 		})),
 	);
 }
@@ -156,8 +159,14 @@ function mirrorSchema(): Table[] {
 						return `${column.name}${column.indexConfig?.order === "desc" ? " DESC" : ""}`;
 					}),
 				})),
-				// No CHECK exceptions remain. Keep this exact comparison; an allowlist may only shrink.
-				checks: config.checks.map((check) => check.name),
+				// Every CHECK is compared by name and by definition once Postgres has canonicalized
+				// the mirror expression (canonicalizeChecks); there are no exceptions.
+				checks: config.checks.map((check) => ({
+					name: check.name,
+					definition: new PgDialect()
+						.sqlToQuery(check.value.inlineParams())
+						.sql.replaceAll(`"${config.name}".`, ""),
+				})),
 			})),
 	);
 }
@@ -182,7 +191,7 @@ async function migratedSchema(context: LocalPostgresContext): Promise<Table[]> {
 	`;
 	const constraints = await context.sql<CatalogKey[]>`
 		SELECT c.relname AS table_name, con.conname AS name, con.contype AS type,
-			con.confdeltype AS on_delete,
+			con.confdeltype AS on_delete, pg_get_constraintdef(con.oid) AS definition,
 			ARRAY(
 				SELECT a.attname FROM unnest(con.conkey) WITH ORDINALITY k(num, ord)
 				JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.num
@@ -243,7 +252,7 @@ async function migratedSchema(context: LocalPostgresContext): Promise<Table[]> {
 					.map(({ name, unique, columns, predicate }) => ({ name, unique, predicate, columns })),
 				checks: constraints
 					.filter((key) => key.table_name === table.name && key.type === "c")
-					.map((key) => key.name),
+					.map((key) => ({ name: key.name, definition: key.definition })),
 			})),
 	);
 }
@@ -280,6 +289,44 @@ async function canonicalizePredicates(
 		}
 	});
 }
+// The mirror's CHECK expressions are Drizzle SQL fragments in no particular spelling. Add each one
+// to an empty copy of its table (LIKE copies column types only) and read back the definition
+// Postgres stores, which is what pg_get_constraintdef returns for the migrated table.
+async function canonicalizeChecks(context: LocalPostgresContext, mirror: Table[]): Promise<void> {
+	const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
+	await context.sql.begin(async (transaction) => {
+		for (const table of mirror) {
+			if (table.checks.length === 0) continue;
+			await transaction.unsafe(
+				`CREATE TEMP TABLE schema_parity_check (LIKE public.${quote(table.name)}) ON COMMIT DROP`,
+			);
+			for (const check of table.checks) {
+				try {
+					await transaction.unsafe(
+						`ALTER TABLE pg_temp.schema_parity_check ADD CONSTRAINT ${quote(check.name)} CHECK (${check.definition})`,
+					);
+				} catch (error) {
+					throw new Error(`Mirror check ${table.name}.${check.name} is not valid SQL`, {
+						cause: error,
+					});
+				}
+			}
+			const rows = await transaction<Check[]>`
+				SELECT conname AS name, pg_get_constraintdef(oid) AS definition FROM pg_constraint
+				WHERE conrelid = 'pg_temp.schema_parity_check'::regclass AND contype = 'c'
+			`;
+			const definitions = new Map(rows.map((row) => [row.name, row.definition]));
+			for (const check of table.checks) {
+				const definition = definitions.get(check.name);
+				if (definition === undefined) {
+					throw new Error(`Missing canonical definition for ${table.name}.${check.name}`);
+				}
+				check.definition = definition;
+			}
+			await transaction`DROP TABLE pg_temp.schema_parity_check`;
+		}
+	});
+}
 localDescribe("Billing schema parity", () => {
 	let context: LocalPostgresContext;
 	let migrated: Table[];
@@ -289,6 +336,7 @@ localDescribe("Billing schema parity", () => {
 		migrated = await migratedSchema(context);
 		mirror = mirrorSchema();
 		await canonicalizePredicates(context, mirror);
+		await canonicalizeChecks(context, mirror);
 	});
 	afterAll(async () => {
 		await context.sql.close();
@@ -312,6 +360,25 @@ localDescribe("Billing schema parity", () => {
 			.find((index) => index.predicate !== null);
 		if (!index) throw new Error("Missing partial index");
 		index.predicate = null;
+		expect(changed).not.toEqual(migrated);
+	});
+	it("detects a check expression that drifts from the migration", () => {
+		const changed = structuredClone(mirror);
+		const check = changed
+			.find((table) => table.name === "catalog_provider_operations")
+			?.checks.find((check) => check.name === "catalog_provider_operations_provider_check");
+		if (!check) throw new Error("Missing catalog provider operation provider check");
+		// Drop the last admitted provider from the list, as when a mirror misses a new provider.
+		const drifted = check.definition.replace(/, '[a-z_]+'::text\]/, "]");
+		expect(drifted).not.toBe(check.definition);
+		check.definition = drifted;
+		expect(changed).not.toEqual(migrated);
+	});
+	it("detects a removed check", () => {
+		const changed = structuredClone(mirror);
+		const table = changed.find((table) => table.checks.length > 0);
+		if (!table) throw new Error("Missing table with a check");
+		table.checks.pop();
 		expect(changed).not.toEqual(migrated);
 	});
 	it("detects a removed foreign-key delete action", () => {

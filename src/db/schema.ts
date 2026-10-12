@@ -190,11 +190,11 @@ export const projects = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"projects_key_format_check",
-			sql`((((char_length(key) >= 1) AND (char_length(key) <= 80)) AND (key ~ '^[a-z0-9][a-z0-9_-]*$'::text)))`,
+			sql`(((char_length(key) BETWEEN 1 AND 80) AND (key ~ '^[a-z0-9][a-z0-9_-]*$'::text)))`,
 		),
 		check(
 			"projects_name_check",
-			sql`((((char_length(name) >= 1) AND (char_length(name) <= 120)) AND (name = btrim(name))))`,
+			sql`(((char_length(name) BETWEEN 1 AND 120) AND (name = btrim(name))))`,
 		),
 		check(
 			"projects_environment_check",
@@ -1611,7 +1611,7 @@ export const catalogProviderOperations = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"catalog_provider_operations_provider_check",
-			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text, 'paddle'::text])))`,
 		),
 		check(
 			"catalog_provider_operations_channel_check",
@@ -1775,7 +1775,7 @@ export const planVersions = pgTable(
 		),
 		check(
 			"plan_versions_billing_interval_count_check",
-			sql`((((billing_interval_count >= 1) AND (billing_interval_count <= 1000)) AND ((billing_interval IS NOT NULL) OR (billing_interval_count = 1))))`,
+			sql`(((billing_interval_count BETWEEN 1 AND 1000) AND ((billing_interval IS NOT NULL) OR (billing_interval_count = 1))))`,
 		),
 		check(
 			"plan_versions_trial_days_check",
@@ -1888,7 +1888,7 @@ export const planItems = pgTable(
 		),
 		check(
 			"plan_items_expiry_check",
-			sql`((((expiry_interval_count >= 1) AND (expiry_interval_count <= 1000)) AND ((expiry_interval IS NOT NULL) OR (expiry_interval_count = 1)) AND ((expires_after_seconds IS NULL) OR (expiry_interval IS NULL))))`,
+			sql`(((expiry_interval_count BETWEEN 1 AND 1000) AND ((expiry_interval IS NOT NULL) OR (expiry_interval_count = 1)) AND ((expires_after_seconds IS NULL) OR (expiry_interval IS NULL))))`,
 		),
 		check(
 			"plan_items_overage_policy_check",
@@ -1908,7 +1908,7 @@ export const planItems = pgTable(
 		),
 		check(
 			"plan_items_reset_interval_count_check",
-			sql`((((reset_interval_count >= 1) AND (reset_interval_count <= 1000)) AND ((reset_interval IS NOT NULL) OR (reset_interval_count = 1))))`,
+			sql`(((reset_interval_count BETWEEN 1 AND 1000) AND ((reset_interval IS NOT NULL) OR (reset_interval_count = 1))))`,
 		),
 		check(
 			"plan_items_overage_check",
@@ -2517,7 +2517,7 @@ export const topupOptions = pgTable(
 		),
 		check(
 			"topup_options_expiry_check",
-			sql`((((expiry_interval_count >= 1) AND (expiry_interval_count <= 1000)) AND ((expiry_interval IS NOT NULL) OR (expiry_interval_count = 1)) AND ((expires_after_seconds IS NULL) OR (expiry_interval IS NULL))))`,
+			sql`(((expiry_interval_count BETWEEN 1 AND 1000) AND ((expiry_interval IS NOT NULL) OR (expiry_interval_count = 1)) AND ((expires_after_seconds IS NULL) OR (expiry_interval IS NULL))))`,
 		),
 		foreignKey({
 			name: "topup_options_project_feature_fk",
@@ -2558,7 +2558,7 @@ export const providerTopupBindings = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"provider_topup_bindings_provider_check",
-			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text, 'paddle'::text])))`,
 		),
 		check(
 			"provider_topup_bindings_channel_check",
@@ -3659,7 +3659,7 @@ export const controlPolicies = pgTable(
 		),
 		check(
 			"control_policies_interval_count_check",
-			sql`((((interval_count >= 1) AND (interval_count <= 1000)) AND (("interval" <> 'lifetime'::text) OR (interval_count = 1))))`,
+			sql`(((interval_count BETWEEN 1 AND 1000) AND (("interval" <> 'lifetime'::text) OR (interval_count = 1))))`,
 		),
 		check("control_policies_revision_check", sql`((revision > 0))`),
 		check(
@@ -3901,7 +3901,7 @@ export const usageAlerts = pgTable(
 		),
 		check(
 			"usage_alerts_interval_count_check",
-			sql`((((interval_count >= 1) AND (interval_count <= 1000)) AND (("interval" <> 'lifetime'::text) OR (interval_count = 1))))`,
+			sql`(((interval_count BETWEEN 1 AND 1000) AND (("interval" <> 'lifetime'::text) OR (interval_count = 1))))`,
 		),
 		check(
 			"usage_alerts_created_by_check",
@@ -4057,7 +4057,7 @@ export const autoTopupPolicies = pgTable(
 	(table): PgTableExtraConfigValue[] => [
 		check(
 			"auto_topup_policies_provider_check",
-			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text, 'paddle'::text])))`,
 		),
 		check(
 			"auto_topup_policies_threshold_quantity_check",
@@ -4212,7 +4212,7 @@ export const autoTopupJobs = pgTable(
 		),
 		check(
 			"auto_topup_jobs_provider_check",
-			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text])))`,
+			sql`((provider = ANY (ARRAY['apple'::text, 'google'::text, 'stripe'::text, 'paddle'::text])))`,
 		),
 		check(
 			"auto_topup_jobs_status_check",
