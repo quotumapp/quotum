@@ -14,6 +14,31 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Promotional plan grants
+
+The metering baseline widens `plan_grants` so that a redeemed `plan_grant` promotion code can give
+its plan:
+
+- `origin` accepts `promotion`;
+- a new nullable `promotion_redemption_id` references the redemption that gave the grant, with
+  the foreign key `plan_grants_project_promotion_redemption_fk`, the check
+  `plan_grants_promotion_check` requiring it exactly on a promotional grant, and the unique index
+  `idx_billing_plan_grants_promotion_redemption`.
+
+Existing trial and default-plan rows satisfy the new check, so the move needs no manual SQL: follow
+steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). Afterwards
+
+```sql
+SELECT count(*) FROM plan_grants WHERE origin = 'promotion';
+```
+
+returns 0. Stored `plan_grant` promotions and their codes keep their terms and become redeemable
+with the new image: [validation](promotions.md#plan-grant-codes) answers `valid: true` for a code
+the previous version refused, when the plan and the account allow the grant. Archive a promotion
+or deactivate its codes before the upgrade if it must stay unused. An older image cannot read the
+new baselines, so a rollback restores the pre-upgrade backup and loses the plan grants redeemed
+since.
+
 ## Console off by default
 
 `QUOTUM_MERCHANT_ENABLED` is replaced by `QUOTUM_CONSOLE_ENABLED`, and the default flips from on to

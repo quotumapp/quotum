@@ -8,8 +8,8 @@ fixed amount per currency, lasting `once`, `repeating` for 1-36 months, or `fore
 or months (at most 730 days or 24 months). It can target plan or product keys and restrict the channels (`web`, `ios`, `android`)
 where a code may be entered. Changing terms means creating a new promotion.
 
-A `plan_grant` is stored but not redeemable yet: no channel has a redemption path for it, so
-creation accepts it and validation and redemption refuse every code of it, as described below.
+A `plan_grant` gives the account the plan itself, with no provider, payment method or invoice; see
+[plan grant codes](#plan-grant-codes).
 
 Operators manage promotions with project authentication, `X-Billing-Operator-Key`, and
 `X-Billing-Actor` on mutations:
@@ -38,11 +38,10 @@ reaches Stripe.
 check a code before offering it. It needs only project authentication, never creates a customer
 or takes a use, treats an omitted `channel` as `web`, and returns `200` with `valid` and a `reason` such as `PROMOTION_CODE_EXPIRED`,
 `PROMOTION_CODE_EXHAUSTED`, `PROMOTION_CODE_ALREADY_REDEEMED`, or
-`PROMOTION_CODE_NOT_APPLICABLE` for a `target` the promotion does not cover. A code of a
-`plan_grant` promotion always answers `valid: false` with `PROMOTION_CODE_NOT_APPLICABLE`, on every
-channel and whatever else is true of the code, because no channel can redeem it. Unknown codes and
-codes restricted to another account both report `PROMOTION_CODE_NOT_FOUND` without promotion
-details.
+`PROMOTION_CODE_NOT_APPLICABLE` for a `target` the promotion does not cover. A `plan_grant` code
+that passes those checks also answers for its plan and the account, with the
+[refusals redemption gives](#plan-grant-codes). Unknown codes and codes restricted to another
+account both report `PROMOTION_CODE_NOT_FOUND` without promotion details.
 It is rate limited per project and client IP with the purchase-verification limit
 (`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`), counted separately from verification and shared by every
 billing account the backend validates codes for; see [rate limits](deployment.md#rate-limits).
@@ -80,14 +79,76 @@ allocation per feature. Rewards expire `expiresAfterSeconds` after redemption (a
 seconds, ten years), are spent like any other allocation, and trigger a coalesced `usage_changed` projection. On web and Android a `discount` code takes no use
 and returns `kind: "requires_commercial_action"`; pass it as `promotionCode` to a commercial action.
 On iOS, discount codes require a linked Apple promotional offer and the existing subscription;
-they return a signed StoreKit action, described below. Direct iOS feature grants remain
-unsupported (`PROMOTION_CODE_CHANNEL_NOT_SUPPORTED`). A `plan_grant` code answers `409`
-`PROMOTION_CODE_NOT_APPLICABLE` on every channel, takes no use and creates no customer, the same
-answer validation gives. Replaying the key returns the stored
+they return a signed StoreKit action, described below. Direct iOS feature or plan grants remain
+unsupported (`PROMOTION_CODE_CHANNEL_NOT_SUPPORTED`). Replaying the key returns the stored
 result with `duplicate: true`, and reusing it for a different code or channel returns
 `IDEMPOTENCY_CONFLICT`. Redemption shares the validation rate limit.
 `GET .../promotion-redemptions` and `GET .../promotion-redemptions/:redemptionId` read one
 account's ledger.
+
+### Plan grant codes
+
+On web and Android a `plan_grant` code takes one use and returns `kind: "plan_granted"`. From that
+moment the account holds the promotion's plan for the promotion's term, as a
+[promotional plan grant](grants.md#promotional-plan-grants): the entitlements, allowances and
+meter limits of the plan's active published version, which the grant pins. A term in days counts
+24-hour days; a term in months ends on the same day of the month, or on that month's last day.
+The redemption's `planGrant` names the grant (`id`, `planKey`, `planVersion`, `status`, `startsAt`,
+`endsAt`, `endedAt`), and every later read of the redemption reports the grant as it then stands:
+`active`, `expired`, `ended` or `superseded`. Other redemptions carry `planGrant: null`.
+
+```http
+POST /v1/billing-accounts/customer_123/promotion-redemptions
+Idempotency-Key: growth-pass-1
+Content-Type: application/json
+
+{"code":"GROWTH3M","channel":"web"}
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "kind": "plan_granted",
+    "duplicate": false,
+    "redemption": {
+      "id": "0192f3a2-0001-7a10-8b20-c30d40e50f60",
+      "promotionKey": "growth-pass",
+      "code": "GROWTH3M",
+      "status": "applied",
+      "provider": "quotum",
+      "source": "api_redeem",
+      "planGrant": {
+        "id": "5f0c1d86-7f0e-4e0b-9a55-7d2f0c1e9a10",
+        "planKey": "growth",
+        "planVersion": 4,
+        "status": "active",
+        "startsAt": "2026-10-12T09:30:00.000Z",
+        "endsAt": "2027-01-12T09:30:00.000Z",
+        "endedAt": null
+      }
+    }
+  }
+}
+```
+
+The example leaves out the redemption's other fields. The code's own limits answer first, as for
+any code. The plan and the account can then refuse, with `409` in redemption and as the `reason`
+of validation:
+
+- `PROMOTION_PLAN_NOT_ELIGIBLE`: the plan has no active, published, public version, or it is an
+  add-on, has licensed quantities or entity-scoped allocations, or is the catalog's default plan.
+  Creating the promotion checks only that the plan exists.
+- `PROMOTION_BASE_PLAN_ACTIVE`: a paid base subscription funds the account's plan.
+- `PROMOTION_PLAN_GRANT_ACTIVE`: the account holds a base plan through a running trial or another
+  promotional grant. Grants neither stack nor extend each other.
+
+A refusal takes no use and records nothing. An account on the default plan is not refused: the
+grant supersedes the default plan, which returns when the grant ends. Redeeming a plan does not use
+up the plan's [trial](grants.md#trials), and nothing limits an account to one promotional grant
+per plan: the code's per-customer cap, one by default, and the refusal of a second running grant
+decide. With an Apple offer (`appleOfferId`), a plan grant code answers
+`PROMOTION_CODE_NOT_APPLICABLE`.
 
 ### Apple subscription offers
 
@@ -164,3 +225,9 @@ reversed, consumed, and held quantity per allocation. The use stays counted agai
 limits. Only applied `quotum` redemptions can be revoked (`PROMOTION_REDEMPTION_NOT_REVOCABLE`);
 refund Stripe purchases instead. A second revocation with another key returns
 `PROMOTION_REDEMPTION_ALREADY_REVERSED`.
+
+Revoking a `plan_grant` redemption ends its grant at once, as ending a trial does: access and the
+grant's allowances stop, the account falls back to the default plan when the catalog marks one,
+and a stored `usage_changed` projection keyed `plan_grant:<id>:ended` is delivered. The response's
+`reversedAllocations` is empty and `redemption.planGrant.status` is `ended`. A grant that already
+expired or gave way to a paid subscription stays as it is; the redemption still becomes `reversed`.
