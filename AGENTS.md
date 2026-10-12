@@ -169,7 +169,10 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 store-event replay, subscription reconciliation, metering maintenance, recurring billing, auto
 top-up, promotion maintenance, provider operation recovery, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
 which adds monthly `usage_events` partitions ahead of time; `quotum partitions` runs it on demand),
-plus Stripe App event processing when Apps OAuth is configured.
+plus Stripe App event processing when Apps OAuth is configured and, only when the merchant platform
+is enabled, the `platform_retention` sweep (`src/platform/retention.ts`, wired by
+`src/composition/platform-retention.ts`), which deletes expired rate limits, auth links, completed
+idempotency rows, step-up grants and terminal MCP rows in bounded batches.
 Usage projection jobs retain an immutable payload through retries; their internal coalescing key
 is `usage:<customerId>` and their delivery key includes `:<sequence>`. Drain old workers before
 upgrading this delivery behavior.

@@ -373,7 +373,8 @@ Billing writes through `/api/billing` require an `Idempotency-Key`. The first re
 checks the member's capability, consumes the step-up grant a sensitive action needs, runs the
 operation once and stores its status and body. Repeating the key with the same request, from the
 same principal and, for step-up actions, the same session, returns the stored response without
-running the operation again or needing another grant. A different request under the key is
+running the operation again or needing another grant. A response is kept for 30 days; the same key
+repeated later runs the operation again. A different request under the key is
 `409 IDEMPOTENCY_CONFLICT`, and a repeat while the first is still running is
 `409 OPERATION_IN_PROGRESS`. An operation that fails or answers 5xx releases the key, so a retry is
 authorized again, with a new step-up grant where one is required; if the process stops mid-operation

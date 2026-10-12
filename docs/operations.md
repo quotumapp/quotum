@@ -286,6 +286,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | [Provider operation recovery](#provider-write-recovery-foundation) | Fixed, every 10 seconds |
 | Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
 | [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | Fixed, every 15 minutes |
+| [Merchant platform retention](#merchant-platform-retention), only when `QUOTUM_CONSOLE_ENABLED=true` | Fixed, every 15 minutes |
 
 Automatic top-up and recurring billing renew every outstanding claim in their current batch,
 including jobs waiting behind a provider call. The heartbeat runs every 60 seconds against the
@@ -358,6 +359,37 @@ it stops early with `locked`, `lock_timeout`, `blocked` or `forbidden`. Both rea
 
 Automatic top-up failures require resolving the payment/configuration cause before a protected
 circuit reset. Use replay/retry routes for durable work; do not manually advance job state.
+
+### Merchant platform retention
+
+The merchant platform keeps short-lived operational rows that nothing else prunes. A runtime that
+serves the merchant platform (`QUOTUM_CONSOLE_ENABLED=true`) schedules the `platform_retention` job
+every 15 minutes; a headless process writes none of these tables and does not. Each run deletes
+rows older than these windows:
+
+| Table | Deleted once | Window |
+| --- | --- | --- |
+| `platform_rate_limits` | `reset_at` is past | 1 day |
+| `platform_auth_links` | `expires_at` or `consumed_at` is past | 7 days |
+| `platform_idempotency` | `created_at` is past, and the stored response is complete | 30 days |
+| `platform_step_up_grants` | `expires_at` or `consumed_at` is past | 7 days |
+| `platform_mcp_changes` | `created_at` is past, and the proposal is `completed`, `rejected`, `cancelled`, `expired`, `stale` or `failed`, or is still `pending` past its expiry | 30 days |
+| `platform_mcp_authorizations` | `expires_at` or `revoked_at` is past, and no proposal refers to it | 30 days |
+
+Rows younger than their window and rows still in use stay: a pending idempotency claim keeps
+answering `OPERATION_IN_PROGRESS`, and a proposal that is `applying` or `needs_review` keeps its
+grant. An elapsed rate-limit window already counts as empty, an expired link or grant is already
+rejected, and a deleted idempotency record only ends replay of an answer older than 30 days. An
+MCP connection whose row is gone answers like a revoked one, `MCP_AUTHORIZATION_REVOKED`. Audit
+events, memberships, sessions, credentials and connections are never touched.
+
+A run deletes at most 1,000 rows per statement and 25 statements per table, each its own short
+transaction that locks only the rows it removes and skips rows a request holds, so replicas share
+the work and a sweep never blocks a request. A larger backlog drains over later runs; the
+`Platform retention sweep deleted expired rows` log line lists the rows removed per table and the
+tables that used every statement (`capped`). A failed table logs `Platform retention sweep failed`
+with the table name, and the other tables are still swept. No setting or migration is involved;
+runs after an upgrade work through any existing backlog, up to 25,000 rows per table each.
 
 ### Recurring billing retries
 
