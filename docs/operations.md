@@ -183,8 +183,12 @@ plaintext is never retained, so every integration needs a replacement:
 
 Both metrics endpoints return Prometheus text (`text/plain; version=0.0.4`) containing process
 metrics by default, even before billing activity. Existing `billing_*` counters and metering
-histograms appear as their operations run. Runtime metrics have no project or customer labels;
-`bun_version_info` has only a `version` label.
+histograms appear as their operations run. Runtime metrics have no project, customer or account
+labels, because `/metrics` is unauthenticated: billing series are labelled only by `worker`,
+`provider`, `operation`, `result`, `code`, `status`, `classification` and `route_group`, a list the
+code keeps closed (`BillingMetricLabelName` in `src/observability/metrics.ts`). A series therefore
+aggregates every project on the replica; the logs, not the metrics, name the project behind a
+failed projection delivery. `bun_version_info` has only a `version` label.
 
 | Metric | Type and meaning |
 | --- | --- |

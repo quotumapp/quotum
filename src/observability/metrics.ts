@@ -15,9 +15,26 @@ export type BillingMetricName =
 
 export type BillingHistogramName = "billing_metering_operation_duration_ms";
 
+/**
+ * Every label a billing metric may carry. `/metrics` is public, so a series must not identify the
+ * project, customer or account that produced it: a label that does is not part of this list, and
+ * adding one is a review decision about what unauthenticated scrapers may learn.
+ */
+export type BillingMetricLabelName =
+	| "classification"
+	| "code"
+	| "operation"
+	| "provider"
+	| "result"
+	| "route_group"
+	| "status"
+	| "worker";
+
+export type BillingMetricLabels = { [Label in BillingMetricLabelName]?: string };
+
 export interface BillingMetrics {
-	increment(name: BillingMetricName, labels?: Record<string, string>): void;
-	observe?(name: BillingHistogramName, value: number, labels?: Record<string, string>): void;
+	increment(name: BillingMetricName, labels?: BillingMetricLabels): void;
+	observe?(name: BillingHistogramName, value: number, labels?: BillingMetricLabels): void;
 	renderPrometheus(): string;
 }
 
@@ -103,7 +120,7 @@ export function safelyObserveBillingMetric(
 	metrics: BillingMetrics,
 	name: BillingHistogramName,
 	value: number,
-	labels?: Record<string, string>,
+	labels?: BillingMetricLabels,
 ): void {
 	try {
 		metrics.observe?.(name, value, labels);
@@ -115,7 +132,7 @@ export function safelyObserveBillingMetric(
 export function safelyIncrementBillingMetric(
 	metrics: BillingMetrics,
 	name: BillingMetricName,
-	labels?: Record<string, string>,
+	labels?: BillingMetricLabels,
 ): void {
 	try {
 		metrics.increment(name, labels);
@@ -124,8 +141,10 @@ export function safelyIncrementBillingMetric(
 	}
 }
 
-function sortLabels(labels: Record<string, string>): Array<[string, string]> {
-	return Object.entries(labels).sort(([left], [right]) => left.localeCompare(right));
+function sortLabels(labels: Readonly<Record<string, string | undefined>>): Array<[string, string]> {
+	return Object.entries(labels)
+		.filter((entry): entry is [string, string] => entry[1] !== undefined)
+		.sort(([left], [right]) => left.localeCompare(right));
 }
 
 function counterKey(

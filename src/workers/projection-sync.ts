@@ -209,7 +209,7 @@ export class ProjectionSyncWorker {
 			safelyIncrementBillingMetric(this.metrics, "billing_projection_sync_jobs_total", {
 				result: "failed",
 			});
-			this.recordWorkerJobMetric(job, "failed");
+			this.recordWorkerJobMetric("failed");
 			safelyLogError(this.logger, "Projection sync job failed", error, {
 				jobId: job.id,
 				workerId: this.workerId,
@@ -222,14 +222,13 @@ export class ProjectionSyncWorker {
 		safelyIncrementBillingMetric(this.metrics, "billing_projection_sync_jobs_total", {
 			result: "succeeded",
 		});
-		this.recordWorkerJobMetric(job, "succeeded");
+		this.recordWorkerJobMetric("succeeded");
 		return "succeeded";
 	}
 
-	private recordWorkerJobMetric(job: ProjectionSyncJobRow, result: "succeeded" | "failed"): void {
+	private recordWorkerJobMetric(result: "succeeded" | "failed"): void {
 		safelyIncrementBillingMetric(this.metrics, "billing_worker_jobs_total", {
 			worker: "projection_sync",
-			project: job.project_key,
 			result,
 		});
 	}
