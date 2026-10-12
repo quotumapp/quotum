@@ -1596,14 +1596,36 @@ async function readAllocationRows(
 	feature: FeatureRow,
 	entityId: string | null,
 ): Promise<AllocationRow[]> {
+	return await executeRows<AllocationRow>(
+		executor,
+		allocationRowsSql(projectId, customerId, featureId(feature), entityId),
+	);
+}
+
+/**
+ * The allocations of a customer's wallet feature with the quantity open reservations hold from
+ * each. It is a function of its own so a test can plan the statement every balance read runs.
+ */
+export function allocationRowsSql(
+	projectId: string,
+	customerId: string,
+	walletFeatureId: string,
+	entityId: string | null,
+): DrizzleSQL {
 	// A closed allocation (reversed, expired, or a default-plan allowance the next write ends) is
 	// listed only while an open reservation still holds part of it: the hold settles from it, so it
 	// stays visible until then, though none of the allocation is available.
-	return await executeRows<AllocationRow>(
-		executor,
-		drizzleSql`
+	//
+	// The open holds are summed from the customer's active reservations, which the partial
+	// `idx_billing_reservations_customer_active` reaches directly, probing each one's hold rows by
+	// primary key. Reading `reservation_allocations` by allocation instead visits every hold the
+	// allocation ever had, settled ones included. The lateral's `OFFSET 0` keeps the planner from
+	// turning that probe into a hash join: a customer whose reservations are mostly settled looks
+	// like one with thousands open, and the hash join would read every hold in the project.
+	return drizzleSql`
 			SELECT allocation.id, allocation.quantity, allocation.reversed_quantity,
-				allocation.consumed_quantity, holds.held_quantity, state.closed,
+				allocation.consumed_quantity, COALESCE(open_holds.held_quantity, 0) AS held_quantity,
+				state.closed,
 				allocation.source_kind,
 				allocation.source_key, allocation.expires_at, allocation.created_at,
 				allocation.reversed_at, entity.external_id AS entity_external_id,
@@ -1613,15 +1635,21 @@ async function readAllocationRows(
 			FROM balance_allocations allocation
 			LEFT JOIN entities entity
 				ON entity.project_id = allocation.project_id AND entity.id = allocation.entity_id
-			CROSS JOIN LATERAL (
-				SELECT COALESCE(sum(held.held_quantity - held.consumed_quantity), 0) AS held_quantity
-				FROM reservation_allocations held
-				JOIN reservations r ON r.project_id = held.project_id AND r.id = held.reservation_id
-				WHERE held.project_id = allocation.project_id
-					AND held.allocation_id = allocation.id
+			LEFT JOIN (
+				SELECT held.allocation_id, sum(held.held_quantity - held.consumed_quantity) AS held_quantity
+				FROM reservations r
+				CROSS JOIN LATERAL (
+					SELECT hold.allocation_id, hold.held_quantity, hold.consumed_quantity
+					FROM reservation_allocations hold
+					WHERE hold.project_id = r.project_id AND hold.reservation_id = r.id
+					OFFSET 0
+				) held
+				WHERE r.project_id = ${projectId}
+					AND r.customer_id = ${customerId}
 					AND r.status = 'active'
 					AND r.expires_at > clock_timestamp()
-			) holds
+				GROUP BY held.allocation_id
+			) open_holds ON open_holds.allocation_id = allocation.id
 			CROSS JOIN LATERAL (
 				SELECT (
 					allocation.reversed_at IS NOT NULL
@@ -1631,12 +1659,11 @@ async function readAllocationRows(
 			) state
 			WHERE allocation.project_id = ${projectId}
 				AND allocation.customer_id = ${customerId}
-				AND allocation.feature_id = ${featureId(feature)}
+				AND allocation.feature_id = ${walletFeatureId}
 				AND (allocation.entity_id IS NULL OR allocation.entity_id = ${entityId}::bigint)
-				AND (NOT state.closed OR holds.held_quantity > 0)
+				AND (NOT state.closed OR COALESCE(open_holds.held_quantity, 0) > 0)
 			ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)}
-		`,
-	);
+		`;
 }
 
 export function emptyBalance(feature: FeatureRow): FiniteMeteringBalance {
@@ -2806,6 +2833,28 @@ async function insufficientMeterLimitConfirmation(
 	};
 }
 
+/**
+ * The active reservations of a billing account that have run out, locked for release. It is a
+ * function of its own so a test can plan it: with `idx_billing_reservations_customer_active` it
+ * reads the account's open reservations, not its whole history.
+ */
+export function expiredSubjectReservationsSql(
+	projectId: string,
+	billingAccountId: string,
+): DrizzleSQL {
+	return drizzleSql`
+		SELECT r.id, r.customer_id
+		FROM reservations r
+		JOIN customers c ON c.project_id = r.project_id AND c.id = r.customer_id
+		WHERE r.project_id = ${projectId}
+			AND c.billing_account_id = ${billingAccountId}
+			AND r.status = 'active'
+			AND r.expires_at <= clock_timestamp()
+		ORDER BY r.id
+		FOR UPDATE OF r
+	`;
+}
+
 /** Reclaim a subject's expired holds before authorization, independent of worker timing. */
 export async function expireSubjectReservations(
 	executor: QueryExecutor,
@@ -2814,11 +2863,7 @@ export async function expireSubjectReservations(
 ): Promise<void> {
 	const rows = await executeRows<{ id: string; customer_id: string }>(
 		executor,
-		drizzleSql`
-  SELECT r.id,r.customer_id FROM reservations r JOIN customers c ON c.project_id=r.project_id AND c.id=r.customer_id
-  WHERE r.project_id=${projectId} AND c.billing_account_id=${billingAccountId} AND r.status='active' AND r.expires_at<=clock_timestamp()
-  ORDER BY r.id FOR UPDATE OF r
- `,
+		expiredSubjectReservationsSql(projectId, billingAccountId),
 	);
 	for (const row of rows) {
 		const reservation = await lockReservation(executor, projectId, row.customer_id, row.id);

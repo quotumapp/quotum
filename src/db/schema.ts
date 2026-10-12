@@ -3177,6 +3177,9 @@ export const reservations = pgTable(
 			table.walletFeatureId,
 			table.createdAt.desc(),
 		),
+		index("idx_billing_reservations_customer_active")
+			.on(table.projectId, table.customerId, table.expiresAt)
+			.where(sql`(status = 'active'::text)`),
 	],
 );
 

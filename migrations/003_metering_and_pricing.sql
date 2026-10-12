@@ -891,6 +891,13 @@ CREATE INDEX IF NOT EXISTS idx_billing_reservations_active_expiry
 CREATE INDEX IF NOT EXISTS idx_billing_reservations_customer_feature
 	ON reservations (project_id, customer_id, wallet_feature_id, created_at DESC);
 
+-- A customer's reservations are never deleted once settled, so any read that has to find the few
+-- still-open ones must not walk the history. `expires_at` is compared against clock_timestamp(),
+-- which cannot be an index condition; the status predicate is what bounds the scan.
+CREATE INDEX IF NOT EXISTS idx_billing_reservations_customer_active
+	ON reservations (project_id, customer_id, expires_at)
+	WHERE status = 'active';
+
 CREATE INDEX IF NOT EXISTS idx_billing_reservations_entity
 	ON reservations (entity_id)
 	WHERE entity_id IS NOT NULL;

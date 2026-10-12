@@ -50,6 +50,17 @@ or deactivate its codes before the upgrade if it must stay unused. An older imag
 new baselines, so a rollback restores the pre-upgrade backup and loses the plan grants redeemed
 since.
 
+## Open reservation index
+
+The metering baseline adds `idx_billing_reservations_customer_active` on
+`reservations (project_id, customer_id, expires_at) WHERE status = 'active'`. Settled reservations
+are never deleted, and every usage write first reclaims the account's expired holds and reads the
+holds that are still open; without an index that leads with the account and holds only open rows,
+both read the account's whole reservation history. No table changes and nothing is backfilled, so
+a dump from the previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup.
+
 ## Subscription reconciliation indexes
 
 The billing core baseline widens `idx_billing_subscriptions_provider_reconciliation_due` to cover
