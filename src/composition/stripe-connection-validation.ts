@@ -25,7 +25,15 @@ interface FailedCheck {
 /** Stripe issues every object id, so no customer, subscription or invoice can carry this one. */
 const absent = "quotum_permission_probe";
 
-function readProbes(client: Stripe, identified: (accountId: string) => void): Probe[] {
+/**
+ * `events` adds the read the setup event check makes: the connection's own key retrieves the
+ * signed event, which proves a foreign endpoint secret was not supplied.
+ */
+function readProbes(
+	client: Stripe,
+	identified: (accountId: string) => void,
+	options: { events: boolean },
+): Probe[] {
 	return [
 		["connected_account_read", async () => identified((await client.accounts.retrieve(null)).id)],
 		["plan_read", () => client.prices.list({ limit: 1 })],
@@ -39,6 +47,7 @@ function readProbes(client: Stripe, identified: (accountId: string) => void): Pr
 		["payment_method_read", () => client.paymentMethods.list({ limit: 1 })],
 		["coupon_read", () => client.coupons.list({ limit: 1 })],
 		["promotion_code_read", () => client.promotionCodes.list({ limit: 1 })],
+		...(options.events ? [["event_read", () => client.events.list({ limit: 1 })] as Probe] : []),
 	];
 }
 
@@ -99,13 +108,14 @@ async function run(probes: Probe[]): Promise<ProbeResult[]> {
 	return results;
 }
 
-function statusOf(error: unknown): number | undefined {
+/** The HTTP status Stripe answered with, if the error carries one. */
+export function stripeErrorStatus(error: unknown): number | undefined {
 	const status = (error as { statusCode?: unknown } | null)?.statusCode;
 	return typeof status === "number" ? status : undefined;
 }
 
 function failedCheck(check: string, error: unknown, permissions: string[]): FailedCheck {
-	const status = statusOf(error);
+	const status = stripeErrorStatus(error);
 	// Extract only a permission token, never Stripe's free-form message or masked key. Stripe
 	// may name a permission with its `rak_` prefix.
 	const permission = (error as { message?: string } | null)?.message
@@ -128,14 +138,22 @@ function failedCheck(check: string, error: unknown, permissions: string[]): Fail
 	};
 }
 
+/**
+ * `eventRead` probes Events: Read. Only a connection that must verify a signed setup event with
+ * its own key needs it, so the caller decides; it defaults to off.
+ */
 export async function validateStripeAccess(
 	client: Stripe,
-	options: { writeProbes?: boolean } = {},
+	options: { writeProbes?: boolean; eventRead?: boolean } = {},
 ): Promise<ConnectionValidation> {
 	let identity = "";
-	const reads = readProbes(client, (accountId) => {
-		identity = accountId;
-	});
+	const reads = readProbes(
+		client,
+		(accountId) => {
+			identity = accountId;
+		},
+		{ events: options.eventRead === true },
+	);
 	const permissions = [...reads.map(([check]) => check), ...stripeWritePermissions];
 	const checks: FailedCheck[] = [];
 	const passed: ConnectionValidation["checks"] = [];
@@ -149,7 +167,7 @@ export async function validateStripeAccess(
 	const authenticated = !checks.some((check) => check.reason === "authentication_failed");
 	if (options.writeProbes !== false && authenticated) {
 		for (const result of await run(writeProbes(client))) {
-			const status = result.ok ? undefined : statusOf(result.error);
+			const status = result.ok ? undefined : stripeErrorStatus(result.error);
 			if (result.ok || status === 404 || status === 400) {
 				passed.push({ code: result.check, passed: true });
 			} else if (status === 403 || status === 401) {

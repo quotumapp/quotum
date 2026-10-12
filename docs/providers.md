@@ -870,11 +870,19 @@ Write includes the reads used for those resources. OAuth installs are a separate
 | Payment Methods | Read | Expand the saved method on Setup Intents and Customers |
 | Coupons | Write | Create and read promotion coupons |
 | Promotion Codes | Write | Create, read and deactivate codes |
+| Events | Read (`event_read`) | Retrieve the signed setup event with the connection's own key before production activation |
 
 Validation runs bounded probes and reports all detected failures in `error.details.checks`
 with `check`, `reason`, and, where relevant, `missingPermission` and `httpStatus`.
 `missingPermissions` deduplicates detected missing permissions. This recipe covers the manual
 billing adapter; the Stripe App manifest has additional installation/event permissions.
+
+Events: Read is probed (`GET /v1/events?limit=1`) only for a production environment's restricted
+key, the one connection that must verify a signed setup event before it is activated (see
+[headless connection setup](#headless-connection-setup)). A sandbox connection never waits for one,
+and a Stripe App install has its events delivered through the app, so neither needs the
+permission. Without it the setup event cannot be retrieved and activation stalls on
+`STRIPE_EVENT_REQUIRED`. Payment Disputes: Read is not needed.
 
 A successful read does not prove write access, so each of the seven write permissions
 (`customer_write`, `checkout_session_write`, `customer_portal_write`, `subscription_write`,
