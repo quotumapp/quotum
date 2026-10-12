@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { executeRows } from "../../src/db/repository/query";
-import { dueProviderReconciliationsSql } from "../../src/db/repository/subscription-reconciliation";
+import {
+	dueProviderReconciliationsSql,
+	expiredSubscriptionCandidatesSql,
+} from "../../src/db/repository/subscription-reconciliation";
 import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -60,5 +63,11 @@ localDescribe("Subscription reconciliation index use", () => {
 		const claim = await plan(dueProviderReconciliationsSql(100, new Date()));
 
 		expect(claim).toContain("idx_billing_subscriptions_provider_reconciliation_due");
+	});
+
+	it("finds subscriptions past their expiry through the expiry index", async () => {
+		const candidates = await plan(expiredSubscriptionCandidatesSql(100));
+
+		expect(candidates).toContain("idx_billing_subscriptions_expiry_due");
 	});
 });

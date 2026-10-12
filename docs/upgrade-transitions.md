@@ -60,11 +60,13 @@ it unset runs [headless](deployment.md#headless-mode). No migration or data move
 ## Subscription reconciliation indexes
 
 The billing core baseline widens `idx_billing_subscriptions_provider_reconciliation_due` to cover
-`expired` subscriptions. The reconciliation claim also reads them, so the old four-status index
-could never serve it and every poll scanned the whole `subscriptions` table. No table changes and
-nothing is backfilled, so a dump from the previous release restores as it is: follow steps 1, 2, 4
-and 6 of [stored job provider identity](#stored-job-provider-identity). An older image cannot read
-the new baseline, so a rollback restores the pre-upgrade backup.
+`expired` subscriptions and adds `idx_billing_subscriptions_expiry_due`. The reconciliation claim
+reads `expired` subscriptions too, so the old four-status index could never serve it, and the
+expiry pass had no index that orders subscriptions by `expires_at`; each poll of either scanned the
+whole `subscriptions` table. No table changes and nothing is backfilled, so a dump from the
+previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup.
 
 ## Upgrading a populated deployment to v0.22.0
 

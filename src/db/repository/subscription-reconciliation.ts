@@ -48,6 +48,22 @@ export function dueProviderReconciliationsSql(limit: number, staleBefore: Date):
 	`;
 }
 
+/**
+ * The live subscriptions whose recorded expiry has passed, oldest first. Like the claim above it
+ * is planned by a test: its filter has to stay inside `idx_billing_subscriptions_expiry_due`.
+ */
+export function expiredSubscriptionCandidatesSql(limit: number): DrizzleSQL {
+	return drizzleSql`
+		SELECT s.id, s.customer_id
+		FROM subscriptions s
+		WHERE s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+			AND s.expires_at IS NOT NULL
+			AND s.expires_at <= now()
+		ORDER BY s.expires_at ASC, s.created_at ASC
+		LIMIT ${limit}
+	`;
+}
+
 export class SubscriptionReconciliationBillingRepository extends RepositoryModule {
 	async reconcileExpiredSubscriptions(
 		limit: number,
@@ -64,15 +80,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 			}>(
 				tx,
 				drizzleSql`
-				WITH candidates AS MATERIALIZED (
-					SELECT s.id, s.customer_id
-					FROM subscriptions s
-					WHERE s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-						AND s.expires_at IS NOT NULL
-						AND s.expires_at <= now()
-					ORDER BY s.expires_at ASC, s.created_at ASC
-					LIMIT ${cappedLimit}
-				),
+				WITH candidates AS MATERIALIZED (${expiredSubscriptionCandidatesSql(cappedLimit)}),
 				locked_customers AS MATERIALIZED (
 					SELECT c.id
 					FROM customers c

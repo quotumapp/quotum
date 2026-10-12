@@ -61,6 +61,12 @@ const allowlisted = [
 		reason: "global provider reconciliation queue claim; the update that follows is by primary key",
 	},
 	{
+		snippet:
+			"SELECT s.id, s.customer_id FROM subscriptions s WHERE s.status IN ('active', 'grace_period', 'billing_retry', 'cancelled') AND s.expires_at IS NOT NULL",
+		reason:
+			"global expiry pass candidates; each project's rows are re-read and locked per customer",
+	},
+	{
 		snippet: "FROM store_events se",
 		reason: "admin stats query uses projectFilter in the same template",
 	},

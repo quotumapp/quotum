@@ -404,6 +404,13 @@ CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_provider_reconciliation_due
 	ON subscriptions (provider_reconciliation_next_attempt_at, provider_reconciled_at, expires_at)
 	WHERE status IN ('active', 'grace_period', 'billing_retry', 'cancelled', 'expired');
 
+-- The expiry pass marks a live subscription expired once its recorded expiry is past, oldest
+-- first. No other index orders subscriptions by expires_at across customers.
+CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_expiry_due
+	ON subscriptions (expires_at, created_at)
+	WHERE status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+		AND expires_at IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_trial_ending_due
 	ON subscriptions (trial_end_at)
 	WHERE trial_ending_notified_at IS NULL

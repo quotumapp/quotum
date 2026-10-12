@@ -71,6 +71,7 @@ describe("baseline schema files", () => {
 		expect(billingCore).toContain("idx_billing_customers_billing_account_id_trgm");
 		expect(billingCore).toContain("idx_billing_projection_sync_jobs_idempotency");
 		expect(billingCore).toContain("idx_billing_subscriptions_provider_reconciliation_due");
+		expect(billingCore).toContain("idx_billing_subscriptions_expiry_due");
 		expect(billingCore).toContain("idx_billing_subscriptions_trial_ending_due");
 		expect(billingCore).toContain("jsonb_typeof(payload->'balances') = 'array'");
 		expect(billingCore).toContain("NOT (payload ? 'operation')");
