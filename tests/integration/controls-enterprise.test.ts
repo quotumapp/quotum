@@ -1834,6 +1834,68 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		).toMatchObject([{ id: pool?.id, quantity: 1, assignedQuantity: 7, availableQuantity: 0 }]);
 	});
 
+	it("lists license pools without locking the customer or rewriting rows", async () => {
+		await seedCatalogMigration(context.sql);
+		const [first] = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		expect(first).toMatchObject({ quantity: 7, active: true });
+		const versions = async () =>
+			await context.sql<Array<{ pool: string; customer: string }>>`
+				SELECT pool.xmin::text AS pool, customer.xmin::text AS customer
+				FROM license_pools pool
+				JOIN customers customer ON customer.id = pool.customer_id
+				WHERE customer.billing_account_id = 'migration-stripe'
+			`;
+		const before = await versions();
+
+		// A second read changes nothing: no row version is written.
+		await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe");
+		expect(await versions()).toEqual(before);
+
+		// And it does not wait for a writer that holds the customer row, as a read-only credential's
+		// request must not (the refresh used to take FOR NO KEY UPDATE on it every time).
+		const listed = await context.sql.begin(async (tx) => {
+			await tx`SELECT id FROM customers WHERE billing_account_id = 'migration-stripe' FOR UPDATE`;
+			return await Promise.race([
+				context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
+				new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error("listing waited for the customer row")), 3_000),
+				),
+			]);
+		});
+		expect(listed).toMatchObject([{ id: first?.id, quantity: 7 }]);
+	});
+
+	it("follows a provider quantity change once, then reads are pure again", async () => {
+		await seedCatalogMigration(context.sql);
+		const [pool] = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		const poolVersion = async () =>
+			(
+				await context.sql<Array<{ version: string }>>`
+					SELECT xmin::text AS version FROM license_pools WHERE id = ${pool?.id ?? ""}::bigint
+				`
+			)[0]?.version;
+		const unchanged = await poolVersion();
+
+		await downgradeLicensedSeats(context.sql, 3);
+		const [after] = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		const changed = await poolVersion();
+		await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe");
+
+		// Same pool id, new capacity, written once.
+		expect(after).toMatchObject({ id: pool?.id, quantity: 3, active: true });
+		expect(changed).not.toBe(unchanged);
+		expect(await poolVersion()).toBe(changed);
+	});
+
 	it("honors license assignments in assignment order after a partial downgrade", async () => {
 		await seedCatalogMigration(context.sql);
 		for (const externalId of ["workspace-a", "workspace-b"]) {
