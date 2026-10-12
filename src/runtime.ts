@@ -154,6 +154,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 				? {}
 				: { stripe: dependencies.stripeClientFactory }),
 		},
+		logger,
 	});
 	const workerProviders = createWorkerProviderSelectors(providerRegistry);
 	const capabilityReads = createProviderCapabilityReads({

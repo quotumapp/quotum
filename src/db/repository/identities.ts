@@ -1,9 +1,11 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError } from "../../billing/errors";
 import type { BillingChannel, BillingProvider } from "../../billing/types";
+import { sqlstateOf } from "../postgres-errors";
 import { type DefaultPlanOutcome, reconcileDefaultPlanGrant } from "./default-plan-grants";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
-import { executeOne } from "./query";
+import { IdentityConflictError } from "./identity-conflicts";
+import { executeOne, executeRows } from "./query";
 import type { CustomerIdentityRow, QueryExecutor, StoreProductIdentityRow } from "./types";
 import { requireNonBlank, requireStripeCustomerId } from "./validation";
 
@@ -246,8 +248,101 @@ export async function upsertProviderCustomer(
 	`,
 	);
 	if (row === null) {
-		throw new Error(input.identityError);
+		throw new IdentityConflictError("customer_linked_to_other_account", input.identityError);
 	}
+}
+
+/**
+ * Links the Stripe customer a verified event names to the account the event resolved to, and
+ * refuses a link that would contradict a stored one. The write is one statement that inserts only
+ * when the account has no other Stripe customer and leaves a customer another account holds alone;
+ * an empty result is then explained as an `IdentityConflictError` naming which link disagrees,
+ * instead of a constraint violation that would abort the recording's transaction half way through.
+ * The partial unique index on one Stripe customer per account stays as the backstop for a
+ * concurrent writer.
+ */
+export async function bindStripeEventCustomer(
+	executor: QueryExecutor,
+	projectId: string,
+	input: { customerId: string; stripeCustomerId: string; providerAccountId?: string | null },
+): Promise<void> {
+	const identityError = `provider customer identity mismatch for Stripe customer id ${input.stripeCustomerId}`;
+	let row: { id: string } | null;
+	try {
+		row = await executeOne<{ id: string }>(
+			executor,
+			drizzleSql`
+			INSERT INTO provider_customers (
+				project_id,
+				customer_id,
+				provider,
+				provider_account_id,
+				external_customer_id
+			)
+			SELECT
+				${projectId}::uuid,
+				${input.customerId}::uuid,
+				'stripe',
+				${input.providerAccountId ?? null}::text,
+				${input.stripeCustomerId}::text
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM provider_customers linked
+				WHERE linked.project_id = ${projectId}
+					AND linked.customer_id = ${input.customerId}
+					AND linked.provider = 'stripe'
+					AND linked.external_customer_id <> ${input.stripeCustomerId}
+			)
+			ON CONFLICT (project_id, provider, external_customer_id) DO UPDATE SET
+				provider_account_id = COALESCE(
+					provider_customers.provider_account_id,
+					EXCLUDED.provider_account_id
+				),
+				updated_at = now()
+			WHERE provider_customers.customer_id = EXCLUDED.customer_id
+			RETURNING id
+		`,
+		);
+	} catch (error) {
+		// Another transaction linked a second customer to this account after the check above.
+		if (sqlstateOf(error) === "23505") {
+			throw accountLinkedToOtherCustomer(null, input.stripeCustomerId);
+		}
+		throw error;
+	}
+	if (row !== null) return;
+
+	const stored = await executeRows<{ customer_id: string; external_customer_id: string }>(
+		executor,
+		drizzleSql`
+			SELECT customer_id, external_customer_id
+			FROM provider_customers
+			WHERE project_id = ${projectId}
+				AND provider = 'stripe'
+				AND (external_customer_id = ${input.stripeCustomerId} OR customer_id = ${input.customerId})
+		`,
+	);
+	const holder = stored.find((link) => link.external_customer_id === input.stripeCustomerId);
+	if (holder !== undefined && holder.customer_id !== input.customerId) {
+		throw new IdentityConflictError("customer_linked_to_other_account", identityError);
+	}
+	const linked = stored.find((link) => link.external_customer_id !== input.stripeCustomerId);
+	if (linked !== undefined) {
+		throw accountLinkedToOtherCustomer(linked.external_customer_id, input.stripeCustomerId);
+	}
+	throw new IdentityConflictError("customer_linked_to_other_account", identityError);
+}
+
+function accountLinkedToOtherCustomer(
+	linkedCustomerId: string | null,
+	namedCustomerId: string,
+): IdentityConflictError {
+	return new IdentityConflictError(
+		"account_linked_to_other_customer",
+		linkedCustomerId === null
+			? `billing account is linked to another Stripe customer; the event names Stripe customer ${namedCustomerId}`
+			: `billing account is linked to Stripe customer ${linkedCustomerId}; the event names Stripe customer ${namedCustomerId}`,
+	);
 }
 
 export async function getStoreProductById(

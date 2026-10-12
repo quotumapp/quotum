@@ -17,13 +17,14 @@ import {
 	recomputeCustomerEntitlements,
 } from "./entitlements";
 import {
+	bindStripeEventCustomer,
 	ensureCustomer,
 	findCustomerBySubscription,
 	getRecordedStripeStoreProduct,
 	getStripeStoreProduct,
 	resolveStripeCustomer,
-	upsertProviderCustomer,
 } from "./identities";
+import { IdentityConflictError, stripeIdentityConflictReason } from "./identity-conflicts";
 import {
 	findStripeCreditReversalTarget,
 	lockCustomerRow,
@@ -829,7 +830,8 @@ export class StripeBillingRepository extends RepositoryModule {
 			`,
 			);
 			if (existing !== null && existing.customer_id !== customer.id) {
-				throw new Error(
+				throw new IdentityConflictError(
+					"customer_linked_to_other_account",
 					`provider customer identity mismatch for Stripe customer id ${input.stripeCustomerId}`,
 				);
 			}
@@ -868,7 +870,8 @@ export class StripeBillingRepository extends RepositoryModule {
 			`,
 			);
 			if (linked === null) {
-				throw new Error(
+				throw new IdentityConflictError(
+					"customer_linked_to_other_account",
 					`provider customer identity mismatch for Stripe customer id ${input.stripeCustomerId}`,
 				);
 			}
@@ -877,6 +880,24 @@ export class StripeBillingRepository extends RepositoryModule {
 	}
 
 	async recordStripeCreditPurchaseAndEnqueueProjection(
+		project: ProjectInstanceContext,
+		input: RecordStripeCreditPurchaseProjectionInput,
+	): Promise<StripeRecordingResult> {
+		return await this.skipOnIdentityConflict(
+			project,
+			{
+				eventType: input.eventType,
+				externalEventId: input.externalEventId,
+				transactionId: input.transactionId,
+				purchaseKind: input.purchaseKind,
+				rawPayload: input.rawPayload,
+				replayStoreEventId: input.replayStoreEventId,
+			},
+			() => this.applyStripeCreditPurchase(project, input),
+		);
+	}
+
+	private async applyStripeCreditPurchase(
 		project: ProjectInstanceContext,
 		input: RecordStripeCreditPurchaseProjectionInput,
 	): Promise<StripeRecordingResult> {
@@ -900,12 +921,10 @@ export class StripeBillingRepository extends RepositoryModule {
 			}
 
 			if (input.stripeCustomerId !== null) {
-				await upsertProviderCustomer(tx, projectId, {
+				await bindStripeEventCustomer(tx, projectId, {
 					customerId: resolved.id,
-					provider: "stripe",
-					externalCustomerId: input.stripeCustomerId,
+					stripeCustomerId: input.stripeCustomerId,
 					providerAccountId: input.providerAccountId ?? null,
-					identityError: `provider customer identity mismatch for Stripe customer id ${input.stripeCustomerId}`,
 				});
 			}
 
@@ -1066,6 +1085,24 @@ export class StripeBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: RecordStripeSubscriptionProjectionInput,
 	): Promise<StripeRecordingResult> {
+		return await this.skipOnIdentityConflict(
+			project,
+			{
+				eventType: input.eventType,
+				externalEventId: input.externalEventId,
+				transactionId: input.invoiceId ?? input.stripeSubscriptionId,
+				purchaseKind: "subscription",
+				rawPayload: input.rawPayload,
+				replayStoreEventId: input.replayStoreEventId,
+			},
+			() => this.applyStripeSubscription(project, input),
+		);
+	}
+
+	private async applyStripeSubscription(
+		project: ProjectInstanceContext,
+		input: RecordStripeSubscriptionProjectionInput,
+	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
 			const transactionId = input.invoiceId ?? input.stripeSubscriptionId;
@@ -1111,12 +1148,10 @@ export class StripeBillingRepository extends RepositoryModule {
 			}
 
 			if (input.stripeCustomerId !== null) {
-				await upsertProviderCustomer(tx, projectId, {
+				await bindStripeEventCustomer(tx, projectId, {
 					customerId: resolved.id,
-					provider: "stripe",
-					externalCustomerId: input.stripeCustomerId,
+					stripeCustomerId: input.stripeCustomerId,
 					providerAccountId: input.providerAccountId ?? null,
-					identityError: `provider customer identity mismatch for Stripe customer id ${input.stripeCustomerId}`,
 				});
 			}
 
@@ -1428,6 +1463,24 @@ export class StripeBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: RecordStripeCreditReversalProjectionInput,
 	): Promise<StripeRecordingResult> {
+		return await this.skipOnIdentityConflict(
+			project,
+			{
+				eventType: input.eventType,
+				externalEventId: input.externalEventId,
+				transactionId: input.reversalId,
+				purchaseKind: null,
+				rawPayload: input.rawPayload,
+				replayStoreEventId: input.replayStoreEventId,
+			},
+			() => this.applyStripeCreditReversal(project, input),
+		);
+	}
+
+	private async applyStripeCreditReversal(
+		project: ProjectInstanceContext,
+		input: RecordStripeCreditReversalProjectionInput,
+	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
 			const target = await findStripeCreditReversalTarget(tx, projectId, input.paymentIntentId);
@@ -1617,6 +1670,24 @@ export class StripeBillingRepository extends RepositoryModule {
 		project: ProjectInstanceContext,
 		input: RecordStripeInvoiceReversalProjectionInput,
 	): Promise<StripeRecordingResult> {
+		return await this.skipOnIdentityConflict(
+			project,
+			{
+				eventType: input.eventType,
+				externalEventId: input.externalEventId,
+				transactionId: input.reversalId,
+				purchaseKind: null,
+				rawPayload: input.rawPayload,
+				replayStoreEventId: input.replayStoreEventId,
+			},
+			() => this.applyStripeInvoiceReversal(project, input),
+		);
+	}
+
+	private async applyStripeInvoiceReversal(
+		project: ProjectInstanceContext,
+		input: RecordStripeInvoiceReversalProjectionInput,
+	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
 			const target = await executeOne<{
@@ -1711,6 +1782,37 @@ export class StripeBillingRepository extends RepositoryModule {
 			await recordStripeSkippedEventInTransaction(tx, project.projectInstanceId, input);
 			return skippedStripeRecordingResult();
 		});
+	}
+
+	/**
+	 * Runs one event's recording; when a stored identity contradicts the event, the recording's
+	 * transaction has already rolled back, so nothing the event carried is applied, and the event is
+	 * kept as a skipped store event in a transaction of its own. The provider is then answered and
+	 * stops redelivering it, and the replay worker applies it once an operator has fixed the stored
+	 * identity. An event id that was already recorded with another identity keeps its original row:
+	 * the skip writes over a pending, skipped or failed row only, never over a processed one.
+	 *
+	 * A live provider read has no event id and is never redelivered, so its conflict stays an error:
+	 * the reconciliation worker retries it with backoff and reports it instead of marking it done.
+	 */
+	private async skipOnIdentityConflict(
+		project: ProjectInstanceContext,
+		event: Omit<RecordStripeSkippedEventInput, "processingError">,
+		record: () => Promise<StripeRecordingResult>,
+	): Promise<StripeRecordingResult> {
+		try {
+			return await record();
+		} catch (error) {
+			if (!(error instanceof IdentityConflictError) || event.externalEventId === null) throw error;
+			const reason = stripeIdentityConflictReason(error);
+			await this.transaction(async (tx) => {
+				await recordStripeSkippedEventInTransaction(tx, project.projectInstanceId, {
+					...event,
+					processingError: `${reason}: ${error.message}`,
+				});
+			});
+			return skippedStripeRecordingResult(reason);
+		}
 	}
 }
 
@@ -1942,7 +2044,8 @@ async function recordExistingSubscriptionInvoice(
 ): Promise<StripeRecordingResult> {
 	const { subscription, input } = fact;
 	if (subscription.customer_id !== fact.customerId) {
-		throw new Error(
+		throw new IdentityConflictError(
+			"subscription_identity_conflict",
 			`Stripe subscription identity mismatch for subscription ${input.stripeSubscriptionId}`,
 		);
 	}

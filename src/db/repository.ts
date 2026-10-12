@@ -184,6 +184,7 @@ export type {
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
 	StripeReversalSkipReason,
+	StripeSkipReason,
 	StripeWebStoreProductRow,
 	TrialEndingNoticeResult,
 } from "./repository/types";

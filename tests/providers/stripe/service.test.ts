@@ -8,8 +8,11 @@ import type {
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
 	StripeReversalSkipReason,
+	StripeSkipReason,
 	StripeWebStoreProductRow,
 } from "../../../src/db/repository";
+import { IdentityConflictError } from "../../../src/db/repository/identity-conflicts";
+import type { BillingLogger } from "../../../src/observability/logger";
 import { STRIPE_LIVE_READ_ORDER_MARGIN_SECONDS } from "../../../src/providers/stripe/normalizer";
 import { StripeBillingService } from "../../../src/providers/stripe/service";
 import type { StripeCatalog } from "../../../src/providers/stripe/types";
@@ -78,6 +81,11 @@ function serviceFixture(
 		retrievedSubscription?: Record<string, unknown>;
 		recordingResult?: "processed" | "skipped" | "ignored";
 		reversalSkipReason?: StripeReversalSkipReason;
+		/** Why the purchase and subscription recordings skip, as the repository reports it. */
+		recordingSkipReason?: StripeSkipReason;
+		/** What linking a Stripe customer to a billing account throws. */
+		linkError?: Error;
+		logger?: BillingLogger;
 		paymentInvoice?: string | Error;
 		customerId?: string;
 		existingCustomerId?: string | null;
@@ -130,18 +138,26 @@ function serviceFixture(
 	const existingCustomerId = overrides.existingCustomerId ?? null;
 	const linkedCustomerId = overrides.linkedCustomerId;
 	const recordingResult = (): StripeRecordingResult =>
-		overrides.recordingResult === "skipped"
-			? { processingStatus: "skipped", billingAccountId: null, entitlements: null }
-			: overrides.recordingResult === "ignored"
-				? { processingStatus: "ignored", billingAccountId: null, entitlements: null }
-				: {
-						processingStatus: "processed",
-						billingAccountId: "user_1",
-						entitlements: entitlementSnapshot,
-					};
+		overrides.recordingSkipReason !== undefined
+			? {
+					processingStatus: "skipped",
+					billingAccountId: null,
+					entitlements: null,
+					skipReason: overrides.recordingSkipReason,
+				}
+			: overrides.recordingResult === "skipped"
+				? { processingStatus: "skipped", billingAccountId: null, entitlements: null }
+				: overrides.recordingResult === "ignored"
+					? { processingStatus: "ignored", billingAccountId: null, entitlements: null }
+					: {
+							processingStatus: "processed",
+							billingAccountId: "user_1",
+							entitlements: entitlementSnapshot,
+						};
 
 	const service = new StripeBillingService({
 		config: { ...config, ...overrides.config },
+		logger: overrides.logger,
 		client: {
 			createCustomer(input) {
 				calls.push({ method: "createCustomer", input });
@@ -314,6 +330,7 @@ function serviceFixture(
 			},
 			linkStripeProviderCustomer(input) {
 				calls.push({ method: "linkStripeProviderCustomer", input });
+				if (overrides.linkError !== undefined) return Promise.reject(overrides.linkError);
 				return Promise.resolve(linkedCustomerId ?? input.stripeCustomerId);
 			},
 			recordStripeCreditPurchaseAndEnqueueProjection(input) {
@@ -2102,6 +2119,135 @@ describe("StripeBillingService", () => {
 			status: "retryable",
 			reason: "stripe_recording_skipped",
 		});
+	});
+
+	// capability: webhook.ingest
+	it("keeps a subscription Checkout whose customer another account holds as a skipped event", async () => {
+		const { calls, repositoryInputs, service } = serviceFixture({
+			webhookEvent: stripeEvent(
+				"checkout.session.completed",
+				checkoutSessionObject({
+					mode: "subscription",
+					payment_intent: undefined,
+					subscription: "sub_123",
+					metadata: {
+						billingAccountId: "user_1",
+						productKey: "premium_monthly",
+						purchaseKind: "subscription",
+					},
+				}),
+				"evt_plan",
+			),
+			linkError: new IdentityConflictError(
+				"customer_linked_to_other_account",
+				"provider customer identity mismatch for Stripe customer id cus_123",
+			),
+		});
+
+		const result = await service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+
+		expect(result).toEqual({
+			status: "skipped",
+			eventType: "checkout.session.completed",
+			entitlements: null,
+		});
+		expect(repositoryInputs).toEqual([
+			{
+				eventType: "checkout.session.completed",
+				externalEventId: "evt_plan",
+				transactionId: "sub_123",
+				purchaseKind: "subscription",
+				processingError:
+					"stripe_customer_linked_to_other_account: provider customer identity mismatch for Stripe customer id cus_123",
+				rawPayload: expect.objectContaining({ mode: "subscription" }),
+				replayStoreEventId: undefined,
+			},
+		]);
+		expect(calls.map((call) => (call as { method: string }).method)).toEqual([
+			"constructWebhookEvent",
+			"linkStripeProviderCustomer",
+			"recordStripeSkippedEvent",
+		]);
+	});
+
+	it("does not hide a failure that is not an identity conflict", async () => {
+		const { service } = serviceFixture({
+			webhookEvent: stripeEvent(
+				"checkout.session.completed",
+				checkoutSessionObject({
+					mode: "subscription",
+					metadata: {
+						billingAccountId: "user_1",
+						productKey: "premium_monthly",
+						purchaseKind: "subscription",
+					},
+				}),
+			),
+			linkError: new Error("connection reset"),
+		});
+
+		await expect(service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" })).rejects.toThrow(
+			"connection reset",
+		);
+	});
+
+	// capability: webhook.ingest
+	it("reports an event kept as skipped on an identity conflict at warn", async () => {
+		const warnings: Array<{ message: string; context?: Record<string, unknown> }> = [];
+		const logger: BillingLogger = {
+			info() {},
+			warn(message, context) {
+				warnings.push({ message, context });
+			},
+			error() {},
+		};
+		const { service } = serviceFixture({
+			config: { projectKey: "acme" } as never,
+			logger,
+			recordingSkipReason: "stripe_account_linked_to_other_customer",
+		});
+
+		const result = await service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+
+		expect(result).toEqual({
+			status: "skipped",
+			eventType: "checkout.session.completed",
+			entitlements: null,
+		});
+		expect(warnings).toEqual([
+			{
+				message: "Stripe event kept as skipped on an identity conflict",
+				context: {
+					provider: "stripe",
+					project: "acme",
+					eventId: "evt_123",
+					eventType: "checkout.session.completed",
+					reason: "stripe_account_linked_to_other_customer",
+				},
+			},
+		]);
+	});
+
+	it("stays quiet for skips that are not identity conflicts", async () => {
+		const warnings: unknown[] = [];
+		const { service } = serviceFixture({
+			logger: { info() {}, error() {}, warn: (message) => warnings.push(message) },
+			recordingResult: "skipped",
+		});
+
+		await service.handleWebhook({ rawBody: "{}", signatureHeader: "sig" });
+
+		expect(warnings).toEqual([]);
+	});
+
+	it("retries a replayed identity conflict under its reason", async () => {
+		const { service } = serviceFixture({
+			recordingSkipReason: "stripe_event_identity_changed",
+		});
+
+		const result = await service.replayStoreEvent(storeEvent());
+
+		expect(result).toEqual({ status: "retryable", reason: "stripe_event_identity_changed" });
 	});
 
 	// capability: refund.sync

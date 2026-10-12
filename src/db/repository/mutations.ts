@@ -6,6 +6,7 @@ import type {
 	PurchaseStatus,
 	SubscriptionStatus,
 } from "../../billing/types";
+import { IdentityConflictError } from "./identity-conflicts";
 import { executeOne, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -195,7 +196,7 @@ export async function upsertSubscription(
 	`,
 	);
 	if (row === null) {
-		throw new Error(input.identityError);
+		throw new IdentityConflictError("subscription_identity_conflict", input.identityError);
 	}
 	return row.id;
 }
@@ -386,7 +387,7 @@ export async function upsertPurchase(
 	`,
 	);
 	if (row === null) {
-		throw new Error(input.identityError);
+		throw new IdentityConflictError("purchase_identity_conflict", input.identityError);
 	}
 	return row.id;
 }

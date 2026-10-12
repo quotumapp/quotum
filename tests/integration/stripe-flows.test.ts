@@ -4178,6 +4178,568 @@ localDescribe("Stripe route flows integration", () => {
 			auto_renew: false,
 		});
 	});
+
+	// A signed event whose identities contradict stored ones must be acknowledged. Answering 500
+	// makes Stripe redeliver the same body for days, and no redelivery can ever apply it. The event
+	// is kept as skipped, nothing it carried is applied, and the replay worker applies it once an
+	// operator has fixed the stored identity.
+	function identityConflictFixture(event: ReturnType<typeof stripeEvent>) {
+		return createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			stripeEvent: event,
+		});
+	}
+
+	/** A paid one-time purchase of echo_credits_10 by another billing account. */
+	function otherAccountPayment(overrides: Record<string, unknown> = {}) {
+		return stripeCheckoutSessionObject({
+			id: "cs_other",
+			client_reference_id: "other_user",
+			metadata: {
+				billingAccountId: "other_user",
+				externalPriceId: "price_credits_10",
+				externalProductId: "prod_stripe_credits_10",
+				productKey: "echo_credits_10",
+				purchaseKind: "consumable",
+			},
+			payment_intent: {
+				id: "pi_other",
+				latest_charge: "ch_other",
+				metadata: { billingAccountId: "other_user" },
+				object: "payment_intent",
+			},
+			...overrides,
+		});
+	}
+
+	/** What an event can change about identities, balances and deliveries, for before-and-after. */
+	async function recordedState(sql: SQL) {
+		const rows = async (query: Promise<Array<Record<string, unknown>>>) => [...(await query)];
+		return {
+			customers: await rows(
+				sql`SELECT billing_account_id FROM customers ORDER BY billing_account_id`,
+			),
+			links: await rows(sql`
+				SELECT c.billing_account_id, pc.external_customer_id
+				FROM provider_customers pc JOIN customers c ON c.id = pc.customer_id
+				ORDER BY c.billing_account_id, pc.external_customer_id
+			`),
+			purchases: await rows(
+				sql`SELECT transaction_id, status, reversed_amount::text FROM purchases ORDER BY transaction_id`,
+			),
+			subscriptions: await rows(
+				sql`SELECT external_subscription_id, status FROM subscriptions ORDER BY external_subscription_id`,
+			),
+			allocations: await rows(
+				sql`SELECT quantity::text, consumed_quantity::text, reversed_quantity::text FROM balance_allocations ORDER BY id`,
+			),
+			entitlements: await rows(
+				sql`SELECT entitlement_key, active FROM entitlements ORDER BY entitlement_key`,
+			),
+			deliveries: await rows(
+				sql`SELECT idempotency_key FROM projection_sync_jobs ORDER BY idempotency_key`,
+			),
+		};
+	}
+
+	async function storedStripeEvent(eventId: string) {
+		const rows = await context.sql<
+			Array<{
+				processing_status: string;
+				processing_error: string | null;
+				transaction_id: string | null;
+			}>
+		>`
+			SELECT processing_status, processing_error, transaction_id FROM store_events
+			WHERE provider = 'stripe' AND external_event_id = ${eventId}
+		`;
+		expect(rows).toHaveLength(1);
+		return { ...rows[0] };
+	}
+
+	async function replayStripeEvents(fixture: ReturnType<typeof createIntegrationApp>) {
+		return await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: {
+				apple: null,
+				google: null,
+				stripe: fixture.projectProviderServices.acme?.stripeBillingService ?? null,
+			},
+		});
+	}
+
+	// capability: webhook.ingest
+	it("keeps a payment for a Stripe customer another account holds as a skipped event", async () => {
+		const fixture = identityConflictFixture(
+			stripeEvent("checkout.session.completed", stripeCheckoutSessionObject(), "evt_owner"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_owner" })).status).toBe(200);
+		const before = await recordedState(context.sql);
+
+		fixture.stripe.setWebhookEvent(
+			stripeEvent("checkout.session.completed", otherAccountPayment(), "evt_other"),
+		);
+		const response = await postStripeWebhook(fixture, { id: "evt_other" });
+
+		expect(response.status).toBe(200);
+		expect(await response.json()).toEqual({
+			success: true,
+			data: { status: "skipped", eventType: "checkout.session.completed", entitlements: null },
+		});
+		expect(await storedStripeEvent("evt_other")).toEqual({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_customer_linked_to_other_account: provider customer identity mismatch for Stripe customer id cus_integration",
+			transaction_id: "pi_other",
+		});
+		// No account, link, purchase, balance or delivery came from the event.
+		expect(await recordedState(context.sql)).toEqual(before);
+		expect(await skippedStripeEvents(context.sql)).toEqual(["evt_other"]);
+
+		// An operator removes the link that does not belong; the replay then applies the event.
+		await context.sql`DELETE FROM provider_customers WHERE external_customer_id = 'cus_integration'`;
+		const run = await replayStripeEvents(fixture);
+
+		expect(run).toMatchObject({ claimed: 1, processed: 1, failed: 0 });
+		expect(await storedStripeEvent("evt_other")).toMatchObject({ processing_status: "processed" });
+		const state = await recordedState(context.sql);
+		expect(state.links).toEqual([
+			{ billing_account_id: "other_user", external_customer_id: "cus_integration" },
+		]);
+		expect(state.purchases.map((purchase) => purchase.transaction_id)).toEqual([
+			"pi_integration",
+			"pi_other",
+		]);
+	});
+
+	// capability: webhook.ingest
+	it("keeps a payment naming a second Stripe customer for the account as a skipped event", async () => {
+		const fixture = identityConflictFixture(
+			stripeEvent("checkout.session.completed", stripeCheckoutSessionObject(), "evt_owner"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_owner" })).status).toBe(200);
+		const before = await recordedState(context.sql);
+
+		fixture.stripe.setWebhookEvent(
+			stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({
+					id: "cs_second_customer",
+					customer: "cus_second",
+					payment_intent: {
+						id: "pi_second",
+						latest_charge: "ch_second",
+						metadata: { billingAccountId: "integration_user" },
+						object: "payment_intent",
+					},
+				}),
+				"evt_second_customer",
+			),
+		);
+		const response = await postStripeWebhook(fixture, { id: "evt_second_customer" });
+
+		expect(response.status).toBe(200);
+		expect((await response.json()).data).toMatchObject({ status: "skipped" });
+		expect(await storedStripeEvent("evt_second_customer")).toEqual({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_account_linked_to_other_customer: billing account is linked to Stripe customer cus_integration; the event names Stripe customer cus_second",
+			transaction_id: "pi_second",
+		});
+		expect(await recordedState(context.sql)).toEqual(before);
+
+		// An operator removes the link to the customer the account no longer uses.
+		await context.sql`DELETE FROM provider_customers WHERE external_customer_id = 'cus_integration'`;
+		const run = await replayStripeEvents(fixture);
+
+		expect(run).toMatchObject({ claimed: 1, processed: 1, failed: 0 });
+		const state = await recordedState(context.sql);
+		expect(state.links).toEqual([
+			{ billing_account_id: "integration_user", external_customer_id: "cus_second" },
+		]);
+		expect(state.purchases.map((purchase) => purchase.transaction_id)).toEqual([
+			"pi_integration",
+			"pi_second",
+		]);
+	});
+
+	// capability: webhook.ingest
+	it("acknowledges a payment event id redelivered for another payment", async () => {
+		const fixture = identityConflictFixture(
+			stripeEvent("checkout.session.completed", stripeCheckoutSessionObject(), "evt_same"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_same" })).status).toBe(200);
+		const before = await recordedState(context.sql);
+		const stored = await storedStripeEvent("evt_same");
+
+		fixture.stripe.setWebhookEvent(
+			stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({
+					payment_intent: {
+						id: "pi_changed",
+						latest_charge: "ch_changed",
+						metadata: { billingAccountId: "integration_user" },
+						object: "payment_intent",
+					},
+				}),
+				"evt_same",
+			),
+		);
+		const response = await postStripeWebhook(fixture, { id: "evt_same" });
+
+		expect(response.status).toBe(200);
+		expect((await response.json()).data).toMatchObject({
+			status: "skipped",
+			eventType: "checkout.session.completed",
+		});
+		// The original record is never overwritten, and the changed payment is not applied.
+		expect(await storedStripeEvent("evt_same")).toEqual(stored);
+		expect(stored).toMatchObject({
+			processing_status: "processed",
+			transaction_id: "pi_integration",
+		});
+		expect(await recordedState(context.sql)).toEqual(before);
+	});
+
+	// capability: refund.sync
+	it("acknowledges a refund event id redelivered for another refund", async () => {
+		const fixture = identityConflictFixture(
+			stripeEvent("checkout.session.completed", stripeCheckoutSessionObject(), "evt_checkout"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_checkout" })).status).toBe(200);
+		fixture.stripe.setWebhookEvent(
+			stripeEvent(
+				"refund.created",
+				stripeRefundObject({ id: "re_first", amount: 100 }),
+				"evt_refund",
+			),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_refund" })).status).toBe(200);
+		const before = await recordedState(context.sql);
+		const stored = await storedStripeEvent("evt_refund");
+
+		fixture.stripe.setWebhookEvent(
+			stripeEvent(
+				"refund.created",
+				stripeRefundObject({ id: "re_second", amount: 100 }),
+				"evt_refund",
+			),
+		);
+		const response = await postStripeWebhook(fixture, { id: "evt_refund" });
+
+		expect(response.status).toBe(200);
+		expect((await response.json()).data).toMatchObject({ status: "skipped" });
+		expect(stored).toMatchObject({ processing_status: "processed", transaction_id: "re_first" });
+		expect(await storedStripeEvent("evt_refund")).toEqual(stored);
+		expect(await recordedState(context.sql)).toEqual(before);
+	});
+
+	// capability: webhook.ingest
+	it("keeps a payment already recorded for another account as a skipped event", async () => {
+		const fixture = identityConflictFixture(
+			stripeEvent("checkout.session.completed", stripeCheckoutSessionObject(), "evt_owner"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_owner" })).status).toBe(200);
+		const before = await recordedState(context.sql);
+
+		// Another account and a customer Quotum has not seen, for the payment that is already recorded.
+		fixture.stripe.setWebhookEvent(
+			stripeEvent(
+				"checkout.session.completed",
+				otherAccountPayment({
+					customer: "cus_other",
+					payment_intent: {
+						id: "pi_integration",
+						latest_charge: "ch_integration",
+						metadata: { billingAccountId: "other_user" },
+						object: "payment_intent",
+					},
+				}),
+				"evt_payment_elsewhere",
+			),
+		);
+		const response = await postStripeWebhook(fixture, { id: "evt_payment_elsewhere" });
+
+		expect(response.status).toBe(200);
+		expect((await response.json()).data).toMatchObject({ status: "skipped" });
+		expect(await storedStripeEvent("evt_payment_elsewhere")).toEqual({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_purchase_identity_conflict: Stripe purchase identity mismatch for transaction pi_integration",
+			transaction_id: "pi_integration",
+		});
+		// The conflict rolled back the account and the customer link the event had started to create.
+		expect(await recordedState(context.sql)).toEqual(before);
+	});
+
+	/** An active subscription for the seeded account, from an event the service verified. */
+	async function startedSubscription(service: StripeBillingService) {
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const period = stripeSubscriptionPeriod(start, start + 30 * 86_400);
+		const created = await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.created",
+				stripeSubscriptionObject(period),
+				start + 100,
+				"evt_sub_first",
+			),
+		);
+		expect(created).toMatchObject({ status: "processed" });
+		return { start, period };
+	}
+
+	// capability: subscription.sync
+	it("keeps a subscription event for a Stripe customer another account holds as a skipped event", async () => {
+		const service = createVerifiedEventService();
+		const { start, period } = await startedSubscription(service);
+		const before = await recordedState(context.sql);
+
+		const result = await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({
+					id: "sub_other",
+					metadata: {
+						billingAccountId: "other_user",
+						externalPriceId: "price_premium_monthly",
+						externalProductId: "prod_stripe_premium",
+						productKey: "premium_monthly",
+						purchaseKind: "subscription",
+					},
+					...period,
+				}),
+				start + 200,
+				"evt_sub_other",
+			),
+		);
+
+		expect(result).toEqual({
+			status: "skipped",
+			eventType: "customer.subscription.updated",
+			entitlements: null,
+		});
+		expect(await storedStripeEvent("evt_sub_other")).toMatchObject({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_customer_linked_to_other_account: provider customer identity mismatch for Stripe customer id cus_integration",
+		});
+		expect(await recordedState(context.sql)).toEqual(before);
+	});
+
+	// capability: subscription.sync
+	it("keeps a subscription event naming a second Stripe customer as a skipped event and replays it", async () => {
+		const service = createVerifiedEventService();
+		const { start, period } = await startedSubscription(service);
+		const before = await recordedState(context.sql);
+
+		const result = await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({ customer: "cus_second", ...period }),
+				start + 200,
+				"evt_sub_second_customer",
+			),
+		);
+
+		expect(result).toMatchObject({ status: "skipped" });
+		expect(await storedStripeEvent("evt_sub_second_customer")).toMatchObject({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_account_linked_to_other_customer: billing account is linked to Stripe customer cus_integration; the event names Stripe customer cus_second",
+		});
+		expect(await recordedState(context.sql)).toEqual(before);
+
+		await context.sql`DELETE FROM provider_customers WHERE external_customer_id = 'cus_integration'`;
+		const run = await runStoreEventReplayWorkerOnce({
+			env: context.env,
+			repository: context.repository,
+			providers: { apple: null, google: null, stripe: service },
+		});
+
+		expect(run).toMatchObject({ claimed: 1, processed: 1, failed: 0 });
+		expect((await recordedState(context.sql)).links).toEqual([
+			{ billing_account_id: "integration_user", external_customer_id: "cus_second" },
+		]);
+	});
+
+	// capability: subscription.sync
+	it("keeps a subscription event for a subscription another account holds as a skipped event", async () => {
+		const service = createVerifiedEventService();
+		const { start, period } = await startedSubscription(service);
+		const before = await recordedState(context.sql);
+
+		const result = await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"customer.subscription.updated",
+				stripeSubscriptionObject({
+					customer: "cus_elsewhere",
+					metadata: {
+						billingAccountId: "other_user",
+						externalPriceId: "price_premium_monthly",
+						externalProductId: "prod_stripe_premium",
+						productKey: "premium_monthly",
+						purchaseKind: "subscription",
+					},
+					...period,
+				}),
+				start + 200,
+				"evt_sub_elsewhere",
+			),
+		);
+
+		expect(result).toMatchObject({ status: "skipped" });
+		expect(await storedStripeEvent("evt_sub_elsewhere")).toMatchObject({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_subscription_identity_conflict: Stripe subscription identity mismatch for subscription sub_1",
+		});
+		expect(await recordedState(context.sql)).toEqual(before);
+	});
+
+	// capability: subscription.sync
+	it("keeps an invoice for a subscription another account holds as a skipped event", async () => {
+		const service = createVerifiedEventService();
+		const { start } = await startedSubscription(service);
+		const before = await recordedState(context.sql);
+		const period = { start, end: start + 30 * 86_400 };
+
+		const result = await service.handleVerifiedAppEvent(
+			verifiedStripeEvent(
+				"invoice.paid",
+				stripeSubscriptionInvoiceObject(period, {
+					customer: "cus_elsewhere",
+					parent: {
+						subscription_details: {
+							subscription: "sub_1",
+							metadata: {
+								billingAccountId: "other_user",
+								externalProductId: "prod_stripe_premium",
+								externalPriceId: "price_premium_monthly",
+								productKey: "premium_monthly",
+								purchaseKind: "subscription",
+							},
+						},
+					},
+				}),
+				start + 200,
+				"evt_invoice_elsewhere",
+			),
+		);
+
+		expect(result).toMatchObject({ status: "skipped", eventType: "invoice.paid" });
+		expect(await storedStripeEvent("evt_invoice_elsewhere")).toMatchObject({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_subscription_identity_conflict: Stripe subscription identity mismatch for subscription sub_1",
+		});
+		expect(await recordedState(context.sql)).toEqual(before);
+	});
+
+	// capability: webhook.ingest
+	it("keeps a subscription Checkout for a Stripe customer another account holds as a skipped event", async () => {
+		const fixture = identityConflictFixture(
+			stripeEvent("checkout.session.completed", stripeCheckoutSessionObject(), "evt_owner"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_owner" })).status).toBe(200);
+		const before = await recordedState(context.sql);
+
+		fixture.stripe.setWebhookEvent(
+			stripeEvent(
+				"checkout.session.completed",
+				stripeCheckoutSessionObject({
+					id: "cs_plan_other",
+					mode: "subscription",
+					client_reference_id: "other_user",
+					subscription: "sub_plan_other",
+					metadata: {
+						billingAccountId: "other_user",
+						productKey: "premium_monthly",
+						purchaseKind: "subscription",
+					},
+				}),
+				"evt_plan_other",
+			),
+		);
+		const response = await postStripeWebhook(fixture, { id: "evt_plan_other" });
+
+		expect(response.status).toBe(200);
+		expect((await response.json()).data).toMatchObject({ status: "skipped" });
+		expect(await storedStripeEvent("evt_plan_other")).toMatchObject({
+			processing_status: "skipped",
+			processing_error:
+				"stripe_customer_linked_to_other_account: provider customer identity mismatch for Stripe customer id cus_integration",
+		});
+		expect(await recordedState(context.sql)).toEqual(before);
+
+		await context.sql`DELETE FROM provider_customers WHERE external_customer_id = 'cus_integration'`;
+		const run = await replayStripeEvents(fixture);
+
+		expect(run).toMatchObject({ claimed: 1, processed: 1, failed: 0 });
+		expect((await recordedState(context.sql)).links).toEqual([
+			{ billing_account_id: "other_user", external_customer_id: "cus_integration" },
+		]);
+	});
+
+	// capability: subscription.sync
+	it("keeps failing a reconciliation read that contradicts a stored identity", async () => {
+		// A live read has no event id and is never redelivered: the worker retries and reports it.
+		const start = Math.floor(Date.now() / 1000) - 86_400;
+		const period = stripeSubscriptionPeriod(start, start + 30 * 86_400);
+		const fake = createFakeStripeBillingClient();
+		let remote: Record<string, unknown> = stripeSubscriptionObject(period);
+		const service = new StripeBillingService({
+			config: {
+				projectKey: "acme",
+				checkoutSuccessUrl:
+					"https://app.integration.test/billing/success?session_id={CHECKOUT_SESSION_ID}",
+				checkoutCancelUrl: "https://app.integration.test/billing",
+				portalReturnUrl: "https://app.integration.test/account/billing",
+			},
+			client: { ...fake.client, retrieveSubscription: async () => remote as never },
+			repository: context.repository.forProject(integrationProjectContext("acme")),
+		});
+		await service.handleVerifiedAppEvent(
+			verifiedStripeEvent("customer.subscription.updated", remote, start + 100, "evt_live"),
+		);
+		const [row] = await context.sql<
+			Array<Parameters<StripeBillingService["reconcileSubscription"]>[0]>
+		>`SELECT * FROM subscriptions WHERE provider = 'stripe' AND external_subscription_id = 'sub_1'`;
+		if (!row) throw new Error("Missing subscription");
+		const before = await recordedState(context.sql);
+
+		remote = stripeSubscriptionObject({ customer: "cus_second", ...period });
+		await expect(service.reconcileSubscription(row)).rejects.toThrow(
+			"billing account is linked to Stripe customer cus_integration",
+		);
+
+		expect(await recordedState(context.sql)).toEqual(before);
+		expect(await skippedStripeEvents(context.sql)).toEqual([]);
+		const stored = await context.sql`SELECT id FROM store_events WHERE external_event_id IS NULL`;
+		expect(stored).toHaveLength(0);
+	});
+
+	// capability: webhook.ingest
+	it("keeps retrying a conflicting event under its reason until the identity is fixed", async () => {
+		const fixture = identityConflictFixture(
+			stripeEvent("checkout.session.completed", stripeCheckoutSessionObject(), "evt_owner"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_owner" })).status).toBe(200);
+		fixture.stripe.setWebhookEvent(
+			stripeEvent("checkout.session.completed", otherAccountPayment(), "evt_other"),
+		);
+		expect((await postStripeWebhook(fixture, { id: "evt_other" })).status).toBe(200);
+
+		const run = await replayStripeEvents(fixture);
+
+		expect(run).toMatchObject({ claimed: 1, retryable: 1, processed: 0 });
+		expect(await storedStripeEvent("evt_other")).toMatchObject({
+			processing_status: "pending",
+			processing_error: "stripe_customer_linked_to_other_account",
+		});
+	});
 });
 
 function createVerifiedEventService(

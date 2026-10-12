@@ -182,6 +182,7 @@ export function createApp({
 				googlePlayBillingService,
 				stripeBillingService,
 			},
+			logger: billingLogger,
 		});
 	const providerServices = projectProviderServiceResolver(providerRegistry);
 	const capabilityReads =

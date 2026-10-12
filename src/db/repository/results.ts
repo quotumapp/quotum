@@ -3,7 +3,7 @@ import type {
 	GooglePlayRecordingResult,
 	StoreKitRecordingResult,
 	StripeRecordingResult,
-	StripeReversalSkipReason,
+	StripeSkipReason,
 } from "./types";
 
 export function skippedStoreKitRecordingResult(): StoreKitRecordingResult {
@@ -28,9 +28,7 @@ export function processedGooglePlayRecordingResult(
 	return { processingStatus: "processed", billingAccountId, entitlements };
 }
 
-export function skippedStripeRecordingResult(
-	skipReason?: StripeReversalSkipReason,
-): StripeRecordingResult {
+export function skippedStripeRecordingResult(skipReason?: StripeSkipReason): StripeRecordingResult {
 	return {
 		processingStatus: "skipped",
 		billingAccountId: null,
