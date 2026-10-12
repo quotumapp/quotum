@@ -14,6 +14,7 @@ import type { ProjectInstanceContext } from "../projects/context";
 import { maxExpirySeconds } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
+import { operatorKeyPaths } from "../shared/operator-key-paths";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/promotion-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
@@ -275,9 +276,7 @@ export function registerPromotionRoutes({
 	rateLimitKeyOptions,
 	registerPostAuthGuard,
 }: PromotionRoutesDependencies): void {
-	registerPostAuthGuard(
-		operatorApiKeyGuard(operatorApiKey, (path) => path.startsWith("/v1/admin/promotion")),
-	);
+	registerPostAuthGuard(operatorApiKeyGuard(operatorApiKey, operatorKeyPaths.promotions));
 	// Code entry is limited like purchase verification so codes cannot be guessed; ledger reads are not.
 	const codeEntryLimit = projectScopedRateLimitGuard({
 		limiter: validationLimiter,

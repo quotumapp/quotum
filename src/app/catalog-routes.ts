@@ -16,6 +16,7 @@ import {
 } from "../shared/cadence";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
 import { maxInt4, minInt4 } from "../shared/input-bounds";
+import { operatorKeyPaths } from "../shared/operator-key-paths";
 import { operatorApiKeyGuard } from "./admin-routes";
 import * as responses from "./contracts/catalog-responses";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
@@ -323,7 +324,7 @@ export function registerCatalogRoutes({
 	registerPostAuthGuard(
 		// Reading the published catalog needs project authentication only; every other catalog
 		// route, reads included, stays behind the operator key.
-		operatorApiKeyGuard(operatorApiKey, (p) => /^\/v1\/admin\/catalog\/.+$/.test(p)),
+		operatorApiKeyGuard(operatorApiKey, operatorKeyPaths.catalog),
 	);
 
 	app.get(

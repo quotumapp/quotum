@@ -1,6 +1,7 @@
 import type { Elysia } from "elysia";
 import { z } from "zod";
 import { bodyTooLargeError, DEFAULT_BODY_LIMIT_BYTES, readCappedText } from "./body-limit";
+import { isOperatorKeyPath } from "./operator-key-paths";
 
 /**
  * Domain-neutral HTTP plumbing shared by the /v1 staff surface and the /api merchant surface.
@@ -86,22 +87,6 @@ export async function lenientJsonParser({ request }: { request: Request }): Prom
 	}
 }
 
-const operatorRequiredPathPattern =
-	/^\/v1\/admin\/(billing-accounts\/[^/]+\/provider-operations\/[^/]+\/reconcile|store-events\/[^/]+\/replay|projection-jobs\/[^/]+\/retry|reconciliation\/subscriptions\/run|metrics)$/;
-
-function operatorRequiredPath(path: string): boolean {
-	return (
-		path.startsWith("/v1/admin/catalog/") ||
-		path.startsWith("/v1/admin/contracts/") ||
-		path.startsWith("/v1/admin/catalog-migrations/") ||
-		path.startsWith("/v1/admin/auto-topups/") ||
-		path.startsWith("/v1/admin/promotion") ||
-		path.startsWith("/v1/admin/operator-grants/") ||
-		path.startsWith("/v1/admin/administrative-debits/") ||
-		operatorRequiredPathPattern.test(path)
-	);
-}
-
 const SERVICE_TOKEN_ONLY_API_PATHS = new Set([
 	"/api/platform/config",
 	"/api/platform/signup-intent",
@@ -123,7 +108,7 @@ export function defaultSecurity(
 	}
 	if (path.startsWith("/v1/")) {
 		const security: Record<string, string[]>[] = [{ projectKey: [] }, { gatewayProject: [] }];
-		if (operatorRequiredPath(path))
+		if (isOperatorKeyPath(path))
 			for (const scheme of security) Object.assign(scheme, { operatorKey: [] });
 		return security;
 	}

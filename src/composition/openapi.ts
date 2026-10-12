@@ -340,6 +340,8 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 			route.path.endsWith("/changes") ||
 			route.path.endsWith("/promotion-redemptions") ||
 			route.path.endsWith("/promotion-redemptions/:redemptionId/revoke") ||
+			route.path.endsWith("/promotion-redemptions/:redemptionId/apple-signatures") ||
+			route.path.endsWith("/catalog/bindings/adopt") ||
 			route.path.endsWith("/trials") ||
 			route.path.endsWith("/trials/:trialId/end");
 		if (actor)
