@@ -508,12 +508,14 @@ processed, without a log line of its own.
 | `stripe_event_identity_changed` | The event id was already recorded with another customer, product, payment or event type. |
 
 The first four events are retried by the event replay worker with backoff, and each retry stores
-the reason as `processingError`. A retry applies the event from its stored payload only when the
-stored identity no longer contradicts it, and Quotum has no operation that changes a stored link:
-a customer link, once written, stays. Such an event therefore ends `failed` after
-`BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` attempts and nothing it carried is applied. Settle the
-payment in Stripe instead: refund it, or take it again through a Quotum checkout for the intended
-billing account, which uses that account's own Stripe customer.
+the reason as `processingError`. An event that is never fixed ends `failed` after
+`BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` attempts and nothing it carried is applied. Quotum never
+changes a link on its own. For the two link conflicts an operator can
+[unlink the Stripe customer](#unlinking-a-stripe-customer); the next retry, or
+`POST /v1/admin/store-events/:eventId/replay`, then applies the event from its stored payload. A
+purchase or subscription conflict has no such repair. Settle that payment in Stripe: refund it, or
+take it again through a Quotum checkout for the intended billing account, which uses that account's
+own Stripe customer.
 
 A `stripe_event_identity_changed` delivery keeps the original event untouched: its stored row stays
 `processed` with the identities it was applied under, and the changed delivery is only logged,
@@ -537,6 +539,80 @@ for Apple, Google and Stripe. Paddle uses the committed sandbox connection and i
 Stripe App OAuth events instead use `/v1/stripe-app/webhooks/test` or `/v1/stripe-app/webhooks/live`
 when OAuth is enabled. These signed app-level events resolve the connection by Stripe account and
 mode; they are not addressed by a project key.
+
+### Unlinking a Stripe customer
+
+A billing account has one Stripe customer, and the link is written once: by the first Quotum
+checkout, portal session or payment setup for the account, or by the first verified event that
+names both. An operator can remove it when it no longer fits. That is the repair for the two link
+conflicts above, and for an account whose Stripe customer was deleted in Stripe.
+
+```http
+POST /v1/admin/provider-customer-unlinks/:billingAccountId
+GET  /v1/admin/provider-customer-unlinks/:billingAccountId
+```
+
+Both need the operator key, so a read-only credential is refused. The `POST` also needs
+`X-Billing-Actor` and an `Idempotency-Key`, and its body names the link to remove:
+
+```json
+{ "provider": "stripe", "externalCustomerId": "cus_123", "reason": "Stripe customer was deleted" }
+```
+
+`provider` accepts only `stripe`, and `reason` is 1-500 characters. `externalCustomerId` must be
+the customer the account is linked to now, so a link that changed since the operator looked is not
+removed. `GET /v1/admin/customers/by-billing-account/:billingAccountId` shows the current link
+under `providerCustomers`.
+
+| Answer | When |
+| --- | --- |
+| `201` with the receipt | The link was removed. |
+| `200` with `duplicate: true` | The same `Idempotency-Key` was replayed with the same body. |
+| `404 BILLING_ACCOUNT_NOT_FOUND` | The account does not exist. It is not created. |
+| `404 PROVIDER_CUSTOMER_LINK_NOT_FOUND` | The account has no Stripe customer. |
+| `409 PROVIDER_CUSTOMER_LINK_MISMATCH` | The account is linked to another customer, named in `details.externalCustomerId`. |
+| `409 PROVIDER_CUSTOMER_LINK_IN_USE` | Work listed below is still open; `details.blockers` gives each `kind` and its `count`. |
+| `409 IDEMPOTENCY_CONFLICT` | The `Idempotency-Key` was used for this account with another body. |
+
+The unlink removes the link and nothing else. Purchases, subscriptions, balances and entitlements
+recorded for the account stay, and no projection is sent. It never points the account at another
+customer: the next event or checkout for the account writes the link under the same checks as a
+first one. The receipt keeps the removed customer id, its Stripe account, when the link was
+written, the actor and the reason, and is never changed; the `GET` lists an account's receipts
+newest first (`limit` up to 100, default 25, and `cursor`).
+
+The link decides which Stripe customer the account's work charges and reports through, so the
+unlink is refused while any of this work is open:
+
+| Blocker `kind` | What holds the link |
+| --- | --- |
+| `subscription` | A Stripe subscription in `active`, `grace_period` or `billing_retry`. One that Stripe has ended (`cancelled`, `expired`) does not hold it, even with paid time left. |
+| `provider_operation` | A Stripe provider operation in `prepared`, `in_flight`, `reconciling` or `requires_review`. |
+| `payment_setup` | A hosted payment setup that is neither `completed` nor `expired`. |
+| `auto_topup_job` | An automatic top-up job in `pending` or `processing`. |
+| `usage_invoice` | A usage invoice period or adjustment in `pending` or `processing`. One that ended `failed` does not hold it. |
+
+An automatic top-up policy does not hold the link and stays in place. A top-up that comes due while
+the account has no Stripe customer ends `provider_action_required`, and later ones charge the
+customer the account is linked to by then.
+
+After the unlink:
+
+- A skipped or failed event for the account applies on the replay worker's next retry, or on
+  `POST /v1/admin/store-events/:eventId/replay`.
+- The next Quotum checkout, portal session or payment setup creates a new Stripe customer for the
+  account. Stripe answers a repeated customer creation with the first result for 24 hours, so the
+  creation request carries the account's unlink count and Stripe treats it as a new request. An
+  account that was never unlinked sends the request it always sent.
+- A later Stripe event that names the removed customer is handled like any other: a purchase or
+  subscription it carries links the customer, under the rules above, to the account the event
+  resolves to.
+
+An account whose Stripe customer was deleted shows up as failing checkouts. Stripe refuses the
+stored customer id, the request answers `500 INTERNAL_ERROR`, and the log carries Stripe's
+`No such customer` error; nothing changes the link on its own. Deleting a customer in Stripe also
+cancels its subscriptions. Once those events are recorded, unlink the customer and the next
+checkout starts a new one.
 
 ## Headless connection setup
 

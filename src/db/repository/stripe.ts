@@ -810,6 +810,24 @@ export class StripeBillingRepository extends RepositoryModule {
 		});
 	}
 
+	async countStripeCustomerUnlinks(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string },
+	): Promise<number> {
+		const row = await executeOne<{ count: number }>(
+			this.database,
+			drizzleSql`
+				SELECT count(*)::int AS count
+				FROM provider_customer_unlinks u
+				JOIN customers c ON c.project_id = u.project_id AND c.id = u.customer_id
+				WHERE u.project_id = ${project.projectInstanceId}
+					AND c.billing_account_id = ${input.billingAccountId}
+					AND u.provider = 'stripe'
+			`,
+		);
+		return Number(row?.count ?? 0);
+	}
+
 	async linkStripeProviderCustomer(
 		project: ProjectInstanceContext,
 		input: LinkStripeProviderCustomerInput,

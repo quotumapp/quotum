@@ -142,6 +142,7 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 		billingAccountId: string;
 		email: string | null;
 		idempotencyScope?: string | null;
+		linkGeneration?: number;
 	}): Promise<{ id: string }>;
 	createCheckoutSession(
 		params: StripeCheckoutSessionCreateParams,
@@ -308,6 +309,9 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 	}): Promise<CommercialActionExecutionResult>;
 
 	getStripeProviderCustomer(input: GetStripeProviderCustomerInput): Promise<string | null>;
+
+	/** How many times an operator has unlinked the account's Stripe customer. */
+	countStripeCustomerUnlinks?(input: { billingAccountId: string }): Promise<number>;
 
 	linkStripeProviderCustomer(input: LinkStripeProviderCustomerInput): Promise<string>;
 
@@ -2183,10 +2187,13 @@ export class StripeBillingService
 			return existingCustomerId;
 		}
 
+		const linkGeneration =
+			(await this.dependencies.repository.countStripeCustomerUnlinks?.({ billingAccountId })) ?? 0;
 		const customer = await this.dependencies.client.createCustomer({
 			billingAccountId,
 			email,
 			idempotencyScope: this.dependencies.config.projectKey ?? null,
+			...(linkGeneration > 0 ? { linkGeneration } : {}),
 		});
 		return this.dependencies.repository.linkStripeProviderCustomer({
 			billingAccountId,

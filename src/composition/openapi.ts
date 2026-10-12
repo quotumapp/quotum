@@ -331,11 +331,13 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 				!route.path.endsWith("/entities")) ||
 			(tags.includes("promotions") && route.path.startsWith("/v1/admin/")) ||
 			tags.includes("balance-adjustments") ||
+			tags.includes("provider-customers") ||
 			route.path.endsWith("/corrections");
 		const idempotent =
 			route.path.endsWith("/providers/paddle/checkout-sessions") ||
 			(tags.includes("metering") && !route.path.endsWith("/check")) ||
 			tags.includes("balance-adjustments") ||
+			tags.includes("provider-customers") ||
 			route.path.endsWith("/commercial-actions") ||
 			route.path.endsWith("/changes") ||
 			route.path.endsWith("/promotion-redemptions") ||

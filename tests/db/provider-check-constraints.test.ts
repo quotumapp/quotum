@@ -14,6 +14,7 @@ const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 const providerTables = [
 	"store_products",
 	"provider_customers",
+	"provider_customer_unlinks",
 	"provider_operations",
 	"subscriptions",
 	"purchases",
@@ -39,6 +40,7 @@ const drizzleMirroredTables = [
 	"payment_setup_sessions",
 	"credit_grant_provider_objects",
 	"provider_customers",
+	"provider_customer_unlinks",
 	"purchases",
 	"store_events",
 	"store_products",

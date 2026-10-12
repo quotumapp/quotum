@@ -71394,6 +71394,659 @@
         ]
       }
     },
+    "/v1/admin/provider-customer-unlinks/{billingAccountId}": {
+      "get": {
+        "operationId": "getV1AdminProviderCustomerUnlinksByBillingAccountId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "actor": {
+                            "type": "string"
+                          },
+                          "billingAccountId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "externalCustomerId": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "linkedAt": {
+                            "type": "string"
+                          },
+                          "provider": {
+                            "enum": [
+                              "stripe"
+                            ],
+                            "type": "string"
+                          },
+                          "providerAccountId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "billingAccountId",
+                          "provider",
+                          "externalCustomerId",
+                          "providerAccountId",
+                          "linkedAt",
+                          "actor",
+                          "reason",
+                          "createdAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "pagination": {
+                      "properties": {
+                        "nextCursor": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "nextCursor"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "pagination"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "GET /v1/admin/provider-customer-unlinks/{billingAccountId}",
+        "tags": [
+          "provider-customers"
+        ]
+      },
+      "post": {
+        "operationId": "postV1AdminProviderCustomerUnlinksByBillingAccountId",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Billing-Actor",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "externalCustomerId": {
+                    "maxLength": 255,
+                    "pattern": "^cus_[A-Za-z0-9_]+$",
+                    "type": "string"
+                  },
+                  "provider": {
+                    "enum": [
+                      "stripe"
+                    ],
+                    "type": "string"
+                  },
+                  "reason": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "externalCustomerId",
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "duplicate": {
+                          "type": "boolean"
+                        },
+                        "unlink": {
+                          "properties": {
+                            "actor": {
+                              "type": "string"
+                            },
+                            "billingAccountId": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string"
+                            },
+                            "externalCustomerId": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "linkedAt": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "providerAccountId": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "billingAccountId",
+                            "provider",
+                            "externalCustomerId",
+                            "providerAccountId",
+                            "linkedAt",
+                            "actor",
+                            "reason",
+                            "createdAt"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "duplicate",
+                        "unlink"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "duplicate": {
+                          "type": "boolean"
+                        },
+                        "unlink": {
+                          "properties": {
+                            "actor": {
+                              "type": "string"
+                            },
+                            "billingAccountId": {
+                              "type": "string"
+                            },
+                            "createdAt": {
+                              "type": "string"
+                            },
+                            "externalCustomerId": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "linkedAt": {
+                              "type": "string"
+                            },
+                            "provider": {
+                              "enum": [
+                                "stripe"
+                              ],
+                              "type": "string"
+                            },
+                            "providerAccountId": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "reason": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "billingAccountId",
+                            "provider",
+                            "externalCustomerId",
+                            "providerAccountId",
+                            "linkedAt",
+                            "actor",
+                            "reason",
+                            "createdAt"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "duplicate",
+                        "unlink"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/provider-customer-unlinks/{billingAccountId}",
+        "tags": [
+          "provider-customers"
+        ]
+      }
+    },
     "/v1/admin/providers/capabilities": {
       "get": {
         "operationId": "getV1AdminProvidersCapabilities",
@@ -88298,6 +88951,10 @@
     {
       "description": "Implemented promotions operations.",
       "name": "promotions"
+    },
+    {
+      "description": "Implemented provider-customers operations.",
+      "name": "provider-customers"
     },
     {
       "description": "Implemented trials operations.",

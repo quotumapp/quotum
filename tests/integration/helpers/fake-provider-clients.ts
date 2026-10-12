@@ -282,6 +282,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		}
 	>();
 	let checkoutSessionFailuresRemaining = options.createCheckoutSessionFailures ?? 0;
+	const deletedCustomers = new Set<string>();
 	const idempotency = createFakeStripeIdempotency();
 	const promotions = createFakeStripePromotions(idempotency);
 	const subscriptionUpdates: Array<{
@@ -327,6 +328,10 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		},
 		defaultPaymentMethodWrites,
 		invoiceCreateParams,
+		/** Deletes a customer as the Stripe Dashboard does: every later use of its id is refused. */
+		deleteCustomer(customerId: string) {
+			deletedCustomers.add(customerId);
+		},
 		/** The event the next verified webhook delivers; the signature check itself is faked. */
 		setWebhookEvent(next: JsonRecord) {
 			event = next;
@@ -382,6 +387,16 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			) {
 				calls.push("createCheckoutSession");
 				checkoutSessionParams.push(params);
+				if (typeof params.customer === "string" && deletedCustomers.has(params.customer)) {
+					// Shaped like stripe-node's error for a customer id Stripe no longer has.
+					throw Object.assign(new Error(`No such customer: '${params.customer}'`), {
+						type: "StripeInvalidRequestError",
+						rawType: "invalid_request_error",
+						code: "resource_missing",
+						param: "customer",
+						statusCode: 400,
+					});
+				}
 				if (checkoutSessionFailuresRemaining > 0) {
 					checkoutSessionFailuresRemaining -= 1;
 					throw new Error("Fake Stripe Checkout is temporarily unavailable");
@@ -451,14 +466,19 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 				billingAccountId: string;
 				email: string | null;
 				idempotencyScope?: string | null;
+				linkGeneration?: number;
 			}) {
 				const { billingAccountId } = input;
 				calls.push(`createCustomer:${billingAccountId}`);
+				// As Stripe replays a creation: the same account gets the same customer until an
+				// unlink changes the request's idempotency key.
+				const generation = input.linkGeneration ?? 0;
+				const replayed = stripeCustomerIdForBillingAccount(billingAccountId);
 
 				return {
 					id:
 						options.createCustomerId?.(input) ??
-						stripeCustomerIdForBillingAccount(billingAccountId),
+						(generation > 0 ? `${replayed}_${generation}` : replayed),
 				};
 			},
 			async createPortalSession(params: Stripe.BillingPortal.SessionCreateParams) {

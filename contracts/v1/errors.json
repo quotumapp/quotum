@@ -139,6 +139,7 @@
         "src/db/repository/controls-enterprise.ts",
         "src/db/repository/identities.ts",
         "src/db/repository/insights.ts",
+        "src/db/repository/provider-customer-unlinks.ts",
         "src/db/repository/usage-operations.ts"
       ]
     },
@@ -580,6 +581,7 @@
         "src/db/repository/paddle.ts",
         "src/db/repository/plan-grants.ts",
         "src/db/repository/promotions.ts",
+        "src/db/repository/provider-customer-unlinks.ts",
         "src/db/repository/provider-operations.ts",
         "src/db/repository/recurring-pricing.ts",
         "src/db/repository/stripe.ts",
@@ -1292,6 +1294,24 @@
       "code": "PROVIDER_CONNECTION_INVALID",
       "sources": [
         "src/composition/connection-validation.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_CUSTOMER_LINK_IN_USE",
+      "sources": [
+        "src/billing/provider-customer-unlinks.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_CUSTOMER_LINK_MISMATCH",
+      "sources": [
+        "src/billing/provider-customer-unlinks.ts"
+      ]
+    },
+    {
+      "code": "PROVIDER_CUSTOMER_LINK_NOT_FOUND",
+      "sources": [
+        "src/billing/provider-customer-unlinks.ts"
       ]
     },
     {

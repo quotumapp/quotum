@@ -157,20 +157,29 @@ export class StripeBillingClient {
 		email: string | null;
 		/** Scopes the idempotency key to one tenant, so two projects never share a created customer. */
 		idempotencyScope?: string | null;
+		/**
+		 * How many times an operator has unlinked this account's customer. Stripe replays a creation
+		 * for a day, so without it an unlinked account would be handed the customer it just lost.
+		 */
+		linkGeneration?: number;
 	}): Promise<Stripe.Customer> {
 		const params: Stripe.CustomerCreateParams = {
 			email: input.email ?? undefined,
 			metadata: { billingAccountId: input.billingAccountId },
 		};
+		const request =
+			input.idempotencyScope == null
+				? params
+				: {
+						scope: input.idempotencyScope,
+						params,
+					};
+		const generation = input.linkGeneration ?? 0;
 		return this.stripe.customers.create(params, {
+			// An account that was never unlinked keeps the key it always had.
 			idempotencyKey: stripeIdempotencyKey(
 				"customers:create",
-				input.idempotencyScope == null
-					? params
-					: {
-							scope: input.idempotencyScope,
-							params,
-						},
+				generation > 0 ? { generation, request } : request,
 			),
 		});
 	}

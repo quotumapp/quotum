@@ -34,7 +34,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import { allocationSpendOrderSql } from "./allocation-order";
 import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
-import { ensureCustomer } from "./identities";
+import { ensureCustomer, lockCustomer } from "./identities";
 import { featureSpentByUsage, requireActiveFeature, resolveEntityId } from "./metering-persistence";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -505,25 +505,6 @@ export class BalanceAdjustmentRepository
 		);
 		return page(rows, limit, toDebitRecord);
 	}
-}
-
-/**
- * Serializes adjustments of one account. `FOR NO KEY UPDATE` still admits the key-share locks that
- * usage takes through its foreign keys while it holds allocation locks, so the two cannot deadlock.
- */
-async function lockCustomer(
-	executor: QueryExecutor,
-	projectId: string,
-	billingAccountId: string,
-): Promise<{ id: string; billing_account_id: string } | null> {
-	return await executeOne<{ id: string; billing_account_id: string }>(
-		executor,
-		drizzleSql`
-			SELECT id, billing_account_id FROM customers
-			WHERE project_id = ${projectId} AND billing_account_id = ${billingAccountId}
-			FOR NO KEY UPDATE
-		`,
-	);
 }
 
 function allocationUnits(value: string): bigint {

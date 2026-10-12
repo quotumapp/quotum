@@ -107,9 +107,14 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		billingAccountId: string;
 		email: string | null;
 		idempotencyScope?: string | null;
+		linkGeneration?: number;
 	}): Promise<{ id: string }> {
 		this.throwIfFailed("createCustomer");
-		return { id: `cus_fake_${digest(input.billingAccountId).slice(0, 24)}` };
+		// As Stripe replays a creation: the same account gets the same customer until it is unlinked.
+		const generation = input.linkGeneration ?? 0;
+		const identity =
+			generation > 0 ? `${input.billingAccountId}:${generation}` : input.billingAccountId;
+		return { id: `cus_fake_${digest(identity).slice(0, 24)}` };
 	}
 
 	async createCheckoutSession(

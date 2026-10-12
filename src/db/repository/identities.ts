@@ -101,6 +101,26 @@ export async function resolveUsageCustomer(
 	);
 }
 
+/**
+ * Serializes operator changes to one account. `FOR NO KEY UPDATE` still admits the key-share locks
+ * that usage takes through its foreign keys while it holds allocation locks, so the two cannot
+ * deadlock. Provider event recording takes the same lock, so it waits for the change or runs first.
+ */
+export async function lockCustomer(
+	executor: QueryExecutor,
+	projectId: string,
+	billingAccountId: string,
+): Promise<CustomerIdentityRow | null> {
+	return await executeOne<CustomerIdentityRow>(
+		executor,
+		drizzleSql`
+			SELECT id, billing_account_id FROM customers
+			WHERE project_id = ${projectId} AND billing_account_id = ${billingAccountId}
+			FOR NO KEY UPDATE
+		`,
+	);
+}
+
 export async function findCustomerByProviderCustomer(
 	executor: QueryExecutor,
 	projectId: string,

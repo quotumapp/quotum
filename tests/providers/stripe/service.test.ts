@@ -85,6 +85,8 @@ function serviceFixture(
 		recordingSkipReason?: StripeSkipReason;
 		/** What linking a Stripe customer to a billing account throws. */
 		linkError?: Error;
+		/** How many unlink receipts the account has; absent leaves the repository without the count. */
+		customerUnlinks?: number;
 		logger?: BillingLogger;
 		paymentInvoice?: string | Error;
 		customerId?: string;
@@ -328,6 +330,14 @@ function serviceFixture(
 				calls.push({ method: "getStripeProviderCustomer", input });
 				return Promise.resolve(existingCustomerId);
 			},
+			...(overrides.customerUnlinks === undefined
+				? {}
+				: {
+						countStripeCustomerUnlinks(input: { billingAccountId: string }) {
+							calls.push({ method: "countStripeCustomerUnlinks", input });
+							return Promise.resolve(overrides.customerUnlinks ?? 0);
+						},
+					}),
 			linkStripeProviderCustomer(input) {
 				calls.push({ method: "linkStripeProviderCustomer", input });
 				if (overrides.linkError !== undefined) return Promise.reject(overrides.linkError);
@@ -1192,6 +1202,35 @@ describe("StripeBillingService", () => {
 					payment_intent_data: { metadata: checkoutMetadata(product) },
 				},
 			},
+		]);
+	});
+
+	it("asks Stripe for a new customer once the account's customer was unlinked", async () => {
+		const never = serviceFixture({ customerUnlinks: 0 });
+		const twice = serviceFixture({ customerUnlinks: 2 });
+
+		await never.service.createPortalSession({ billingAccountId: "user_1" });
+		await twice.service.createPortalSession({ billingAccountId: "user_1" });
+
+		type RecordedCall = { method: string; input?: unknown };
+		const creation = (calls: unknown[]) =>
+			(calls as RecordedCall[]).find((call) => call.method === "createCustomer")?.input;
+		// An account never unlinked keeps the request, and so the idempotency key, it always had.
+		expect(creation(never.calls)).toEqual({
+			billingAccountId: "user_1",
+			email: null,
+			idempotencyScope: null,
+		});
+		expect(creation(twice.calls)).toEqual({
+			billingAccountId: "user_1",
+			email: null,
+			idempotencyScope: null,
+			linkGeneration: 2,
+		});
+		expect((twice.calls as RecordedCall[]).map((call) => call.method).slice(0, 3)).toEqual([
+			"getStripeProviderCustomer",
+			"countStripeCustomerUnlinks",
+			"createCustomer",
 		]);
 	});
 

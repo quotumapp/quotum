@@ -395,6 +395,10 @@ export class ProjectScopedBillingRepository {
 		return await this.repository.getStripeProviderCustomer(this.project, input);
 	}
 
+	async countStripeCustomerUnlinks(input: { billingAccountId: string }): Promise<number> {
+		return await this.repository.countStripeCustomerUnlinks(this.project, input);
+	}
+
 	async linkStripeProviderCustomer(input: LinkStripeProviderCustomerInput): Promise<string> {
 		return await this.repository.linkStripeProviderCustomer(this.project, input);
 	}

@@ -376,6 +376,65 @@ export const providerCustomers = pgTable(
 	],
 );
 
+export const providerCustomerUnlinks = pgTable(
+	"provider_customer_unlinks",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id").notNull(),
+		provider: text("provider").$type<BillingProvider>().notNull(),
+		providerAccountId: text("provider_account_id"),
+		externalCustomerId: text("external_customer_id").notNull(),
+		linkedAt: timestamp("linked_at", { withTimezone: true }).notNull(),
+		actor: text("actor").notNull(),
+		reason: text("reason").notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"provider_customer_unlinks_provider_check",
+			sql`${table.provider} IN ('apple', 'google', 'stripe', 'paddle')`,
+		),
+		check(
+			"provider_customer_unlinks_actor_check",
+			sql`char_length(${table.actor}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"provider_customer_unlinks_reason_check",
+			sql`char_length(${table.reason}) BETWEEN 1 AND 500`,
+		),
+		check(
+			"provider_customer_unlinks_idempotency_key_check",
+			sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 255`,
+		),
+		check(
+			"provider_customer_unlinks_request_hash_check",
+			sql`char_length(${table.requestHash}) = 64`,
+		),
+		unique("provider_customer_unlinks_project_id_id_unique").on(table.projectId, table.id),
+		unique("provider_customer_unlinks_idempotency_unique").on(
+			table.projectId,
+			table.customerId,
+			table.idempotencyKey,
+		),
+		foreignKey({
+			name: "provider_customer_unlinks_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		index("idx_billing_provider_customer_unlinks_customer_created").on(
+			table.projectId,
+			table.customerId,
+			table.createdAt.desc(),
+			table.id.desc(),
+		),
+	],
+);
+
 export const subscriptions = pgTable(
 	"subscriptions",
 	{

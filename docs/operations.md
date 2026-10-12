@@ -653,3 +653,28 @@ Customer creation now scopes its Stripe idempotency key to the project. Before r
 change out, reconcile any provider customer creations whose response or local linkage was lost
 under the previous unscoped key; otherwise a retry can create a duplicate customer. Existing
 linked customers are reused without creating another provider customer.
+
+### Stripe customer link repair
+
+A billing account's Stripe customer link is written once and no worker changes it. Two situations
+need an operator:
+
+- A Stripe event stored as `skipped` or `failed` whose `processingError` starts with
+  `stripe_customer_linked_to_other_account` or `stripe_account_linked_to_other_customer`.
+  `GET /v1/admin/store-events?processingStatus=failed` lists the ones that ran out of retries.
+- Checkouts for one account that answer `500 INTERNAL_ERROR` while the log shows Stripe's
+  `No such customer`: the linked customer was deleted in Stripe.
+
+1. Decide which side is wrong. Compare the event's customer and billing account with
+   `GET /v1/admin/customers/by-billing-account/:billingAccountId` and with the customer in Stripe.
+   When the event is the wrong one, leave the link alone and settle the payment in Stripe.
+2. Clear what holds the link: let Stripe end the account's subscription, and let open payment
+   setups, top-up jobs and usage invoices finish.
+3. Send `POST /v1/admin/provider-customer-unlinks/:billingAccountId` with the linked customer id
+   and a reason. `409 PROVIDER_CUSTOMER_LINK_IN_USE` names what is still open.
+4. Send `POST /v1/admin/store-events/:eventId/replay` for the event, or let the account check out
+   again.
+
+[Unlinking a Stripe customer](providers.md#unlinking-a-stripe-customer) has the request, the
+refusals and what the unlink leaves in place. Do not edit `provider_customers` rows by hand: the
+unlink is the only change that leaves a receipt.

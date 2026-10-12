@@ -167,6 +167,22 @@ describe("StripeBillingClient", () => {
 		expect(new Set([keys[0], keys[2], keys[3]]).size).toBe(3);
 	});
 
+	it("changes the customer key only for an account whose customer was unlinked", async () => {
+		const { client, requestOptions } = stripeFixture();
+		const input = { billingAccountId: "user_1", email: "reader@example.com" };
+		await client.createCustomer(input);
+		await client.createCustomer({ ...input, linkGeneration: 0 });
+		await client.createCustomer({ ...input, linkGeneration: 1 });
+		await client.createCustomer({ ...input, linkGeneration: 2 });
+		await client.createCustomer({ ...input, idempotencyScope: "project_a" });
+		await client.createCustomer({ ...input, idempotencyScope: "project_a", linkGeneration: 1 });
+		const keys = requestOptions.map((call) => call.options?.idempotencyKey);
+
+		// Stripe replays a creation for a day; a new key is what gets the account a new customer.
+		expect(keys[1]).toBe(keys[0]);
+		expect(new Set(keys).size).toBe(5);
+	});
+
 	it("passes Checkout Session creation params through to Stripe", async () => {
 		const { calls, client } = stripeFixture();
 		const params = {

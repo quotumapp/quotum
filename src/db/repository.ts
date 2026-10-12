@@ -93,6 +93,7 @@ import { ProjectScopedBillingRepository } from "./repository/project-scoped";
 import { ProjectionJobBillingRepository } from "./repository/projection-jobs";
 import { PromotionProviderObjectRepository } from "./repository/promotion-provider-objects";
 import { PromotionRepository } from "./repository/promotions";
+import { ProviderCustomerUnlinkRepository } from "./repository/provider-customer-unlinks";
 import { ProviderOperationRepository } from "./repository/provider-operations";
 import {
 	type ClaimedSubscriptionChange,
@@ -211,6 +212,7 @@ export class BillingRepository {
 	readonly planGrants: PlanGrantRepository;
 	readonly balanceAdjustments: BalanceAdjustmentRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
+	readonly providerCustomerUnlinks: ProviderCustomerUnlinkRepository;
 	readonly providerOperations: ProviderOperationRepository;
 	readonly paddle: PaddleBillingRepository;
 	readonly paddleCheckouts: PaddleCheckoutRepository;
@@ -242,6 +244,7 @@ export class BillingRepository {
 		this.planGrants = new PlanGrantRepository(database);
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
+		this.providerCustomerUnlinks = new ProviderCustomerUnlinkRepository(database);
 		this.providerOperations = new ProviderOperationRepository(database);
 		this.paddle = new PaddleBillingRepository(database);
 		this.paddleCheckouts = new PaddleCheckoutRepository(database);
@@ -909,6 +912,13 @@ export class BillingRepository {
 		input: GetStripeProviderCustomerInput,
 	): Promise<string | null> {
 		return await this.stripe.getStripeProviderCustomer(project, input);
+	}
+
+	async countStripeCustomerUnlinks(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string },
+	): Promise<number> {
+		return await this.stripe.countStripeCustomerUnlinks(project, input);
 	}
 
 	async linkStripeProviderCustomer(
