@@ -409,6 +409,12 @@ event ordering. Those commercial fields come from subscription events and reconc
 Paying an older invoice or a proration credit therefore cannot undo an upgrade. Invoice history
 retains its own event order, including invoices delivered after newer subscription events.
 
+A subscription Stripe ended, by an immediate cancellation or when its period closed, expires when
+Stripe ended it, and its recorded expiry moves to that moment even though the period was paid
+through later. A cancellation that shares a second with the subscription's earlier event applies,
+and so does a reconciliation read that finds the subscription ended; see
+[event order](subscriptions.md#which-plan-version-a-stripe-update-applies).
+
 A subscription event resolves its product and price to a store mapping that is on sale, except for
 a subscription Quotum already recorded: that one keeps following its recorded product and price
 after the mapping or the product is retired, for example when `catalog:provision` replaces a
