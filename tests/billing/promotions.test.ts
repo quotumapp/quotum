@@ -7,6 +7,7 @@ import {
 	normalizePromotionCode,
 	type PromotionCodeAvailability,
 	promotionCodeUnavailability,
+	promotionEffectRedeemable,
 } from "../../src/billing/promotions";
 import { maxExpirySeconds } from "../../src/shared/cadence";
 
@@ -251,6 +252,10 @@ describe("promotion terms", () => {
 				},
 				codes: [{ code: "HOSTED", hostedCheckoutEnabled: true }],
 			}),
+			discountInput({
+				effect: { kind: "plan_grant", planKey: "pro", durationUnit: "day", durationCount: 30 },
+				codes: [{ code: "HOSTED", hostedCheckoutEnabled: true }],
+			}),
 		]) {
 			expect(errorCode(() => normalizeCreatePromotionInput(input))).toBe(
 				"PROMOTION_HOSTED_CHECKOUT_UNSUPPORTED",
@@ -263,6 +268,14 @@ describe("promotion terms", () => {
 				),
 			),
 		).toBe("PROMOTION_CODE_CONFLICT");
+	});
+});
+
+describe("promotion effect redemption", () => {
+	it("redeems discounts and feature grants but not plan grants", () => {
+		expect(promotionEffectRedeemable("discount")).toBe(true);
+		expect(promotionEffectRedeemable("feature_grant")).toBe(true);
+		expect(promotionEffectRedeemable("plan_grant")).toBe(false);
 	});
 });
 

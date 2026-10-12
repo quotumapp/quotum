@@ -1748,6 +1748,200 @@ localDescribe("promotion feature grants", () => {
 		expect(await unknown.json()).toMatchObject({ data: [], pagination: { nextCursor: null } });
 	});
 
+	it("refuses a plan grant code on every channel, in validation and in redemption", async () => {
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const planGrant: CreatePromotionInput["effect"] = {
+			kind: "plan_grant",
+			planKey: "premium",
+			durationUnit: "day",
+			durationCount: 30,
+		};
+		await context.repository.promotions.createPromotion(project, {
+			key: "premium-trial",
+			name: "Premium trial",
+			effect: planGrant,
+			codes: [
+				{ code: "TRIAL30" },
+				{ code: "TRIAL-VIP", billingAccountId: "vip" },
+				{ code: "TRIAL-OLD", expiresAt: "2026-01-01T00:00:00Z" },
+				{ code: "TRIAL-FIRST", firstPurchaseOnly: true },
+			],
+			actor,
+		});
+		await context.repository.promotions.createPromotion(project, {
+			key: "web-trial",
+			name: "Web trial",
+			effect: planGrant,
+			allowedChannels: ["web"],
+			codes: [{ code: "WEB-TRIAL" }],
+			actor,
+		});
+		await context.repository.promotions.createPromotion(
+			project,
+			grantPromotion({ codes: [{ code: "WELCOME" }] }),
+		);
+		await context.repository.promotions.createPromotion(
+			project,
+			discountPromotion({ codes: [{ code: "SPRING" }] }),
+		);
+		const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+			testRequest(app, path, {
+				method: "POST",
+				headers: { ...authHeaders("acme"), "content-type": "application/json", ...headers },
+				body: JSON.stringify(body),
+			});
+		const validate = async (billingAccountId: string, body: unknown) => {
+			const response = await post(
+				`/v1/billing-accounts/${billingAccountId}/promotion-codes/validate`,
+				body,
+			);
+			expect(response.status).toBe(200);
+			return (await response.json()).data;
+		};
+		const redeem = async (billingAccountId: string, body: unknown, key: string) => {
+			const response = await post(
+				`/v1/billing-accounts/${billingAccountId}/promotion-redemptions`,
+				body,
+				{ "idempotency-key": key },
+			);
+			return { status: response.status, body: await response.json() };
+		};
+
+		for (const channel of ["web", "android", "ios"] as const) {
+			expect(await validate("trial-user", { code: "TRIAL30", channel })).toMatchObject({
+				valid: false,
+				reason: "PROMOTION_CODE_NOT_APPLICABLE",
+				promotion: { key: "premium-trial", effectKind: "plan_grant" },
+				code: { code: "TRIAL30" },
+			});
+			const refused = await redeem(
+				"trial-user",
+				{ code: "TRIAL30", channel },
+				`plan-grant-${channel}`,
+			);
+			expect(refused.status).toBe(409);
+			expect(refused.body.error.code).toBe("PROMOTION_CODE_NOT_APPLICABLE");
+		}
+		// The omitted channel is web, and a channel the promotion does not allow is still answered
+		// by the effect, because no channel could redeem the code.
+		expect(await validate("trial-user", { code: "TRIAL30" })).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_APPLICABLE",
+		});
+		expect(await validate("trial-user", { code: "WEB-TRIAL", channel: "android" })).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_APPLICABLE",
+		});
+		expect(
+			await validate("trial-user", {
+				code: "TRIAL30",
+				target: { kind: "plan", key: "premium" },
+			}),
+		).toMatchObject({ valid: false, reason: "PROMOTION_CODE_NOT_APPLICABLE" });
+		for (const code of ["TRIAL-OLD", "TRIAL-FIRST"]) {
+			expect(await validate("trial-user", { code })).toMatchObject({
+				valid: false,
+				reason: "PROMOTION_CODE_NOT_APPLICABLE",
+			});
+			const refused = await redeem("trial-user", { code, channel: "web" }, `plan-grant-${code}`);
+			expect(refused.body.error.code).toBe("PROMOTION_CODE_NOT_APPLICABLE");
+		}
+
+		// A code restricted to another account stays hidden: not found, without promotion details.
+		expect(await validate("trial-user", { code: "TRIAL-VIP" })).toEqual({
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_FOUND",
+			promotion: null,
+			code: null,
+		});
+		const hidden = await redeem("trial-user", { code: "TRIAL-VIP", channel: "web" }, "vip-1");
+		expect(hidden.status).toBe(404);
+		expect(hidden.body.error.code).toBe("PROMOTION_CODE_NOT_FOUND");
+		expect(await validate("vip", { code: "TRIAL-VIP" })).toMatchObject({
+			valid: false,
+			reason: "PROMOTION_CODE_NOT_APPLICABLE",
+		});
+
+		// Redeemable effects are unchanged.
+		expect(await validate("trial-user", { code: "WELCOME" })).toMatchObject({
+			valid: true,
+			reason: null,
+			promotion: { key: "welcome-credits", effectKind: "feature_grant" },
+		});
+		expect(
+			await validate("trial-user", {
+				code: "SPRING",
+				target: { kind: "product", key: "echo_credits_10" },
+			}),
+		).toMatchObject({ valid: true, reason: null, promotion: { effectKind: "discount" } });
+
+		// Refusing never creates a customer, a use or a grant.
+		expect(
+			await context.sql`SELECT id FROM customers WHERE billing_account_id IN ('trial-user', 'vip')`,
+		).toHaveLength(0);
+		expect(await context.sql`SELECT id FROM promotion_redemptions`).toHaveLength(0);
+		expect(await context.sql`SELECT id FROM balance_allocations`).toHaveLength(0);
+		const [counts] = await context.sql<Array<{ used: number }>>`
+			SELECT coalesce(sum(redeemed_count + reserved_count), 0)::integer AS used
+			FROM promotion_codes WHERE normalized_code LIKE 'TRIAL%' OR normalized_code = 'WEB-TRIAL'
+		`;
+		expect(counts).toEqual({ used: 0 });
+	});
+
+	it("never turns a plan grant promotion into a hosted code or a Stripe coupon", async () => {
+		const planGrant = {
+			kind: "plan_grant",
+			planKey: "premium",
+			durationUnit: "day",
+			durationCount: 30,
+		} as const;
+		expect(
+			await captureCode(
+				context.repository.promotions.createPromotion(project, {
+					key: "hosted-trial",
+					name: "Hosted trial",
+					effect: planGrant,
+					codes: [{ code: "HOSTED-TRIAL", hostedCheckoutEnabled: true }],
+					actor,
+				}),
+			),
+		).toBe("PROMOTION_HOSTED_CHECKOUT_UNSUPPORTED");
+		await context.repository.promotions.createPromotion(project, {
+			key: "premium-trial",
+			name: "Premium trial",
+			effect: planGrant,
+			allowedChannels: ["web"],
+			codes: [{ code: "TRIAL30" }],
+			actor,
+		});
+		expect(
+			await captureCode(
+				context.repository.promotions.addPromotionCodes(
+					project,
+					"premium-trial",
+					[{ code: "LATE-HOSTED", hostedCheckoutEnabled: true }],
+					actor,
+				),
+			),
+		).toBe("PROMOTION_HOSTED_CHECKOUT_UNSUPPORTED");
+
+		expect(await context.repository.promotionProviders.reconcilePromotionCoupons(10)).toEqual({
+			couponsCreated: 0,
+			couponsCurrent: 0,
+			promotionCodesCreated: 0,
+		});
+		expect(await context.repository.promotionProviders.ensureHostedPromotionCodeObjects(10)).toBe(
+			0,
+		);
+		expect(
+			(await context.repository.promotions.getPromotion(project, "premium-trial")).providerObjects,
+		).toEqual([]);
+		expect(await context.sql`SELECT id FROM promotion_provider_objects`).toHaveLength(0);
+	});
+
 	it("never grants more than the global cap under concurrent redemptions", async () => {
 		await context.repository.promotions.createPromotion(
 			project,

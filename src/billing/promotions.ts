@@ -67,6 +67,14 @@ export type PromotionEffect =
 			durationCount: number;
 	  };
 
+/**
+ * Whether any channel has a redemption path for an effect today. A `plan_grant` is stored but no
+ * channel redeems it yet, so validation and redemption both refuse it.
+ */
+export function promotionEffectRedeemable(kind: PromotionEffectKind): boolean {
+	return kind !== "plan_grant";
+}
+
 export type PromotionTarget = { kind: "plan"; key: string } | { kind: "product"; key: string };
 
 export interface PromotionCodeInput {

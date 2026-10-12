@@ -10,6 +10,7 @@ import { BillingError, InvalidRequestError, PersistenceConflictError } from "../
 import {
 	normalizePromotionCode,
 	type PromotionRedeemInput,
+	promotionEffectRedeemable,
 	promotionError,
 } from "../../billing/promotions";
 import type { ProjectInstanceContext } from "../../projects/context";
@@ -187,6 +188,8 @@ export class ApplePromotionRepository extends RepositoryModule {
 					resolved.code.billingAccountId !== input.billingAccountId)
 			)
 				throw promotionError("PROMOTION_CODE_NOT_FOUND");
+			if (!promotionEffectRedeemable(resolved.promotion.effect.kind))
+				throw promotionError("PROMOTION_CODE_NOT_APPLICABLE");
 			const context = await this.context(
 				tx,
 				projectId,

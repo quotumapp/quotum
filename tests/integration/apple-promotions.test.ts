@@ -548,6 +548,43 @@ localDescribe("Apple subscription promotions", () => {
 			appleOffers: [],
 		});
 	});
+	it("refuses a plan grant code with the redemption error even when an offer is supplied", async () => {
+		const offer = await promotion();
+		await context.repository.promotions.createPromotion(project, {
+			key: "premium_trial",
+			name: "Premium trial",
+			effect: { kind: "plan_grant", planKey: "premium", durationUnit: "day", durationCount: 30 },
+			allowedChannels: ["ios"],
+			codes: [{ code: "TRIAL-IOS" }],
+			actor: "test-operator",
+		});
+		await expect(
+			context.repository.applePromotions.redeem(
+				project,
+				{
+					code: "TRIAL-IOS",
+					channel: "ios",
+					appleOfferId: offer.id,
+					subscriptionId,
+					billingAccountId: "apple_customer",
+					idempotencyKey: "plan-grant",
+					actor: null,
+				},
+				signer,
+			),
+		).rejects.toMatchObject({ code: "PROMOTION_CODE_NOT_APPLICABLE" });
+		expect(
+			await context.repository.promotions.validatePromotionCode(project, {
+				code: "TRIAL-IOS",
+				channel: "ios",
+				billingAccountId: "apple_customer",
+			}),
+		).toMatchObject({ valid: false, reason: "PROMOTION_CODE_NOT_APPLICABLE", appleOffers: [] });
+		expect(
+			await context.sql`SELECT id FROM promotion_redemptions WHERE project_id = ${project.projectInstanceId}`,
+		).toHaveLength(0);
+	});
+
 	it("does not mark continuing renewals as new uses after an offer link is retired", async () => {
 		const offer = await promotion();
 		await redeem(offer.id);
