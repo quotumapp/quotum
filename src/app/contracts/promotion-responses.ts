@@ -187,6 +187,11 @@ export const postV1AdminPromotionsByPromotionKeyArchiveResponse200Schema = z.obj
 	data: promotionSchema,
 });
 
+export const postV1AdminPromotionsByPromotionKeyTermsResponse200Schema = z.object({
+	success: z.literal(true),
+	data: promotionSchema,
+});
+
 export const postV1AdminPromotionsByPromotionKeyProviderSyncResponse200Schema = z.object({
 	success: z.literal(true),
 	data: promotionSchema,

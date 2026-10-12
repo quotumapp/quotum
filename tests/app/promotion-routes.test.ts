@@ -146,6 +146,7 @@ function recordingService() {
 		getPromotion: record("getPromotion", promotion),
 		listPromotions: record("listPromotions", { items: [promotion], nextCursor: "next" }),
 		archivePromotion: record("archivePromotion", { ...promotion, status: "archived" }),
+		updatePromotionTerms: record("updatePromotionTerms", { ...promotion, name: "Spring sale 2" }),
 		addPromotionCodes: record("addPromotionCodes", { codes: [code], created: 1 }),
 		listPromotionCodes: record("listPromotionCodes", { items: [code], nextCursor: null }),
 		deactivatePromotionCode: record("deactivatePromotionCode", { ...code, active: false }),
@@ -292,6 +293,67 @@ describe("promotion routes", () => {
 		expect(unknownField.status).toBe(400);
 		expect(selector.status).toBe(400);
 		expect(calls).toEqual([]);
+	});
+
+	it("changes terms with the operator actor and rejects empty, unknown and selector bodies", async () => {
+		const { service, calls } = recordingService();
+		const app = promotionApp(service);
+		const update = (body: unknown, headers: Record<string, string> = operatorHeaders) =>
+			testRequest(app, "/v1/admin/promotions/spring-sale/terms", {
+				method: "POST",
+				headers,
+				body: JSON.stringify(body),
+			});
+		const { "x-billing-actor": _actor, ...withoutActor } = operatorHeaders;
+
+		const changed = await update({
+			name: "Spring sale 2",
+			metadata: { campaign: "spring" },
+			discount: { type: "percent", percentOffBps: 1500, duration: "repeating", durationMonths: 3 },
+		});
+		const nameOnly = await update({ name: "Spring sale 2" });
+		const empty = await update({});
+		const unknown = await update({ name: "Spring", targets: [] });
+		const selector = await update({ name: "Spring", projectId: "other" });
+		const badDiscount = await update({
+			discount: { type: "percent", percentOffBps: 0, duration: "once" },
+		});
+		const missingActor = await update({ name: "Spring" }, withoutActor);
+		const missingOperatorKey = await update(
+			{ name: "Spring" },
+			{ authorization: "Bearer secret", "content-type": "application/json" },
+		);
+
+		expect(changed.status).toBe(200);
+		expect((await changed.json()).data.name).toBe("Spring sale 2");
+		expect(nameOnly.status).toBe(200);
+		expect([empty, unknown, selector, badDiscount, missingActor].map((r) => r.status)).toEqual([
+			400, 400, 400, 400, 400,
+		]);
+		expect([401, 403]).toContain(missingOperatorKey.status);
+		expect(calls).toEqual([
+			{
+				method: "updatePromotionTerms",
+				args: [
+					"spring-sale",
+					{
+						name: "Spring sale 2",
+						metadata: { campaign: "spring" },
+						discount: {
+							type: "percent",
+							percentOffBps: 1500,
+							duration: "repeating",
+							durationMonths: 3,
+						},
+					},
+					"operator@example.com",
+				],
+			},
+			{
+				method: "updatePromotionTerms",
+				args: ["spring-sale", { name: "Spring sale 2" }, "operator@example.com"],
+			},
+		]);
 	});
 
 	it("maps list filters, code deactivation and redemption queries to the service", async () => {

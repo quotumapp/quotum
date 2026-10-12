@@ -33,6 +33,8 @@ import {
 	listPromotionRedemptionsQuerySchema,
 	listPromotionsQuerySchema,
 	promotionCodeInputs,
+	promotionTermsBodySchema,
+	promotionTermsUpdateInput,
 	revokePromotionRedemptionBodySchema,
 } from "../app/promotion-routes";
 import { providerOperationParamsSchema } from "../app/provider-operation-routes";
@@ -466,6 +468,15 @@ export function createMerchantBillingPort(input: {
 				return ok(await repo.applePromotions.retire(project, id, parse(z.uuid(), event), actor));
 			case "promotions.archive":
 				return ok(await repo.promotions.archivePromotion(project, id, actor));
+			case "promotions.terms.update":
+				return ok(
+					await repo.promotions.updatePromotionTerms(
+						project,
+						id,
+						promotionTermsUpdateInput(parse(promotionTermsBodySchema, command.body)),
+						actor,
+					),
+				);
 			case "account.promotion-redemptions": {
 				const input = parse(listAccountRedemptionsQuerySchema, command.query);
 				return list(

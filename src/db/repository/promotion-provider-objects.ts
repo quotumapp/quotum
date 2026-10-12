@@ -15,6 +15,23 @@ import type { QueryExecutor } from "./types";
 
 type Timestamp = Date | string;
 
+/**
+ * What a coupon was created for. `discount` is absent on coupons made before promotion terms became
+ * editable; those were created from terms that could not change, so the promotion's own terms apply.
+ */
+interface CouponAppliesTo {
+	products?: string[] | null;
+	discount?: PromotionDiscount;
+}
+
+interface DiscountColumns {
+	discount_type: "percent" | "amount" | null;
+	percent_off_bps: number | null;
+	discount_duration: "once" | "repeating" | "forever" | null;
+	duration_months: number | null;
+	amounts: Array<{ currency: string; amountOffMinor: number | string }>;
+}
+
 interface ClaimedObjectRow {
 	project_id: string;
 	project_key: string;
@@ -28,7 +45,7 @@ interface ClaimedObjectRow {
 	provider_active: boolean | null;
 	retire_requested: boolean;
 	attempts: number;
-	applies_to: { products?: string[] | null };
+	applies_to: CouponAppliesTo;
 	promotion_key: string;
 	promotion_name: string;
 	discount_type: "percent" | "amount" | null;
@@ -405,18 +422,79 @@ export async function refreshHostedCodeDesiredStateInTx(
 	);
 }
 
+/**
+ * Brings an edited promotion's existing coupon up to its current terms. A promotion that has no
+ * coupon yet gets its first one lazily, from the terms it has then.
+ */
+export async function reconcileExistingCouponInTx(
+	tx: QueryExecutor,
+	projectId: string,
+	promotionId: string,
+): Promise<"created" | "current" | "skipped"> {
+	const existing = await executeOne<{ id: string }>(
+		tx,
+		drizzleSql`
+			SELECT id
+			FROM promotion_provider_objects
+			WHERE project_id = ${projectId}
+				AND promotion_id = ${promotionId}
+				AND object_kind = 'coupon'
+				AND status <> 'retired'
+			LIMIT 1
+		`,
+	);
+	return existing === null ? "skipped" : await reconcileCouponInTx(tx, projectId, promotionId);
+}
+
+/**
+ * Records the terms a promotion's coupons were created from, before an edit changes them. A coupon
+ * that predates editable terms carries no discount, and its terms are the promotion's current ones.
+ */
+export async function stampCouponDiscountInTx(
+	tx: QueryExecutor,
+	projectId: string,
+	promotionId: string,
+	discount: PromotionDiscount,
+): Promise<void> {
+	await executeRows(
+		tx,
+		drizzleSql`
+			UPDATE promotion_provider_objects
+			SET applies_to = applies_to || ${jsonb({ discount })}, updated_at = now()
+			WHERE project_id = ${projectId}
+				AND promotion_id = ${promotionId}
+				AND object_kind = 'coupon'
+				AND status <> 'retired'
+				AND applies_to -> 'discount' IS NULL
+			RETURNING id
+		`,
+	);
+}
+
 async function reconcileCouponInTx(
 	tx: QueryExecutor,
 	projectId: string,
 	promotionId: string,
 ): Promise<"created" | "current" | "skipped"> {
-	const promotion = await executeOne<{
-		status: string;
-		published_catalog_revision_id: string | number | null;
-	}>(
+	const promotion = await executeOne<
+		DiscountColumns & {
+			status: string;
+			published_catalog_revision_id: string | number | null;
+		}
+	>(
 		tx,
 		drizzleSql`
-			SELECT p.status, project.published_catalog_revision_id
+			SELECT
+				p.status, project.published_catalog_revision_id, p.discount_type, p.percent_off_bps,
+				p.discount_duration, p.duration_months,
+				COALESCE((
+					SELECT jsonb_agg(
+						jsonb_build_object('currency', a.currency, 'amountOffMinor', a.amount_off_minor)
+						ORDER BY a.currency
+					)
+					FROM promotion_discount_amounts a
+					WHERE a.project_id = p.project_id AND a.promotion_id = p.id
+				), '[]'::jsonb) AS amounts
 			FROM promotions p
 			JOIN projects project ON project.id = p.project_id
 			WHERE p.project_id = ${projectId} AND p.id = ${promotionId}
@@ -424,16 +502,20 @@ async function reconcileCouponInTx(
 		`,
 	);
 	if (promotion === null || promotion.status !== "active") return "skipped";
+	const discount = discountFromColumns(promotion);
+	if (discount === null) return "skipped";
 	const revisionId =
 		promotion.published_catalog_revision_id === null
 			? null
 			: String(promotion.published_catalog_revision_id);
-	const appliesTo = { products: await stripeProductsForPromotion(tx, projectId, promotionId) };
-	const appliesToHash = sha256Hex(stableJson(appliesTo));
-	const latest = await executeOne<{ id: string; applies_to_hash: string }>(
+	const appliesTo: CouponAppliesTo = {
+		products: await stripeProductsForPromotion(tx, projectId, promotionId),
+		discount,
+	};
+	const latest = await executeOne<{ id: string; applies_to: CouponAppliesTo }>(
 		tx,
 		drizzleSql`
-			SELECT id, applies_to_hash
+			SELECT id, applies_to
 			FROM promotion_provider_objects
 			WHERE project_id = ${projectId}
 				AND promotion_id = ${promotionId}
@@ -443,18 +525,24 @@ async function reconcileCouponInTx(
 			LIMIT 1
 		`,
 	);
-	if (latest !== null && latest.applies_to_hash === appliesToHash) {
+	if (latest !== null && couponMatches(latest.applies_to, appliesTo)) {
+		// A coupon that predates editable terms is stamped with the terms it has always had.
 		await executeOne(
 			tx,
 			drizzleSql`
 				UPDATE promotion_provider_objects
-				SET catalog_revision_id = ${revisionId}::bigint, updated_at = now()
+				SET catalog_revision_id = ${revisionId}::bigint,
+					applies_to = ${jsonb(appliesTo)},
+					updated_at = now()
 				WHERE project_id = ${projectId} AND id = ${latest.id}
 				RETURNING id
 			`,
 		);
 		return "current";
 	}
+	// The hash names this coupon within the promotion's chain: it includes the coupon it replaces,
+	// so going back to earlier terms still gets a new coupon instead of colliding with the old one.
+	const appliesToHash = sha256Hex(stableJson({ ...appliesTo, replaces: latest?.id ?? null }));
 	await executeOne(
 		tx,
 		drizzleSql`
@@ -501,6 +589,35 @@ async function reconcileCouponInTx(
 		);
 	}
 	return "created";
+}
+
+/** Whether an existing coupon already serves the wanted products and discount terms. */
+function couponMatches(existing: CouponAppliesTo, wanted: CouponAppliesTo): boolean {
+	if (stableJson(existing.products ?? null) !== stableJson(wanted.products ?? null)) return false;
+	return (
+		existing.discount === undefined || stableJson(existing.discount) === stableJson(wanted.discount)
+	);
+}
+
+function discountFromColumns(row: DiscountColumns): PromotionDiscount | null {
+	if (row.discount_type === null) return null;
+	const duration = row.discount_duration ?? "once";
+	return row.discount_type === "percent"
+		? {
+				type: "percent",
+				percentOffBps: row.percent_off_bps ?? 0,
+				duration,
+				durationMonths: row.duration_months,
+			}
+		: {
+				type: "amount",
+				amounts: row.amounts.map((amount) => ({
+					currency: amount.currency,
+					amountOffMinor: Number(amount.amountOffMinor),
+				})),
+				duration,
+				durationMonths: row.duration_months,
+			};
 }
 
 /**
@@ -619,24 +736,11 @@ function toSyncJob(row: ClaimedObjectRow): PromotionStripeSyncJob {
 		attempts: row.attempts,
 	};
 	if (row.object_kind === "coupon") {
-		const duration = row.discount_duration ?? "once";
-		const discount: PromotionDiscount =
-			row.discount_type === "percent"
-				? {
-						type: "percent",
-						percentOffBps: row.percent_off_bps ?? 0,
-						duration,
-						durationMonths: row.duration_months,
-					}
-				: {
-						type: "amount",
-						amounts: row.amounts.map((amount) => ({
-							currency: amount.currency,
-							amountOffMinor: Number(amount.amountOffMinor),
-						})),
-						duration,
-						durationMonths: row.duration_months,
-					};
+		// A coupon is created for the terms it was made with, whatever the promotion says now.
+		const discount: PromotionDiscount | null = row.applies_to.discount ?? discountFromColumns(row);
+		if (discount === null) {
+			throw new Error(`Promotion ${row.promotion_key} has no discount for its coupon`);
+		}
 		return {
 			...base,
 			objectKind: "coupon",

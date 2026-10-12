@@ -41,6 +41,7 @@ import type {
 	PromotionRedemptionStatus,
 	PromotionRevokeResult,
 	PromotionTarget,
+	PromotionTermsUpdate,
 	PromotionValidation,
 } from "../billing/promotions";
 import type { ProviderOperationReceipt } from "../billing/provider-operations";
@@ -417,6 +418,13 @@ export class BillingClient {
 			archive: (promotionKey: string) =>
 				this.request<PromotionRecord>(`/v1/admin/promotions/${segment(promotionKey)}/archive`, {
 					method: "POST",
+					operator: true,
+				}),
+			/** Changes terms for future redemptions; existing subscribers keep the terms they were given. */
+			updateTerms: (promotionKey: string, input: PromotionTermsUpdate) =>
+				this.request<PromotionRecord>(`/v1/admin/promotions/${segment(promotionKey)}/terms`, {
+					method: "POST",
+					body: input,
 					operator: true,
 				}),
 			addCodes: (promotionKey: string, codes: PromotionCodeInput[]) =>

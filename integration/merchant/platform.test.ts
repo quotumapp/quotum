@@ -627,6 +627,15 @@ describe("merchant platform transactions", () => {
 			{ key: "promotion-deactivate", headers },
 		);
 
+		const revised = await browser.request(
+			"/api/billing/admin/promotions/launch/terms",
+			{
+				name: "Launch discount 2",
+				discount: { type: "percent", percentOffBps: 1000, duration: "forever" },
+			},
+			{ key: "promotion-terms", headers },
+		);
+
 		expect(created.status).toBe(201);
 		expect((await created.json()).data).toMatchObject({
 			key: "launch",
@@ -635,6 +644,11 @@ describe("merchant platform transactions", () => {
 		expect(replay.status).toBe(200);
 		expect((await listed.json()).data.map((item: { key: string }) => item.key)).toEqual(["launch"]);
 		expect((await deactivated.json()).data).toMatchObject({ code: "LAUNCH", active: false });
+		expect(revised.status).toBe(200);
+		expect((await revised.json()).data).toMatchObject({
+			name: "Launch discount 2",
+			effect: { kind: "discount", discount: { type: "percent", percentOffBps: 1000 } },
+		});
 	});
 	it.each([
 		["/api/billing/admin/promotions/launch/apple-offers", "promotions.apple-offers.link"],
