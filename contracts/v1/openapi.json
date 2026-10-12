@@ -87385,6 +87385,29 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "missingPermission": {
+                      "enum": [
+                        "event_read",
+                        "connected_account_read"
+                      ],
+                      "type": "string"
+                    },
+                    "reason": {
+                      "enum": [
+                        "signature_invalid",
+                        "verification_failed",
+                        "mode_mismatch",
+                        "account_mismatch",
+                        "event_not_found",
+                        "event_mismatch",
+                        "stale_event",
+                        "missing_permission",
+                        "authentication_failed",
+                        "provider_unavailable",
+                        "connection_changed"
+                      ],
+                      "type": "string"
+                    },
                     "success": {
                       "enum": [
                         false

@@ -2,6 +2,7 @@ import type { BetterAuthOptions } from "better-auth";
 import { Elysia } from "elysia";
 import { sql } from "../db/client";
 import { attachRequestServer } from "../http/server";
+import type { BillingLogger } from "../observability/logger";
 import { createMerchantApp, type MerchantUnexpectedErrorReport } from "../platform/app";
 import type { MerchantBillingPort } from "../platform/application/billing-port";
 import { createMerchantAuth, type MerchantAuth } from "../platform/auth";
@@ -66,6 +67,8 @@ export function attachMerchantRuntime(
 		trustProxyHeaders?: boolean;
 		/** `BILLING_STRIPE_WRITE_PERMISSION_PROBES`; a supplied `connectionValidation` ignores it. */
 		stripeWritePermissionProbes?: boolean;
+		/** Receives a warning for each setup event the ingress refuses, with its reason. */
+		logger?: BillingLogger;
 	},
 ): QuotumApp {
 	const { config } = options;
@@ -109,6 +112,7 @@ export function attachMerchantRuntime(
 		oauth,
 		registerBackground: options.registerBackground,
 		trustProxyHeaders: options.trustProxyHeaders,
+		logger: options.logger,
 	});
 	const remoteMcp = config.mcp
 		? createRemoteMcpApp({
@@ -141,6 +145,8 @@ export function attachHeadlessRuntime(
 		staffRequestScope?: RequestScope;
 		/** `BILLING_TRUST_PROXY_HEADERS`: key the setup ingress limiters on the forwarded client. */
 		trustProxyHeaders?: boolean;
+		/** Receives a warning for each setup event the ingress refuses, with its reason. */
+		logger?: BillingLogger;
 	} = {},
 ): QuotumApp {
 	const persistence = merchantSql(sql);
@@ -152,6 +158,7 @@ export function attachHeadlessRuntime(
 			oauth: createStripeOAuthPort(),
 			registerBackground: options.registerBackground,
 			trustProxyHeaders: options.trustProxyHeaders,
+			logger: options.logger,
 		}),
 		staffRequestScope: options.staffRequestScope,
 	});
@@ -163,9 +170,12 @@ function createConnectionIngress(input: {
 	oauth: StripeOAuthPort | null;
 	registerBackground?: MerchantRuntimeOptions["registerBackground"];
 	trustProxyHeaders?: boolean;
+	logger?: BillingLogger;
 }): AppElysia[] {
 	const { trustProxyHeaders } = input;
-	const ingress: AppElysia[] = [createConnectionEventApp(input.repository, { trustProxyHeaders })];
+	const ingress: AppElysia[] = [
+		createConnectionEventApp(input.repository, { trustProxyHeaders, logger: input.logger }),
+	];
 	if (input.oauth) {
 		const events = createStripeAppEvents(input.repository, input.oauth, input.persistence, {
 			trustProxyHeaders,

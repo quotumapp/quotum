@@ -635,10 +635,13 @@ and commit steps as the **Integrations** screens, and audit events name the oper
      written there, readable only by you. If the file cannot be written, nothing is drafted.
    - A provider draft prints its `setupWebhookPath`.
 3. **Verify events (active production only).** An active production provider must deliver an event
-   first. Point the provider's webhook at the setup path and send a test event. Then commit with
-   `--wait-for-event 10m`, which waits for that event. Sandbox and inactive environments commit
-   without one, but activating an inactive production environment (step 5) needs it, so send the
-   test event before you commit there too.
+   first. Point the provider's webhook at the setup path and send an event that exists in the
+   provider account and is at most five minutes old. For Stripe, produce a real event, such as
+   editing a product's metadata with `product.updated` selected on the endpoint. Then commit with
+   `--wait-for-event 10m`, which waits for that event. A refused event answers `400` with a
+   `reason`; see [If a setup event is refused](#if-a-setup-event-is-refused). Sandbox and inactive
+   environments commit without one, but activating an inactive production environment (step 5)
+   needs it, so send the event before you commit there too.
 4. **Commit.** `quotum connections commit <instance> <kind> <draft-id>` validates again and
    activates the version. Then point the provider's webhook at the regular path
    `/v1/projects/<instance>/webhooks/<provider>`.
@@ -658,6 +661,32 @@ While the merchant platform runs, an organization that has members manages its o
 `--member-override-reason <why>`,
 which the audit event records next to the operator. Stripe App OAuth needs a merchant session, so it
 is available only in the merchant application.
+
+### If a setup event is refused
+
+The setup route answers `404` for an unknown project, a provider that does not match the saved
+connection, or a version that expired or was retired, and `413` for a body over 256 KB. For an
+event it refused after finding the saved version it answers `400 {"success": false}` with a
+`reason` that never contains a key, a secret or the provider's own text. Stripe's webhook delivery
+log shows this body, and the service logs a warning with the same reason, the version and, for
+Stripe, the request id Stripe gave the failed call.
+
+| `reason` | Meaning |
+| --- | --- |
+| `signature_invalid` | The signature or its timestamp does not verify with the saved webhook secret, which is often the secret of another endpoint |
+| `verification_failed` | An Apple or Google notification did not verify for this connection |
+| `mode_mismatch` | A live event reached a sandbox draft, or a test event a production one |
+| `account_mismatch` | The event belongs to another Stripe account than the key's |
+| `missing_permission` | Stripe answered 403; `missingPermission` is `event_read` (Events: Read) or `connected_account_read` (Accounts: Read) |
+| `authentication_failed` | Stripe rejected the saved key |
+| `event_not_found` | Stripe has no event with that id for this key: it comes from another account, it is not a real event of this account, or it is older than 30 days |
+| `event_mismatch` | Stripe returned a different event than the one signed |
+| `stale_event` | The event is more than five minutes old; resending it does not help, so produce a new one |
+| `connection_changed` | The event predates this draft, or the draft expired or was replaced |
+| `provider_unavailable` | The provider call failed for another reason; send the event again |
+
+A `400` without a `reason` means the version was not found, or its saved secrets or settings could
+not be read.
 
 ## Projections
 

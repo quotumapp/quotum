@@ -200,7 +200,7 @@ async function connectionsCommand(
 					if (error instanceof MerchantError && error.code === "PROVIDER_EVENT_REQUIRED")
 						throw new MerchantError(
 							error.code,
-							`${error.message} Send a test event to /v1/projects/${target.instanceKey}/connections/${draftId}/webhooks/${kind}, or rerun with --wait-for-event 10m.`,
+							`${error.message} Send a real event, no more than five minutes old, to /v1/projects/${target.instanceKey}/connections/${draftId}/webhooks/${kind}, or rerun with --wait-for-event 10m.`,
 							error.status,
 						);
 					throw error;
