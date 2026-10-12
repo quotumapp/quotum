@@ -39,6 +39,17 @@ or deactivate its codes before the upgrade if it must stay unused. An older imag
 new baselines, so a rollback restores the pre-upgrade backup and loses the plan grants redeemed
 since.
 
+## Subscription reconciliation indexes
+
+The billing core baseline widens `idx_billing_subscriptions_provider_reconciliation_due` to cover
+`expired` subscriptions and adds `idx_billing_subscriptions_expiry_due`. The reconciliation claim
+reads `expired` subscriptions too, so the old four-status index could never serve it, and the
+expiry pass had no index that orders subscriptions by `expires_at`; each poll of either scanned the
+whole `subscriptions` table. No table changes and nothing is backfilled, so a dump from the
+previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup.
+
 ## Console off by default
 
 `QUOTUM_MERCHANT_ENABLED` is replaced by `QUOTUM_CONSOLE_ENABLED`, and the default flips from on to

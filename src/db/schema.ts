@@ -578,7 +578,14 @@ export const subscriptions = pgTable(
 		),
 		index("idx_billing_subscriptions_provider_reconciliation_due")
 			.on(table.providerReconciliationNextAttemptAt, table.providerReconciledAt, table.expiresAt)
-			.where(sql`${table.status} IN ('active', 'grace_period', 'billing_retry', 'cancelled')`),
+			.where(
+				sql`${table.status} IN ('active', 'grace_period', 'billing_retry', 'cancelled', 'expired')`,
+			),
+		index("idx_billing_subscriptions_expiry_due")
+			.on(table.expiresAt, table.createdAt)
+			.where(
+				sql`${table.status} IN ('active', 'grace_period', 'billing_retry', 'cancelled') AND ${table.expiresAt} IS NOT NULL`,
+			),
 		index("idx_billing_subscriptions_trial_ending_due")
 			.on(table.trialEndAt)
 			.where(
