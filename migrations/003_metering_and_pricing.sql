@@ -2250,9 +2250,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_apple
 CREATE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_promotion
 	ON promotion_provider_objects (project_id, promotion_id, created_at);
 
+-- The Stripe object claim reads exactly these rows; its predicate has to stay inside this one,
+-- or Postgres cannot use the index and every poll scans the table.
 CREATE INDEX IF NOT EXISTS idx_billing_promotion_provider_objects_due
 	ON promotion_provider_objects (next_attempt_at, id)
-	WHERE status = 'pending' OR (status = 'ready' AND provider_active IS DISTINCT FROM desired_active);
+	WHERE status = 'pending'
+		OR (status = 'ready' AND (retire_requested OR provider_active IS DISTINCT FROM desired_active));
 
 CREATE TABLE IF NOT EXISTS promotion_redemptions (
 	id UUID PRIMARY KEY DEFAULT uuidv7(),

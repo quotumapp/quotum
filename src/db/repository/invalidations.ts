@@ -1,4 +1,4 @@
-import { sql as drizzleSql } from "drizzle-orm";
+import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import type { PurchaseKind, PurchaseStatus } from "../../billing/types";
 import { assertUpdated, executeOne } from "./query";
 import type {
@@ -86,14 +86,17 @@ export async function findAppleInvalidationTarget(
 	);
 }
 
-export async function findGooglePurchaseInvalidationTarget(
-	executor: QueryExecutor,
+/**
+ * The purchase a Google voided-purchase or RTDN event refers to, by purchase token or by order id,
+ * locked with its customer. It is a function of its own so a test can plan it: the order-id arms
+ * have to stay inside the predicates of `idx_billing_purchases_raw_payload_order_id` and
+ * `idx_billing_purchases_raw_payload_latest_order_id`, or every event scans the purchases table.
+ */
+export function googlePurchaseInvalidationTargetSql(
 	projectId: string,
-	input: RecordGooglePurchaseProjectionInput,
-): Promise<InvalidationTargetRow | null> {
-	const purchase = await executeOne<InvalidationTargetRow>(
-		executor,
-		drizzleSql`
+	input: Pick<RecordGooglePurchaseProjectionInput, "purchaseToken" | "orderId">,
+): DrizzleSQL {
+	return drizzleSql`
 		SELECT
 			pu.id AS purchase_id,
 			pu.customer_id,
@@ -122,7 +125,17 @@ export async function findGooglePurchaseInvalidationTarget(
 		ORDER BY CASE WHEN pu.transaction_id = ${input.purchaseToken} THEN 0 ELSE 1 END
 		LIMIT 1
 		FOR NO KEY UPDATE OF c
-	`,
+	`;
+}
+
+export async function findGooglePurchaseInvalidationTarget(
+	executor: QueryExecutor,
+	projectId: string,
+	input: RecordGooglePurchaseProjectionInput,
+): Promise<InvalidationTargetRow | null> {
+	const purchase = await executeOne<InvalidationTargetRow>(
+		executor,
+		googlePurchaseInvalidationTargetSql(projectId, input),
 	);
 	if (purchase !== null) {
 		return purchase;

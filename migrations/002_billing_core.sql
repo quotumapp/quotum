@@ -504,13 +504,17 @@ CREATE INDEX IF NOT EXISTS idx_billing_entitlements_key_customer
 CREATE INDEX IF NOT EXISTS idx_billing_provider_customers_external_customer_id
 	ON provider_customers (external_customer_id);
 
+-- A Google voided-purchase or RTDN event finds its purchase by order id, and the admin purchase
+-- list filters by it. The predicate is `IS NOT NULL` on the indexed expression because
+-- Postgres uses a partial index only when the query implies the predicate, and an equality on
+-- the expression implies that but not `raw_payload ? 'orderId'`.
 CREATE INDEX IF NOT EXISTS idx_billing_purchases_raw_payload_order_id
 	ON purchases ((raw_payload->>'orderId'))
-	WHERE raw_payload ? 'orderId';
+	WHERE (raw_payload->>'orderId') IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_raw_state_order_id
-	ON subscriptions ((raw_state->>'orderId'))
-	WHERE raw_state ? 'orderId';
+CREATE INDEX IF NOT EXISTS idx_billing_purchases_raw_payload_latest_order_id
+	ON purchases ((raw_payload->>'latestOrderId'))
+	WHERE (raw_payload->>'latestOrderId') IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_billing_customers_billing_account_id_trgm
 	ON customers USING gin (billing_account_id gin_trgm_ops);
