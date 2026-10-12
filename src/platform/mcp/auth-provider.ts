@@ -160,7 +160,7 @@ export function createMcpAuthProvider(store: MerchantStore) {
 						containMcpCodeReplay(
 							ctx,
 							hash,
-							() => binding.revoke(grant.id, grant.principal_id),
+							() => binding.revoke(grant.id, grant.principal_id, "code_replay"),
 							store.now,
 						);
 					} else if (
@@ -171,7 +171,7 @@ export function createMcpAuthProvider(store: MerchantStore) {
 						if (typeof ctx.body.client_id !== "string") throw invalid();
 						const grant = await binding.checkRefresh(ctx.body.refresh_token, ctx.body.client_id);
 						containMcpRefreshInvalidation(ctx, grant, () =>
-							binding.revoke(grant.id, grant.principal_id),
+							binding.revoke(grant.id, grant.principal_id, "refresh_replay"),
 						);
 					} else throw new APIError("BAD_REQUEST", { error: "unsupported_grant_type" });
 				}

@@ -9,6 +9,15 @@ export const MCP_INSTANCE_CLAIM = "https://quotum.dev/project_instance";
 export const MCP_GRANT_CLAIM = "https://quotum.dev/mcp_authorization";
 export const MCP_GRANT_MS = 30 * 24 * 60 * 60_000;
 
+/** Why a grant ended; recorded in the metadata of its `mcp.revoked` audit event. */
+export type McpRevokeReason =
+	| "user"
+	| "client"
+	| "code_replay"
+	| "refresh_replay"
+	| "issuance_failed"
+	| "password_reset";
+
 export interface McpGrant {
 	id: string;
 	principal_id: string;
@@ -310,7 +319,7 @@ export class McpAuthorizations {
 		const [grant] = await this.store.sql<
 			McpGrant[]
 		>`SELECT * FROM platform_mcp_authorizations WHERE code_hash=${this.tokenHash(code)} AND client_id=${clientId}`;
-		if (grant) await this.revoke(grant.id, grant.principal_id);
+		if (grant) await this.revoke(grant.id, grant.principal_id, "code_replay");
 	}
 
 	/**
@@ -373,13 +382,13 @@ export class McpAuthorizations {
 		if (!grant) return this.validate(undefined);
 		try {
 			if (!issued) {
-				await this.revoke(grant.id, grant.principal_id);
+				await this.revoke(grant.id, grant.principal_id, "issuance_failed");
 				return;
 			}
 			await this.validate(grant, false);
 			await this.approve(grant);
 		} catch (error) {
-			await this.revoke(grant.id, grant.principal_id);
+			await this.revoke(grant.id, grant.principal_id, "issuance_failed");
 			throw error;
 		} finally {
 			await this.store.sql.begin(async (tx) => {
@@ -420,7 +429,7 @@ export class McpAuthorizations {
 				!row.rotation_replay_expires_at ||
 				row.rotation_replay_expires_at < this.store.now())
 		) {
-			await this.revoke(grant.id, grant.principal_id);
+			await this.revoke(grant.id, grant.principal_id, "refresh_replay");
 			throw new MerchantError(
 				"MCP_AUTHORIZATION_REVOKED",
 				"Reconnect Quotum to authorize access.",
@@ -435,7 +444,7 @@ export class McpAuthorizations {
 		const [grant] = await this.store.sql<
 			McpGrant[]
 		>`SELECT g.* FROM platform_mcp_authorizations g JOIN platform_auth_oauth_refresh_tokens t ON t.authorization_code_id=g.code_hash WHERE t.token=${this.tokenHash(token)} AND g.client_id=${clientId}`;
-		if (grant) await this.revoke(grant.id, grant.principal_id);
+		if (grant) await this.revoke(grant.id, grant.principal_id, "client");
 	}
 
 	async approve(grant: McpGrant) {
@@ -473,7 +482,7 @@ export class McpAuthorizations {
 		};
 	}
 
-	async revoke(id: string, principalId: string, instanceId?: string) {
+	async revoke(id: string, principalId: string, reason: McpRevokeReason, instanceId?: string) {
 		return this.store.sql.begin(async (tx) => {
 			const [row] = await tx<
 				McpGrant[]
@@ -486,15 +495,35 @@ export class McpAuthorizations {
 			await this.store.audit(tx, principalId, row.organization_id, "mcp.revoked", id, {
 				clientId: row.client_id,
 				projectInstanceId: row.project_instance_id,
+				reason,
 			});
 			return { revoked: true };
 		});
 	}
 
+	/** Every live grant of one person, for a password reset; each leaves its own audit event. */
 	async revokeUser(userId: string) {
 		await this.store.sql.begin(async (tx) => {
-			await tx`UPDATE platform_mcp_authorizations SET revoked_at=${this.store.now()} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${userId}) AND revoked_at IS NULL`;
+			const revoked = await tx<
+				Pick<
+					McpGrant,
+					"id" | "principal_id" | "organization_id" | "client_id" | "project_instance_id"
+				>[]
+			>`UPDATE platform_mcp_authorizations SET revoked_at=${this.store.now()} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${userId}) AND revoked_at IS NULL RETURNING id,principal_id,organization_id,client_id,project_instance_id`;
 			await tx`UPDATE platform_auth_oauth_refresh_tokens SET revoked=${this.store.now()},rotation_replay_response=NULL,rotation_replay_expires_at=NULL WHERE user_id=${userId}`;
+			for (const grant of revoked)
+				await this.store.audit(
+					tx,
+					grant.principal_id,
+					grant.organization_id,
+					"mcp.revoked",
+					grant.id,
+					{
+						clientId: grant.client_id,
+						projectInstanceId: grant.project_instance_id,
+						reason: "password_reset" satisfies McpRevokeReason,
+					},
+				);
 		});
 	}
 }

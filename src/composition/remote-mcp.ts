@@ -299,7 +299,7 @@ export function createRemoteMcpApp(options: {
 									grant.userId === claims.sub &&
 									grant.project_instance_id === claims[MCP_INSTANCE_CLAIM]
 								)
-									await grants.revoke(grant.id, grant.principal_id);
+									await grants.revoke(grant.id, grant.principal_id, "client");
 							} catch (error) {
 								if (!(error instanceof MerchantError)) throw error;
 							}
