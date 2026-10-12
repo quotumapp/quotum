@@ -14,6 +14,23 @@ valid for 15 minutes. Execution accepts only the `previewToken` with an `Idempot
 rejects expired previews, catalog or customer drift, or a changed target. A durable
 subscription-change result is HTTP 202; every other result, including a cancellation, is HTTP 200.
 
+## Licensed quantities
+
+Licensed `quantities` (seats and the like) arrive on `checkout_plan`, `subscription_change` and
+`setup_payment` intents, on `POST .../providers/stripe/checkout-sessions` and on
+`POST .../subscriptions/:subscriptionId/changes`. A quantity stays within a price's
+`minimumQuantity` and `maximumQuantity`, and never above 2,147,483,647, the range of a
+subscription item's stored quantity, even when the price sets no `maximumQuantity`. A larger
+quantity answers `400 INVALID_QUANTITY` before anything is reserved, previewed or sent to Stripe.
+Execution checks the stored intent again, so a preview that predates the bound is refused rather
+than sent.
+
+A preview states a flat total exactly or not at all. Where a flat line's unit amount times its
+quantity, or the sum of the lines, passes 9,007,199,254,740,991 minor units (the largest integer a
+JSON number holds exactly), the preview answers `400 INVALID_QUANTITY` instead of a rounded amount.
+Tiered lines are priced by Stripe and are not limited this way. The bound covers what Quotum
+creates; a quantity set in Stripe directly, such as in the Dashboard, is not checked by it.
+
 ## Paddle fixed-plan checkout
 
 Paddle is sandbox-only and accepts `checkout_plan` and `checkout_product` through the same routes.
