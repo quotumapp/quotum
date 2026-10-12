@@ -130,6 +130,36 @@ export function defaultPlanAllowanceEndingSql(
 }
 
 /**
+ * Whether an allocation is an allowance of the account's latest default-plan grant that the grant's
+ * end closed inside the allowance's window: a paid base plan or a trial superseded the grant, or the
+ * catalog dropped the marker. The default plan resumes such an allowance, with its use kept, when it
+ * starts again inside the window (see `resumeDefaultPlanAllowances`), so what is true of its use
+ * now is true of what the account reads then. An allowance whose window has ended never resumes.
+ * Takes the allocation's table alias.
+ */
+export function defaultPlanAllowanceResumableSql(
+	projectId: string,
+	allocation: DrizzleSQL,
+): DrizzleSQL {
+	return drizzleSql`(
+		EXISTS (
+			SELECT 1
+			FROM plan_grants closed
+			WHERE closed.project_id = ${projectId}
+				AND closed.id = ${allocation}.plan_grant_id
+				AND closed.origin = 'default'
+				AND closed.status IN ('superseded', 'ended')
+				AND closed.id = (
+					SELECT latest.id
+					FROM (${previousDefaultGrantSql(projectId, drizzleSql`closed.customer_id`)}) latest
+				)
+		)
+		AND (${allocation}.period_start_at IS NULL OR ${allocation}.period_start_at <= clock_timestamp())
+		AND (${allocation}.period_end_at IS NULL OR ${allocation}.period_end_at > clock_timestamp())
+	)`;
+}
+
+/**
  * Whether the account's default-plan grant differs from what the catalog asks for: one to start,
  * one to supersede because a base plan took over, or one to move or end after a publish.
  */

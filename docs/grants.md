@@ -94,7 +94,9 @@ with no end:
   account's previous default-plan grant and takes over what that grant left in the windows still
   running, so falling back within a window resumes it instead of refilling it, and its meter limits
   keep counting the same window. The projection that records the ending also carries the default
-  plan's keys.
+  plan's keys. A usage correction of what the superseded allowance spent lowers its use at once, so
+  the resumed allowance reads what is left after it (see
+  [Pricing usage](metering.md#pricing-usage)).
 
 A publish that changes the default plan changes the accounts that hold it, in the background.
 - **The plan is republished with a new version:** each grant moves in place. Its meter limits

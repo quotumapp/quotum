@@ -606,6 +606,8 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		expect(await usage()).toEqual({ consumed: "20", available: "350" });
 		await correctEvent(original, "20", "carried-fix-2");
 		expect(await usage()).toEqual({ consumed: "0", available: "370" });
+		// The balance the switch carried is not credited again for usage that went back to version 2.
+		expect((await carryAllowance())?.quantity).toBe("70.000000000");
 		expect(await carriedUsage()).toEqual([{ requested: "30.000000000", applied: "0.000000000" }]);
 		// Version 2 can spend its whole allowance again, and nothing more.
 		await spend(300, "spend-everything");
@@ -613,6 +615,109 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 		await expect(correctEvent(original, "1", "carried-fix-3")).rejects.toMatchObject({
 			code: "CORRECTION_EXCEEDS_USAGE",
 		});
+	});
+
+	it("gives a correction back on the carry that holds the allowance's unused balance", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await sync(1);
+		const original = await spendEvent(30, "spend-then-carry-balance");
+		await commercialSwitch("migration-plan", "carry-balance-then-correct", {
+			balances: ["ai_credits"],
+		});
+		await sync(2);
+		// Version 1's allowance ended with 30 used and the 70 it left became the carry.
+		expect(await available()).toBe("370");
+
+		const first = await correctEvent(original, "10", "balance-fix-1");
+		expect(first).toMatchObject({ walletQuantity: "-10", balance: { available: "380" } });
+		expect(await available()).toBe("380");
+		expect(await carryAllowance()).toMatchObject({
+			quantity: "80.000000000",
+			consumed: "0.000000000",
+		});
+		expect(await versionOneAllowance()).toMatchObject({ consumed: "20.000000000", ended: true });
+
+		// Repeating a recorded correction answers it again and credits nothing twice.
+		expect(await correctEvent(original, "10", "balance-fix-1")).toMatchObject({
+			usageEventId: first.usageEventId,
+		});
+		expect(await available()).toBe("380");
+
+		await correctEvent(original, "20", "balance-fix-2");
+		expect(await available()).toBe("400");
+		expect(await carryAllowance()).toMatchObject({ quantity: "100.000000000" });
+		expect(await versionOneAllowance()).toMatchObject({ consumed: "0.000000000" });
+		// The event is corrected in full, so there is nothing left of it to correct.
+		await expect(correctEvent(original, "1", "balance-fix-3")).rejects.toMatchObject({
+			code: "CORRECTION_EXCEEDS_USAGE",
+		});
+		expect(await available()).toBe("400");
+
+		// The carry and version 2 can spend what they hold, and nothing more.
+		await spend(400, "spend-everything-after-balance-fix");
+		expect(await available()).toBe("0");
+	});
+
+	it("hands the corrected balance back to the allowance a return resumes", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await sync(1);
+		const original = await spendEvent(30, "spend-then-carry-then-return");
+		await commercialSwitch("migration-plan", "carry-balance-then-return", {
+			balances: ["ai_credits"],
+		});
+		await sync(2);
+		await correctEvent(original, "10", "return-fix-1");
+		expect(await available()).toBe("380");
+
+		await migrateBackToVersionOne();
+
+		// The carry ended and version 1's allowance is open again, with 20 of the 30 still used.
+		expect(await versionOneAllowance()).toMatchObject({ consumed: "20.000000000", ended: false });
+		expect(await available()).toBe("80");
+		await correctEvent(original, "20", "return-fix-2");
+		expect(await versionOneAllowance()).toMatchObject({ consumed: "0.000000000" });
+		expect(await available()).toBe("100");
+	});
+
+	it("records a correction that no live carry can take, as for any ended allowance", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await sync(1);
+		const original = await spendEvent(30, "spend-then-expire-carry");
+		await commercialSwitch("migration-plan", "carry-then-expire", { balances: ["ai_credits"] });
+		await sync(2);
+		// The carry's window is over, so what it held is gone, and so is a correction's way back.
+		await context.sql`
+			UPDATE balance_allocations SET expires_at = now() - INTERVAL '1 second'
+			WHERE source_kind = 'carry_over'
+		`;
+		expect(await available()).toBe("300");
+
+		const corrected = await correctEvent(original, "30", "expired-carry-fix");
+
+		expect(corrected).toMatchObject({ walletQuantity: "-30" });
+		expect(await available()).toBe("300");
+		expect(await versionOneAllowance()).toMatchObject({ consumed: "30.000000000" });
+	});
+
+	it("records a correction of an allowance the switch carried nothing from", async () => {
+		await addAllowance(1, "100");
+		await addAllowance(2, "300");
+		await sync(1);
+		const original = await spendEvent(100, "spend-everything-then-carry");
+		await commercialSwitch("migration-plan", "carry-nothing", { balances: ["ai_credits"] });
+		await sync(2);
+		// Nothing was unused, so no carry exists to hold a correction.
+		expect(await carryAllowance()).toBeUndefined();
+		expect(await available()).toBe("300");
+
+		const corrected = await correctEvent(original, "40", "nothing-carried-fix");
+
+		expect(corrected).toMatchObject({ walletQuantity: "-40" });
+		expect(await available()).toBe("300");
+		expect(await carryAllowance()).toBeUndefined();
 	});
 
 	it("never gives back more than the capped carry charged", async () => {
@@ -786,6 +891,55 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 			}
 		}
 	}, 600_000);
+
+	it("returns every corrected quantity through random spends, corrections and balance carries", async () => {
+		for (const seed of [11, 29, 47, 211]) {
+			await resetForSecondRun();
+			await threePlans("1000");
+			await sync(1);
+			const random = seeded(seed);
+			const plans = [
+				["migration-plan", 1],
+				["other-plan", 2],
+				["third-plan", 3],
+			] as const;
+			let current = 0;
+			const events: Array<{ id: string; recordedAt: string; left: number }> = [];
+			for (let step = 0; step < 40; step++) {
+				const roll = random();
+				const trace = `seed ${seed} step ${step}`;
+				if (roll < 0.4) {
+					const credits = 1 + Math.floor(random() * 9);
+					events.push({
+						...(await spendEvent(credits, `balance-walk-${seed}-${step}`)),
+						left: credits,
+					});
+				} else if (roll < 0.7) {
+					const open = events.filter((event) => event.left > 0);
+					const event = open[Math.floor(random() * open.length)];
+					if (event === undefined) continue;
+					const credits = 1 + Math.floor(random() * event.left);
+					const before = Number(await available());
+					await correctEvent(event, String(credits), `balance-walk-fix-${seed}-${step}`);
+					event.left -= credits;
+					// The usage was spent on the allowance live then, or on one a switch ended, and its
+					// balance reached the carry: either way the whole correction is spendable again.
+					expect({ trace, available: Number(await available()) - before }).toEqual({
+						trace,
+						available: credits,
+					});
+				} else if (current < plans.length - 1) {
+					// Forward only, so no allowance is carried from twice.
+					current += 1;
+					const [key, version] = plans[current] ?? plans[0];
+					await commercialSwitch(key, `balance-walk-switch-${seed}-${step}`, {
+						balances: ["ai_credits"],
+					});
+					await sync(version);
+				}
+			}
+		}
+	}, 120_000);
 });
 
 function changeIntent(effectiveMode: "immediate" | "period_end") {
@@ -1239,6 +1393,18 @@ async function allowances() {
 		ORDER BY feature.key, allocation.id
 	`;
 	return rows.map((row) => ({ ...row }));
+}
+
+/** The `carry_over` allocation of the subscription, when a switch created one. */
+async function carryAllowance() {
+	return (await allowances()).find((row) => row.source_kind === "carry_over");
+}
+
+/** Version 1's plan allowance of `ai_credits`, which a switch to version 2 ends. */
+async function versionOneAllowance() {
+	return (await allowances()).find(
+		(row) => row.source_kind === "subscription" && row.version === 1,
+	);
 }
 
 async function carriedUsage() {

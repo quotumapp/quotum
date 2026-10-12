@@ -147,7 +147,10 @@ An immediate `subscription_change` intent can carry some of that over, per consu
   that feature, or at the end of the billing period when the new item does not reset or the new
   plan lacks the feature. What a lifetime allowance left never expires: it stays the lifetime
   credit the outgoing version granted. It is never rolled over, and the balance breakdown names its
-  origin in `carryOverOriginAllocationId`.
+  origin in `carryOverOriginAllocationId`. A usage correction of what the outgoing allowance spent
+  before the switch grows the carry by the quantity returned, as if the correction had come first,
+  and a return to the outgoing version hands that quantity back to the resumed allowance. A switch
+  that carried nothing, because the allowance had nothing unused, leaves no carry to take it.
 - **`usages`:** the feature's usage in the outgoing allowance's current reset window, its period
   when it does not reset, or everything a lifetime allowance consumed, is written as consumed
   quantity on the new allowance, so an upgrade does not reset consumption. Usage in earlier windows of the period has reset already and

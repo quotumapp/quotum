@@ -425,6 +425,9 @@ async function carryOverUsage(executor: QueryExecutor, input: CarryOverInput): P
  * With `closedSource` the allowance the correction named is itself reduced, since a plan change
  * ended it and the usual restoring skipped it. An allowance that is reversed, or expired with its
  * rollover still to run, is left alone, as every other correction leaves such an allowance.
+ *
+ * Returns whether a carry took usage of the allowance after the event: the correction then went
+ * where that usage now sits, and its balance, if one was carried too, is not credited again.
  */
 export async function followCarriedUsage(
 	executor: QueryExecutor,
@@ -436,7 +439,7 @@ export async function followCarriedUsage(
 		quantity: string;
 		closedSource: boolean;
 	},
-): Promise<void> {
+): Promise<boolean> {
 	const rows = await executeRows<{
 		subscription_change_id: string;
 		from_allocation_id: string | number;
@@ -474,11 +477,11 @@ export async function followCarriedUsage(
 			? [index]
 			: [],
 	);
-	if (portions.length === 0) return;
+	if (portions.length === 0) return false;
 	const quantity = allocationUnits(input.quantity);
 	if (input.closedSource) {
 		const reduced = await reduceCopy(executor, input.projectId, input.allocationId, quantity);
-		if (reduced === null) return;
+		if (reduced === null) return true;
 	}
 	// What is left of each portion once the correction is taken from them, oldest first.
 	const caps = new Map<number, bigint>();
@@ -519,6 +522,61 @@ export async function followCarriedUsage(
 			`,
 		);
 	}
+	return true;
+}
+
+/**
+ * A correction takes `quantity` back from the plan allowance `allocationId`, which an immediate plan
+ * change ended after carrying its unused balance (`balances`) into a `carry_over` allocation. The
+ * ended allowance cannot take the quantity back, so it goes where the rest of that balance went:
+ * the live carry grows by it and the ended allowance gives it up, exactly as if the usage had been
+ * corrected before the switch. The carry then holds what the allowance would have carried, and a
+ * return to the allowance's version, which ends the carry and resumes the allowance, hands the same
+ * quantity back to it.
+ *
+ * Nothing changes without a live carry: it expired with its window, was ended by a return, or the
+ * switch carried nothing because the allowance had no unused quantity. The allowance is then
+ * ended for good, as any ended allowance is for a correction, and its usage is not credited
+ * anywhere. An allowance that is reversed, or expired with its rollover still to run, is left
+ * alone (see `reduceCopy`).
+ */
+export async function restoreCarriedBalance(
+	executor: QueryExecutor,
+	input: { projectId: string; allocationId: string; quantity: string },
+): Promise<void> {
+	const carry = await executeOne<{ id: string | number | bigint }>(
+		executor,
+		drizzleSql`
+			SELECT id
+			FROM balance_allocations
+			WHERE project_id = ${input.projectId}
+				AND source_kind = 'carry_over'
+				AND carry_over_origin_allocation_id = ${input.allocationId}::bigint
+				AND reversed_at IS NULL
+				AND (expires_at IS NULL OR expires_at > clock_timestamp())
+			ORDER BY id DESC
+			LIMIT 1
+			FOR UPDATE
+		`,
+	);
+	if (carry === null) return;
+	const returned = await reduceCopy(
+		executor,
+		input.projectId,
+		input.allocationId,
+		allocationUnits(input.quantity),
+	);
+	if (returned === null || returned === 0n) return;
+	await executeOne(
+		executor,
+		drizzleSql`
+			UPDATE balance_allocations
+			SET quantity = quantity + ${unitsToDecimal(returned, allocationScale)}::numeric,
+				updated_at = now()
+			WHERE project_id = ${input.projectId} AND id = ${String(carry.id)}::bigint
+			RETURNING id
+		`,
+	);
 }
 
 /**
