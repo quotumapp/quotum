@@ -364,8 +364,16 @@ the replaced limit keeps its capacity, settles once against the replacing limit 
 frees it when released or expired. A reservation placed before a first limit existed holds nothing
 under it, and its confirmation counts against the limit when it is confirmed. A correction lowers
 every limit that counts the corrected usage, including one that started from it. A window that
-opened before a usage limit counted recorded usage keeps what it counted until it rolls; saving the
-account's or entity's limit again opens a window that counts it. `GET /controls` reports each
+opened before a usage limit counted recorded usage (before v0.27.0) keeps what it counted until it
+rolls; saving the account's or entity's limit again opens a window that counts it. A plan default's
+open window is not counted again either when the entities it is in force for change, as when an
+account-wide plan grant starts or ends beside an entity-bound subscription: until it rolls it lacks
+the earlier usage of an entity the limit newly covers and keeps that of an entity it no longer
+covers. A correction of usage that was not written under the limit, because it predates the window
+or the limit did not cover its entity then, goes by the entities the limit covers when the
+correction is made, whether or not the window counted that usage: it lowers a window that never
+counted it and leaves a window that did when the limit no longer covers the entity. Neither moves
+the window further from the recorded usage. `GET /controls` reports each
 limit's `windowStartAt` and `windowEndAt` (both `null` for `lifetime`). A percentage alert follows
 the usage limit counted in its own window, and a hold stays in the window it was taken in:
 confirming after the window rolls charges the earlier window.
