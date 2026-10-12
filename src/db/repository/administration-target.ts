@@ -31,7 +31,7 @@ export async function administrationTarget(
 			query = sql`SELECT to_jsonb(r) - 'metadata' AS target FROM promotion_redemptions r WHERE r.project_id=${projectId} AND r.id=${account}::uuid`;
 			break;
 		case "promotions.codes.deactivate":
-			query = sql`SELECT to_jsonb(c) - 'code' - 'code_hash' AS target FROM promotion_codes c WHERE c.project_id=${projectId} AND c.id=${id}::uuid`;
+			query = sql`SELECT to_jsonb(c) - 'code' - 'normalized_code' - 'code_hash' AS target FROM promotion_codes c WHERE c.project_id=${projectId} AND c.id=${id}::uuid`;
 			break;
 		case "usage.correct":
 			query = sql`SELECT to_jsonb(e) - 'metadata' AS target FROM usage_events e WHERE e.project_id=${projectId} AND e.customer_id IN (${customer}) AND (e.id=${id}::uuid OR e.original_event_id=${id}::uuid) ORDER BY e.recorded_at,e.id`;

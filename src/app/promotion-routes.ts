@@ -176,6 +176,8 @@ export const listPromotionCodesQuerySchema = z
 		limit: decimalDigitsQuery(z.coerce.number().int().positive().max(100).default(25)),
 		cursor: z.string().trim().min(1).optional(),
 		active: z.enum(["true", "false"]).optional(),
+		/** Only codes an operator created, or only codes a gift purchase minted. */
+		source: z.enum(["operator", "gift"]).optional(),
 	})
 	.strict();
 
@@ -218,6 +220,8 @@ export const listAccountRedemptionsQuerySchema = z
 		cursor: z.string().trim().min(1).optional(),
 	})
 	.strict();
+
+export const listAccountGiftsQuerySchema = listAccountRedemptionsQuerySchema;
 
 const redemptionParams = z.object({ redemptionId: z.uuid() }).strict();
 const accountRedemptionParams = z
@@ -581,6 +585,7 @@ export function registerPromotionRoutes({
 					limit: query.limit,
 					cursor: query.cursor ?? null,
 					active: query.active === undefined ? null : query.active === "true",
+					source: query.source ?? null,
 				},
 			);
 			return { success: true, data: result.items, pagination: { nextCursor: result.nextCursor } };
@@ -739,6 +744,32 @@ export function registerPromotionRoutes({
 				path: "/v1/billing-accounts/:billingAccountId/promotion-redemptions",
 				responses: {
 					200: responses.getV1BillingAccountsByBillingAccountIdPromotionRedemptionsResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	// Not opted in to read-only credentials: a gift's codes are bearer secrets, like the codes the
+	// redemption routes take, so only a full project key reads them.
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/gifts",
+		async ({ params, query, project }) => {
+			const result = await service.listAccountGifts(
+				privateProject(project),
+				params.billingAccountId,
+				{ limit: query.limit, cursor: query.cursor ?? null },
+			);
+			return { success: true, data: result.items, pagination: { nextCursor: result.nextCursor } };
+		},
+		{
+			params: accountParams,
+			query: listAccountGiftsQuerySchema,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdGifts",
+				tags: ["promotions"],
+				path: "/v1/billing-accounts/:billingAccountId/gifts",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdGiftsResponse200Schema,
 				},
 			}),
 		},

@@ -12,6 +12,7 @@ import type { PlanGrantStatus } from "../../billing/plan-grants";
 import {
 	type CommercialPromotion,
 	type CreatePromotionInput,
+	type GiftRecord,
 	type NormalizedPromotionCode,
 	normalizeCreatePromotionInput,
 	normalizePromotionCode,
@@ -55,7 +56,7 @@ import { allocationSpendOrderSql } from "./allocation-order";
 import { linkAppleOfferInTx } from "./apple-promotions";
 import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
-import { promotionBacksGifts } from "./gift-sales";
+import { promotionBacksGifts, readAccountGifts } from "./gift-reads";
 import { ensureCustomer } from "./identities";
 import { lockCustomerRow } from "./invalidations";
 import {
@@ -139,6 +140,8 @@ interface PromotionCodeRow {
 	created_at: Timestamp;
 	deactivated_by: string | null;
 	deactivated_at: Timestamp | null;
+	gift_purchase_id: string | null;
+	gift_ordinal: number | null;
 	cursor_created_at: string;
 }
 
@@ -524,7 +527,7 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 	async listPromotionCodes(
 		project: ProjectInstanceContext,
 		key: string,
-		input: PromotionListInput & { active?: boolean | null },
+		input: PromotionListInput & { active?: boolean | null; source?: "operator" | "gift" | null },
 	): Promise<PromotionListResult<PromotionCodeRecord>> {
 		const projectId = project.projectInstanceId;
 		const promotion = await requirePromotion(this.database, projectId, drizzleSql`p.key = ${key}`);
@@ -532,6 +535,8 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 		if (input.active !== undefined && input.active !== null) {
 			conditions.push(drizzleSql`c.active = ${input.active}`);
 		}
+		if (input.source === "gift") conditions.push(drizzleSql`c.gift_purchase_id IS NOT NULL`);
+		if (input.source === "operator") conditions.push(drizzleSql`c.gift_purchase_id IS NULL`);
 		const cursor = keysetCondition(input.cursor, "c");
 		if (cursor !== null) {
 			conditions.push(cursor);
@@ -1055,6 +1060,19 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 				},
 			});
 		});
+	}
+
+	async listAccountGifts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		input: PromotionListInput,
+	): Promise<PromotionListResult<GiftRecord>> {
+		return await readAccountGifts(
+			this.database,
+			project.projectInstanceId,
+			billingAccountId,
+			input,
+		);
 	}
 
 	async listAccountRedemptions(
@@ -2337,7 +2355,8 @@ async function codeRows(
 				c.expires_at, c.max_redemptions, c.max_redemptions_per_customer,
 				c.first_purchase_only, c.billing_account_id, c.hosted_checkout_enabled,
 				c.redeemed_count, c.reserved_count, c.created_by, c.created_at, c.deactivated_by,
-				c.deactivated_at, ${cursorTimestamp("c")} AS cursor_created_at
+				c.deactivated_at, c.gift_purchase_id, c.gift_ordinal,
+				${cursorTimestamp("c")} AS cursor_created_at
 			FROM promotion_codes c
 			JOIN promotions p ON p.project_id = c.project_id AND p.id = c.promotion_id
 			WHERE c.project_id = ${projectId} AND ${condition}
@@ -2523,6 +2542,10 @@ function toCodeRecord(row: PromotionCodeRow): PromotionCodeRecord {
 		createdAt: toIso(row.created_at),
 		deactivatedBy: row.deactivated_by,
 		deactivatedAt: row.deactivated_at === null ? null : toIso(row.deactivated_at),
+		gift:
+			row.gift_purchase_id === null || row.gift_ordinal === null
+				? null
+				: { purchaseId: row.gift_purchase_id, ordinal: row.gift_ordinal },
 	};
 }
 

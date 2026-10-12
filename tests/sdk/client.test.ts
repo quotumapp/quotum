@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { GiftRecord } from "../../src/billing/promotions";
 import { BillingApiError, BillingClient } from "../../src/sdk/client";
 
 describe("BillingClient", () => {
@@ -498,6 +499,43 @@ describe("BillingClient", () => {
 		expect(await calls[0]?.json()).toEqual({ planKey: "pro", durationDays: 14 });
 		expect(calls[3]?.headers.get("idempotency-key")).toBe("end-1");
 		expect(calls.some((call) => call.headers.has("x-billing-operator-key"))).toBe(false);
+	});
+
+	it("reads the gifts an account bought with a project key", async () => {
+		const calls: Request[] = [];
+		const gift: GiftRecord = {
+			purchaseId: "44444444-4444-4444-8444-444444444444",
+			productKey: "gift_12m",
+			purchasedAt: "2026-10-12T12:00:00.000Z",
+			reversedAt: null,
+			reversalReason: null,
+			codes: [
+				{
+					code: "K7Q2-M9XD-4TRW-P8HB-3NCF",
+					status: "available",
+					expiresAt: "2028-10-12T12:00:00.000Z",
+					redeemedAt: null,
+				},
+			],
+		};
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return Response.json({ success: true, data: [gift], pagination: { nextCursor: "next" } });
+			},
+		});
+
+		const page = await client.promotions.accountGifts("account 1", { limit: 10, cursor: "abc" });
+
+		expect(page).toEqual({ data: [gift], nextCursor: "next" });
+		expect(`${calls[0]?.method} ${new URL(calls[0]?.url ?? "").pathname}`).toBe(
+			"GET /v1/billing-accounts/account%201/gifts",
+		);
+		expect(new URL(calls[0]?.url ?? "").search).toBe("?limit=10&cursor=abc");
+		expect(calls[0]?.headers.has("x-billing-operator-key")).toBe(false);
 	});
 
 	it("redeems codes, reads the account ledger and revokes redemptions", async () => {

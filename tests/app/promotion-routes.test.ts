@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createApp } from "../../src/app";
 import type {
+	GiftRecord,
 	PromotionCodeRecord,
 	PromotionRecord,
 	PromotionRedemptionRecord,
@@ -100,6 +101,29 @@ const code: PromotionCodeRecord = {
 	createdAt: "2026-09-16T00:00:00.000Z",
 	deactivatedBy: null,
 	deactivatedAt: null,
+	gift: null,
+};
+
+const gift: GiftRecord = {
+	purchaseId: "44444444-4444-4444-8444-444444444444",
+	productKey: "gift_12m",
+	purchasedAt: "2026-10-12T12:00:00.000Z",
+	reversedAt: null,
+	reversalReason: null,
+	codes: [
+		{
+			code: "K7Q2-M9XD-4TRW-P8HB-3NCF",
+			status: "available",
+			expiresAt: "2028-10-12T12:00:00.000Z",
+			redeemedAt: null,
+		},
+		{
+			code: "W3NF-8HCV-2JTA-R6KD-5MPQ",
+			status: "redeemed",
+			expiresAt: "2028-10-12T12:00:00.000Z",
+			redeemedAt: "2026-10-20T08:14:09.000Z",
+		},
+	],
 };
 
 const redemption: PromotionRedemptionRecord = {
@@ -171,6 +195,7 @@ function recordingService() {
 			items: [redemption],
 			nextCursor: null,
 		}),
+		listAccountGifts: record("listAccountGifts", { items: [gift], nextCursor: "next" }),
 		getAccountRedemption: record("getAccountRedemption", redemption),
 		revokePromotionRedemption: record("revokePromotionRedemption", {
 			duplicate: false,
@@ -212,7 +237,10 @@ function promotionApp(service: PromotionServiceLike) {
 			connections: fixtureConnections(env.connectionFixtures),
 			projectContextResolver: projectContextResolver({
 				contexts: [projectInstanceContext("acme")],
-				credentials: { secret: "acme" },
+				credentials: {
+					secret: "acme",
+					"read-key": { projectInstanceKey: "acme", access: "read_only" },
+				},
 			}),
 			promotionService: service,
 		}),
@@ -391,7 +419,11 @@ describe("promotion routes", () => {
 		expect(synced.status).toBe(200);
 		expect(calls.map((call) => [call.method, ...call.args])).toEqual([
 			["listPromotions", { limit: 10, cursor: null, status: "active" }],
-			["listPromotionCodes", "spring-sale", { limit: 25, cursor: null, active: false }],
+			[
+				"listPromotionCodes",
+				"spring-sale",
+				{ limit: 25, cursor: null, active: false, source: null },
+			],
 			[
 				"listPromotionRedemptions",
 				"spring-sale",
@@ -494,6 +526,62 @@ describe("promotion routes", () => {
 					idempotencyKey: "redeem-1",
 					actor: "user:42",
 				},
+			],
+		]);
+	});
+
+	it("lists the gifts an account bought, for a project key only", async () => {
+		const { service, calls } = recordingService();
+		const app = promotionApp(service);
+		const backend = { authorization: "Bearer secret" };
+		const readOnlyBackend = { authorization: "Bearer read-key" };
+		const path = "/v1/billing-accounts/acct_1/gifts?limit=5&cursor=abc";
+
+		const read = await testRequest(app, path, { headers: backend });
+		const readOnly = await testRequest(app, path, { headers: readOnlyBackend });
+		const unfiltered = await testRequest(app, "/v1/billing-accounts/acct_1/gifts", {
+			headers: backend,
+		});
+		const badLimit = await testRequest(app, "/v1/billing-accounts/acct_1/gifts?limit=0", {
+			headers: backend,
+		});
+
+		expect(read.status).toBe(200);
+		expect(await read.json()).toEqual({
+			success: true,
+			data: [gift],
+			pagination: { nextCursor: "next" },
+		});
+		expect(readOnly.status).toBe(403);
+		expect((await readOnly.json()).error.code).toBe("READ_ONLY_CREDENTIAL");
+		expect(unfiltered.status).toBe(200);
+		expect(badLimit.status).toBe(400);
+		expect(calls.map((call) => [call.method, ...call.args])).toEqual([
+			["listAccountGifts", "acct_1", { limit: 5, cursor: "abc" }],
+			["listAccountGifts", "acct_1", { limit: 25, cursor: null }],
+		]);
+	});
+
+	it("filters an operator's codes by where they came from", async () => {
+		const { service, calls } = recordingService();
+		const app = promotionApp(service);
+
+		const response = await testRequest(
+			app,
+			"/v1/admin/promotions/spring-sale/codes?source=gift&active=true",
+			{ headers: operatorHeaders },
+		);
+		const invalid = await testRequest(app, "/v1/admin/promotions/spring-sale/codes?source=other", {
+			headers: operatorHeaders,
+		});
+
+		expect(response.status).toBe(200);
+		expect(invalid.status).toBe(400);
+		expect(calls.map((call) => [call.method, ...call.args])).toEqual([
+			[
+				"listPromotionCodes",
+				"spring-sale",
+				{ limit: 25, cursor: null, active: true, source: "gift" },
 			],
 		]);
 	});

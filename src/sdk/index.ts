@@ -30,6 +30,7 @@ export type {
 } from "../billing/plan-grants";
 export type {
 	CreatePromotionInput,
+	GiftRecord,
 	PromotionCodeInput,
 	PromotionCodeRecord,
 	PromotionEffect,

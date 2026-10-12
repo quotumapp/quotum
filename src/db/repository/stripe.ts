@@ -16,7 +16,7 @@ import {
 	getEntitlementSnapshot,
 	recomputeCustomerEntitlements,
 } from "./entitlements";
-import { readGiftSale } from "./gift-sales";
+import { readGiftSale } from "./gift-reads";
 import { deactivateGiftCodesForPurchaseInTx, mintGiftCodesForPurchaseInTx } from "./gifts";
 import {
 	bindStripeEventCustomer,

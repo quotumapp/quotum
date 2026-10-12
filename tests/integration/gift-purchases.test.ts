@@ -319,6 +319,109 @@ localDescribe("Gift purchases integration", () => {
 		expect(state).toEqual({ reason: "refund", status: "refunded" });
 	});
 
+	it("shows the buyer each code with its status, and never who redeemed it", async () => {
+		await buy();
+		const [first, second] = await codes();
+		const client = api();
+		const gifts = async () => {
+			const response = await client.get("/v1/billing-accounts/buyer/gifts");
+			expect(response.status).toBe(200);
+			return response.body;
+		};
+
+		const before = await gifts();
+		expect(before.pagination).toEqual({ nextCursor: null });
+		expect(before.data).toHaveLength(1);
+		expect(before.data[0]).toMatchObject({
+			productKey: "gift_12m",
+			reversedAt: null,
+			reversalReason: null,
+		});
+		expect(before.data[0].codes.map((entry: { status: string }) => entry.status)).toEqual([
+			"available",
+			"available",
+		]);
+		expect(before.data[0].codes.map((entry: { code: string }) => entry.code)).toEqual([
+			(first as CodeRow).code,
+			(second as CodeRow).code,
+		]);
+
+		await client.redeem("reader", (first as CodeRow).code.toLowerCase(), "redeem-1");
+		const redeemed = (await gifts()).data[0].codes[0];
+		expect(redeemed.status).toBe("redeemed");
+		expect(redeemed.redeemedAt).toEqual(expect.any(String));
+		expect(JSON.stringify(redeemed)).not.toContain("reader");
+		expect(Object.keys(redeemed).sort()).toEqual(["code", "expiresAt", "redeemedAt", "status"]);
+
+		await refund("pi_gift_1", price, "full");
+		const after = (await gifts()).data[0];
+		expect(after.codes.map((entry: { status: string }) => entry.status)).toEqual([
+			"redeemed",
+			"deactivated",
+		]);
+		expect(after.reversalReason).toBe("refund");
+		expect(after.reversedAt).toEqual(expect.any(String));
+	});
+
+	it("marks a code expired once its validity elapsed, and pages purchases newest first", async () => {
+		await buy("pi_gift_1");
+		await buy("pi_gift_2");
+		await context.sql`
+			UPDATE promotion_codes SET expires_at = now() - interval '1 day'
+			WHERE project_id = ${projectId} AND gift_ordinal = 1
+				AND gift_purchase_id = (
+					SELECT id FROM purchases WHERE project_id = ${projectId} AND transaction_id = 'pi_gift_1'
+				)
+		`;
+		const client = api();
+
+		const first = await client.get("/v1/billing-accounts/buyer/gifts?limit=1");
+		const second = await client.get(
+			`/v1/billing-accounts/buyer/gifts?limit=1&cursor=${first.body.pagination.nextCursor}`,
+		);
+
+		expect(first.body.data).toHaveLength(1);
+		expect(second.body.data).toHaveLength(1);
+		expect(second.body.pagination.nextCursor).toBeNull();
+		const older = second.body.data[0];
+		expect(older.codes.map((entry: { status: string }) => entry.status)).toEqual([
+			"expired",
+			"available",
+		]);
+		expect(first.body.data[0].purchaseId).not.toBe(older.purchaseId);
+		const empty = await client.get("/v1/billing-accounts/nobody/gifts");
+		expect(empty.body).toEqual({ success: true, data: [], pagination: { nextCursor: null } });
+	});
+
+	it("lists a gift's codes for an operator by where they came from", async () => {
+		await buy();
+		await context.repository.promotions.addPromotionCodes(
+			project,
+			"voucher-12m",
+			[{ code: "OPERATOR-CODE" }],
+			"operator",
+		);
+
+		const gifted = await context.repository.promotions.listPromotionCodes(project, "voucher-12m", {
+			limit: 10,
+			source: "gift",
+		});
+		const operator = await context.repository.promotions.listPromotionCodes(
+			project,
+			"voucher-12m",
+			{
+				limit: 10,
+				source: "operator",
+			},
+		);
+
+		expect(gifted.items.map((entry) => entry.gift?.ordinal).sort()).toEqual([1, 2]);
+		expect(gifted.items.every((entry) => entry.createdBy === "system:gift-purchase")).toBe(true);
+		expect(operator.items.map((entry) => [entry.code, entry.gift])).toEqual([
+			["OPERATOR-CODE", null],
+		]);
+	});
+
 	it("changes no code when the refund is partial", async () => {
 		await buy();
 

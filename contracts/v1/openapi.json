@@ -6067,6 +6067,24 @@
                 "firstPurchaseOnly": {
                   "type": "boolean"
                 },
+                "gift": {
+                  "properties": {
+                    "ordinal": {
+                      "type": "number"
+                    },
+                    "purchaseId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "purchaseId",
+                    "ordinal"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "hostedCheckoutEnabled": {
                   "type": "boolean"
                 },
@@ -6118,7 +6136,8 @@
                 "createdBy",
                 "createdAt",
                 "deactivatedBy",
-                "deactivatedAt"
+                "deactivatedAt",
+                "gift"
               ],
               "type": "object"
             },
@@ -9142,6 +9161,113 @@
         "required": [
           "success",
           "data"
+        ],
+        "type": "object"
+      },
+      "getV1BillingAccountsByBillingAccountIdGiftsResponse200": {
+        "properties": {
+          "data": {
+            "items": {
+              "properties": {
+                "codes": {
+                  "items": {
+                    "properties": {
+                      "code": {
+                        "type": "string"
+                      },
+                      "expiresAt": {
+                        "type": "string"
+                      },
+                      "redeemedAt": {
+                        "type": [
+                          "null",
+                          "string"
+                        ]
+                      },
+                      "status": {
+                        "enum": [
+                          "available",
+                          "redeemed",
+                          "expired",
+                          "deactivated"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "code",
+                      "status",
+                      "expiresAt",
+                      "redeemedAt"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "productKey": {
+                  "type": "string"
+                },
+                "purchasedAt": {
+                  "type": "string"
+                },
+                "purchaseId": {
+                  "type": "string"
+                },
+                "reversalReason": {
+                  "enum": [
+                    "refund",
+                    "dispute",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "reversedAt": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
+                }
+              },
+              "required": [
+                "purchaseId",
+                "productKey",
+                "purchasedAt",
+                "reversedAt",
+                "reversalReason",
+                "codes"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "pagination": {
+            "properties": {
+              "nextCursor": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              }
+            },
+            "required": [
+              "nextCursor"
+            ],
+            "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "pagination"
         ],
         "type": "object"
       },
@@ -13588,6 +13714,24 @@
               "firstPurchaseOnly": {
                 "type": "boolean"
               },
+              "gift": {
+                "properties": {
+                  "ordinal": {
+                    "type": "number"
+                  },
+                  "purchaseId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "purchaseId",
+                  "ordinal"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "hostedCheckoutEnabled": {
                 "type": "boolean"
               },
@@ -13639,7 +13783,8 @@
               "createdBy",
               "createdAt",
               "deactivatedBy",
-              "deactivatedAt"
+              "deactivatedAt",
+              "gift"
             ],
             "type": "object"
           },
@@ -13702,6 +13847,24 @@
                     "firstPurchaseOnly": {
                       "type": "boolean"
                     },
+                    "gift": {
+                      "properties": {
+                        "ordinal": {
+                          "type": "number"
+                        },
+                        "purchaseId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "purchaseId",
+                        "ordinal"
+                      ],
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
                     "hostedCheckoutEnabled": {
                       "type": "boolean"
                     },
@@ -13753,7 +13916,8 @@
                     "createdBy",
                     "createdAt",
                     "deactivatedBy",
-                    "deactivatedAt"
+                    "deactivatedAt",
+                    "gift"
                   ],
                   "type": "object"
                 },
@@ -42608,6 +42772,18 @@
               "enum": [
                 "true",
                 "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "enum": [
+                "operator",
+                "gift"
               ],
               "type": "string"
             }
@@ -72853,6 +73029,18 @@
               ],
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "enum": [
+                "operator",
+                "gift"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -81016,6 +81204,197 @@
           "customer"
         ],
         "x-quotum-credential-access": "read_only"
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/gifts": {
+      "get": {
+        "operationId": "getV1BillingAccountsByBillingAccountIdGifts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billingAccountId",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/getV1BillingAccountsByBillingAccountIdGiftsResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (400); see the error code and request ID."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (401); see the error code and request ID."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (403); see the error code and request ID."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (404); see the error code and request ID."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (409); see the error code and request ID."
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (410); see the error code and request ID."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (413); see the error code and request ID."
+          },
+          "415": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (415); see the error code and request ID."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (422); see the error code and request ID."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (429); see the error code and request ID."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (500); see the error code and request ID."
+          },
+          "501": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (501); see the error code and request ID."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuotumError"
+                }
+              }
+            },
+            "description": "Request failed (503); see the error code and request ID."
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/gifts",
+        "tags": [
+          "promotions"
+        ]
       }
     },
     "/v1/billing-accounts/{billingAccountId}/license-assignments": {
