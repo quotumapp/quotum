@@ -109,9 +109,20 @@ export class MerchantStore {
 			.sql`SELECT id FROM platform_service_principals WHERE token_hash=${this.hash(token)} AND active=true`;
 		return rows.length === 1;
 	}
-	async rateLimit(key: string, limit: number, windowMs: number): Promise<void> {
+	/**
+	 * Counts one attempt in a fixed window and refuses with 429 once `limit` is exceeded. Inside a
+	 * transaction, pass its executor: the count then commits or rolls back with the work it guards,
+	 * so a replay or a refused request never spends the budget, and the transaction does not wait
+	 * for a second pool connection while holding its own.
+	 */
+	async rateLimit(
+		key: string,
+		limit: number,
+		windowMs: number,
+		executor: MerchantSql = this.sql,
+	): Promise<void> {
 		const now = this.now();
-		const [row] = await this.sql<
+		const [row] = await executor<
 			{ count: number; reset_at: Date }[]
 		>`INSERT INTO platform_rate_limits(key_hash,count,reset_at) VALUES(${this.hash(key)},1,${new Date(now.getTime() + windowMs)}) ON CONFLICT(key_hash) DO UPDATE SET count=CASE WHEN platform_rate_limits.reset_at<=${now} THEN 1 ELSE platform_rate_limits.count+1 END, reset_at=CASE WHEN platform_rate_limits.reset_at<=${now} THEN EXCLUDED.reset_at ELSE platform_rate_limits.reset_at END RETURNING count,reset_at`;
 		if (row && row.count > limit)

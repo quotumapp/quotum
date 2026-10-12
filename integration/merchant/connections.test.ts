@@ -194,6 +194,36 @@ describe("encrypted merchant connections", () => {
 			).status,
 		).toBe(409);
 	});
+	it("limits one member to thirty stored drafts an hour and charges only a new draft", async () => {
+		const browser = new MerchantBrowser(f);
+		await onboard(browser);
+		const path = "/api/platform/connections/projection/drafts";
+		const draft = (index: number) => browser.request(path, input, { key: `draft-limit-${index}` });
+		// A draft refused for a stale revision stores nothing and spends nothing.
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const stale = await browser.request(path, { ...input, expectedRevision: 9 });
+			expect([stale.status, (await stale.json()).error.code]).toEqual([409, "CONNECTION_CHANGED"]);
+		}
+		const first = await (await draft(0)).json();
+		for (let index = 1; index < 30; index++) expect((await draft(index)).status).toBe(200);
+
+		const limited = await draft(30);
+		expect(Number(limited.headers.get("retry-after"))).toBeLessThanOrEqual(60 * 60);
+		expect([limited.status, (await limited.json()).error.code]).toEqual([429, "RATE_LIMITED"]);
+		expect(await f.sql`SELECT id FROM platform_connection_versions`).toHaveLength(30);
+		// A repeated key replays its draft without storing another.
+		expect((await (await draft(0)).json()).data).toEqual({
+			draftId: first.data.draftId,
+			secretDisclosed: false,
+		});
+
+		// The window ends after an hour; keep the session alive on the way.
+		for (let minutes = 0; minutes < 61; minutes += 20) {
+			f.advance(Math.min(20, 61 - minutes) * 60_000);
+			await browser.json("/api/platform/session");
+		}
+		expect((await draft(30)).status).toBe(200);
+	});
 	it("requires verification and production step-up even before activation", async () => {
 		const browser = new MerchantBrowser(f);
 		await onboard(browser);

@@ -45,6 +45,11 @@ export interface ConnectionGate {
 	confirm(tx: MerchantSql, action: string, target: string): Promise<void>;
 	/** The organization that audit events record. */
 	organizationId(tx: MerchantSql): Promise<string>;
+	/**
+	 * Bounds how fast one actor stores drafts. Called inside the draft transaction once a new
+	 * version is certain to be written, so a replayed key or a refused request spends nothing.
+	 */
+	admitDraft?(tx: MerchantSql): Promise<void>;
 }
 
 export interface ConnectionLifecycleDependencies {
@@ -110,6 +115,7 @@ export class ConnectionLifecycle {
 					"Refresh this connection before editing.",
 					409,
 				);
+			await gate.admitDraft?.(tx);
 			const id = randomUUID();
 			const generated = kind === "projection" ? randomToken() : undefined;
 			if (generated) normalized.secrets.projectionSecret = generated;

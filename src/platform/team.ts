@@ -235,6 +235,21 @@ export class MerchantTeam {
 						"An invitation already exists. Resend it to issue a new link.",
 						409,
 					);
+				// Each invitation, including a resend, mails an address the caller chose. Charged here, inside
+				// the transaction and after every refusal, so a replay or a refused request spends nothing and
+				// a limit hit leaves the invitation a resend would have replaced valid.
+				await this.store.rateLimit(
+					`invitation:principal:${identity.principalId}`,
+					30,
+					60 * 60_000,
+					tx,
+				);
+				await this.store.rateLimit(
+					`invitation:organization:${member.organization_id}`,
+					100,
+					24 * 60 * 60_000,
+					tx,
+				);
 				const [created] = await tx<
 					{ id: string }[]
 				>`INSERT INTO platform_invitations(organization_id,inviter_membership_id,inviter_revision,email,role,token_hash,expires_at) VALUES(${member.organization_id},${member.id},${member.revision},${input.email},${input.role},${this.store.hash(token)},${new Date(this.store.now().getTime() + INVITATION_MS)}) RETURNING id`;

@@ -132,6 +132,10 @@ export class MerchantStepUp {
 					"The selected environment is not active.",
 					404,
 				);
+			// A challenge is a stored row, and a member could otherwise create them without bound.
+			// Charged after the capability and scope checks, inside the transaction, so a replay or
+			// a refused request spends nothing.
+			await this.store.rateLimit(`step-up:principal:${identity.principalId}`, 30, 15 * 60_000, tx);
 			const expires = new Date(this.store.now().getTime() + STEP_UP_MS);
 			// Dated by the application clock, like the proof that must follow it: the column default
 			// is the database clock, and a host clock behind it would reject every fresh proof.
