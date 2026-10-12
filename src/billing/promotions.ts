@@ -482,6 +482,12 @@ const promotionErrorDefinitions = [
 		message:
 			"Promotion has a linked Apple offer; its price is set at Apple, so retire the offer before changing the discount",
 	},
+	{
+		code: "PROMOTION_HAS_ACTIVE_GIFTS",
+		status: 409,
+		message:
+			"Promotion backs a gift that is still sold or gift codes that are neither redeemed nor expired",
+	},
 	{ code: "PROMOTION_TERMS_INVALID", status: 400, message: "Promotion terms are invalid" },
 	{ code: "PROMOTION_TARGET_NOT_FOUND", status: 400, message: "Promotion target was not found" },
 	{

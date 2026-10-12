@@ -1245,6 +1245,12 @@
       ]
     },
     {
+      "code": "PROMOTION_HAS_ACTIVE_GIFTS",
+      "sources": [
+        "src/billing/promotions.ts"
+      ]
+    },
+    {
       "code": "PROMOTION_HOSTED_CHECKOUT_UNSUPPORTED",
       "sources": [
         "src/billing/promotions.ts"

@@ -191,6 +191,37 @@ per plan: the code's per-customer cap, one by default, and the refusal of a seco
 decide. With an Apple offer (`appleOfferId`), a plan grant code answers
 `PROMOTION_CODE_NOT_APPLICABLE`.
 
+### Gift codes
+
+A [gift](catalog.md#gifts) sells plan grant codes: a customer pays once through `checkout_product`
+and Quotum mints the codes that purchase yields, each a single-use `plan_grant` code of the gift's
+promotion. They redeem exactly as [plan grant codes](#plan-grant-codes) do, with the same
+refusals, and the buyer receives no access from the purchase itself.
+
+- **Codes.** A code is 20 symbols in five groups, such as `K7Q2-M9XD-4TRW-P8HB-3NCF`, drawn from
+  an alphabet without `0 1 I L O`: about 99 bits, so a code is the secret that protects the grant
+  and the redemption rate limit is not what makes it safe. Send a code as it was issued; matching
+  ignores case but not the hyphens. A code never collides with an operator's code: it is drawn
+  again.
+- **Minting.** Codes are minted in the transaction that records the completed purchase, keyed by
+  purchase and ordinal, so the second event Stripe sends for one payment, a replayed event and a
+  catalog published since add none. Each code expires `codeValidDays` after the purchase and is
+  never account-restricted or hosted in Stripe Checkout. A fully discounted purchase mints like any
+  other.
+- **Refund and dispute.** A full refund or a dispute deactivates the codes of the purchase that
+  nobody has redeemed; redemption of one answers `PROMOTION_CODE_INACTIVE`. A redeemed code keeps
+  its running grant, and ending it is a deliberate
+  `POST /v1/admin/promotion-redemptions/:redemptionId/revoke`. A partial refund changes no code. A
+  purchase paid in full by a discount can never be reversed, and a dispute that Stripe later closes
+  in the merchant's favor does not restore its codes.
+- **Archiving.** Archiving a promotion refuses every redemption, so
+  `POST /v1/admin/promotions/:key/archive` answers `409 PROMOTION_HAS_ACTIVE_GIFTS` while a gift of
+  the published catalog sells its codes or sold codes are neither redeemed nor expired. Retire the
+  gift and let the checkouts already open finish (a Checkout session expires after at most 24
+  hours) before archiving.
+- **Operators.** A minted code's `createdBy` is `system:gift-purchase`, and
+  `GET /v1/admin/promotions/:promotionKey/codes` lists it with the operator's own.
+
 ### Apple subscription offers
 
 Configure the offer in App Store Connect first. Quotum links it; it does not create or verify its

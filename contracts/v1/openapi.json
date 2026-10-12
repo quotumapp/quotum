@@ -10947,6 +10947,7 @@
                     "kind": {
                       "enum": [
                         "topup",
+                        "gift",
                         "one_time"
                       ],
                       "type": "string"
