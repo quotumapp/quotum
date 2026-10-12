@@ -325,26 +325,31 @@ window; stacked windows, such as a daily and a monthly limit, belong on the plan
 
 A usage limit starts from the usage already recorded in its current window, never from zero: the
 quantity recorded for the feature in that window, less its corrections, for the account's limit by
-every entity and for an entity's limit by that entity only. An account's or entity's first limit, a
-limit with another cadence than the one it replaced, a republished plan's limit and a contract limit
-that takes over from a plan default all start there, and a replacing limit that counts the same
-window keeps the higher of that and the count of the one it replaced. The count is read once, when
-a write opens the window, from the same events a usage alert starts from, and `check` and
-`GET /controls` read it the same way before then; a lifetime window reads the feature's whole
-history for the customer at that point. A spend limit has no recorded charge to read back from
-usage: it counts the spend charged after it took effect, and a replacing spend limit with the same
-window keeps the count of the one it replaced. Usage that a confirmation charged to the window its
-hold was taken in does not count again in the window it was recorded in. Open holds count against a
-replacing limit too: a reservation taken under the replaced limit keeps its capacity, settles once
-against the replacing limit when confirmed and frees it when released or expired. A reservation
-placed before a first limit existed holds nothing under it, and its confirmation counts against the
-limit when it is confirmed. A correction lowers every limit that counts the corrected usage,
-including one that started from it. A window that opened before a usage limit counted recorded
-usage keeps what it counted until it rolls; saving the account's or entity's limit again opens a
-window that counts it. `GET /controls` reports each limit's `windowStartAt` and `windowEndAt` (both
-`null` for `lifetime`). A percentage alert follows the usage limit counted in its own window, and a
-hold stays in the window it was taken in: confirming after the window rolls charges the earlier
-window.
+every entity and for an entity's limit by that entity only. A plan's default limit counts the
+entities it is in force for: every entity when an account-wide subscription, an account-wide plan
+grant or the default plan carries it, and otherwise only the entities of its plan version's
+entity-bound subscriptions. Usage of any other entity, and a write without an entity, is neither
+limited by it nor counted toward it. An account's or entity's first limit, a limit with another
+cadence than the one it replaced, a republished plan's limit and a contract limit that takes over
+from a plan default all start there, and a replacing limit that counts the same window keeps the
+higher of that and the count of the one it replaced. The count is read once, when a write opens the
+window, from the same events a usage alert starts from, and `check` and `GET /controls` read it the
+same way before then; a lifetime window reads the feature's whole history for the customer at that
+point. A spend limit has no recorded charge to read back from usage: it counts the spend charged
+after it took effect, and a replacing spend limit with the same window keeps the count of the one it
+replaced. Usage that a confirmation charged to an earlier window of the same cadence, the one its
+hold was taken in, does not count again in the window it was recorded in; a window of another
+cadence did not hold it, so a monthly limit that replaced a daily one counts a confirmation the
+daily window was charged. Open holds count against a replacing limit too: a reservation taken under
+the replaced limit keeps its capacity, settles once against the replacing limit when confirmed and
+frees it when released or expired. A reservation placed before a first limit existed holds nothing
+under it, and its confirmation counts against the limit when it is confirmed. A correction lowers
+every limit that counts the corrected usage, including one that started from it. A window that
+opened before a usage limit counted recorded usage keeps what it counted until it rolls; saving the
+account's or entity's limit again opens a window that counts it. `GET /controls` reports each
+limit's `windowStartAt` and `windowEndAt` (both `null` for `lifetime`). A percentage alert follows
+the usage limit counted in its own window, and a hold stays in the window it was taken in:
+confirming after the window rolls charges the earlier window.
 
 A usage alert counts its window from the window's start: a new alert starts from the usage already
 recorded in the current window, and if that usage has already reached the threshold, the alert records
