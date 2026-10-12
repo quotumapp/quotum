@@ -567,7 +567,9 @@ export class StripeBillingService
 		if ((this.dependencies.config.taxMode ?? "disabled") !== "disabled") {
 			params.automatic_tax = { enabled: true };
 			params.tax_id_collection = { enabled: true };
-			params.customer_update = { address: "auto" };
+			// Stripe rejects tax ID collection for an existing customer unless Checkout may save the
+			// business name it collects with the ID.
+			params.customer_update = { address: "auto", name: "auto" };
 		}
 
 		if (mode === "payment") {
