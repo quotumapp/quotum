@@ -212,7 +212,7 @@ describeLocalPostgres(describe, describe.skip)(
 			// A preview stored before the bound existed carries the quantity the caller sent.
 			await context.sql`
 			UPDATE commercial_action_previews
-			SET intent = jsonb_set(intent, '{quantities,licensed_seats}', ${String(largest + 1)}::jsonb)
+			SET intent = jsonb_set(intent, '{quantities,licensed_seats}', ${String(largest + 1)}::text::jsonb)
 		`;
 
 			await expectInvalidQuantity(
