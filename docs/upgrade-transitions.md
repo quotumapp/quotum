@@ -14,17 +14,6 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
-## Open reservation index
-
-The metering baseline adds `idx_billing_reservations_customer_active` on
-`reservations (project_id, customer_id, expires_at) WHERE status = 'active'`. Settled reservations
-are never deleted, and every usage write first reclaims the account's expired holds and reads the
-holds that are still open; without an index that leads with the account and holds only open rows,
-both read the account's whole reservation history. No table changes and nothing is backfilled, so
-a dump from the previous release restores as it is: follow steps 1, 2, 4 and 6 of
-[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
-baseline, so a rollback restores the pre-upgrade backup.
-
 ## Promotional plan grants
 
 The metering baseline widens `plan_grants` so that a redeemed `plan_grant` promotion code can give
@@ -49,6 +38,17 @@ the previous version refused, when the plan and the account allow the grant. Arc
 or deactivate its codes before the upgrade if it must stay unused. An older image cannot read the
 new baselines, so a rollback restores the pre-upgrade backup and loses the plan grants redeemed
 since.
+
+## Open reservation index
+
+The metering baseline adds `idx_billing_reservations_customer_active` on
+`reservations (project_id, customer_id, expires_at) WHERE status = 'active'`. Settled reservations
+are never deleted, and every usage write first reclaims the account's expired holds and reads the
+holds that are still open; without an index that leads with the account and holds only open rows,
+both read the account's whole reservation history. No table changes and nothing is backfilled, so
+a dump from the previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup.
 
 ## Subscription reconciliation indexes
 
