@@ -73,11 +73,11 @@ export const usageBodySchema = z
 	})
 	.strict();
 
-const reserveBodySchema = usageBodySchema.extend({
+export const reserveBodySchema = usageBodySchema.extend({
 	expiresInSeconds: z.number().int().min(1).max(86400).default(300),
 });
 
-const confirmBodySchema = z
+export const confirmBodySchema = z
 	.object({
 		quantity: z.string().trim().min(1).max(80),
 		occurredAt: storableDateTimeSchema().nullable().optional(),

@@ -17,7 +17,14 @@ import { publishAiCreditsCatalog } from "../tests/integration/helpers/metering-c
 import { integrationProjectContext } from "../tests/integration/helpers/platform-fixture";
 import { trapInterrupts } from "./lib/interrupts";
 import { driveUserArrivals } from "./lib/load-arrivals";
-import { evaluateLoadGates } from "./lib/load-gates";
+import { evaluateLoadGates, isSuccessStatus } from "./lib/load-gates";
+import {
+	checkRequestBody,
+	confirmRequestBody,
+	consumeRequestBody,
+	loadFeatureKey,
+	reserveRequestBody,
+} from "./lib/load-requests";
 import {
 	applyTestcontainersDefaults,
 	createPostgresContainer,
@@ -75,6 +82,8 @@ interface RunResult {
 	requests: number;
 	ledgerCalls: number;
 	unitsPerCall: number;
+	/** Requests answered 200 with the operation allowed; the others were denied or failed. */
+	accepted: number;
 	rps: number;
 	ledgerCallsPerSecond: number;
 	clientMs: { p50: number; p95: number; p99: number; max: number };
@@ -385,10 +394,12 @@ async function measureRun(
 	const latencies = samples.map((sample) => sample.ms).sort((left, right) => left - right);
 	const statuses: Record<string, number> = {};
 	let denied = 0;
+	let accepted = 0;
 	let ledgerCalls = 0;
 	for (const sample of samples) {
 		statuses[String(sample.status)] = (statuses[String(sample.status)] ?? 0) + 1;
 		if (sample.denied) denied += 1;
+		if (sample.accepted) accepted += 1;
 		ledgerCalls += sample.ledgerCalls;
 	}
 	const result: RunResult = {
@@ -399,6 +410,7 @@ async function measureRun(
 		requests: samples.length,
 		ledgerCalls,
 		unitsPerCall: run.unitsPerCall,
+		accepted,
 		rps: round(samples.length / (elapsedMs / 1000)),
 		ledgerCallsPerSecond: round(ledgerCalls / (elapsedMs / 1000)),
 		clientMs: {
@@ -432,7 +444,7 @@ async function measureRun(
 		cpu,
 	};
 	process.stdout.write(
-		`${result.rps} rps, p50 ${result.clientMs.p50} ms, p99 ${result.clientMs.p99} ms, statuses ${JSON.stringify(statuses)}\n`,
+		`${result.rps} rps, p50 ${result.clientMs.p50} ms, p99 ${result.clientMs.p99} ms, statuses ${JSON.stringify(statuses)}, accepted ${accepted}/${samples.length}\n`,
 	);
 	return result;
 }
@@ -462,7 +474,7 @@ async function runWindowScenario(context: ScenarioContext): Promise<RunResult[]>
 			1000000000000, ${cadence}, 1, 1, 'load-lane'
 		FROM customers customer
 		JOIN features feature
-			ON feature.project_id = customer.project_id AND feature.key = 'model_tokens'
+			ON feature.project_id = customer.project_id AND feature.key = ${loadFeatureKey}
 		WHERE customer.project_id = ${projectId}
 			AND customer.billing_account_id LIKE 'load-%'
 			AND customer.billing_account_id <> ${hotAccount}
@@ -543,7 +555,7 @@ async function driveEach(
 			try {
 				outcome = await request(index);
 			} catch {
-				outcome = { status: 0, denied: false, ledgerCalls: 0 };
+				outcome = { status: 0, denied: false, accepted: false, ledgerCalls: 0 };
 			}
 			samples.push({ ...outcome, ms: performance.now() - startedAt });
 		}
@@ -620,6 +632,7 @@ async function runUserScenario(context: ScenarioContext, users: number): Promise
 		requests: run.sent,
 		ledgerCalls: run.sent,
 		unitsPerCall: 1,
+		accepted: acceptedKeys.size,
 		rps: round(acceptedDuringWindow / (options.durationMs / 1000)),
 		ledgerCallsPerSecond: round(run.sent / (options.durationMs / 1000)),
 		clientMs: {
@@ -727,11 +740,21 @@ async function profileOperation(
 	if (!context.statementStats) throw new Error("--profile needs pg_stat_statements");
 	const warmup = 20;
 	const measured = 50;
-	for (let index = 0; index < warmup; index += 1) await request();
+	const outcomes: RequestOutcome[] = [];
+	for (let index = 0; index < warmup; index += 1) outcomes.push(await request());
 	await context.sql`SELECT pg_stat_statements_reset()`;
 	const startedAt = performance.now();
-	for (let index = 0; index < measured; index += 1) await request();
+	for (let index = 0; index < measured; index += 1) outcomes.push(await request());
 	const wallMs = (performance.now() - startedAt) / measured;
+	// A refused or denied request runs little of the operation being profiled, so a profile of them
+	// would list the authentication lookup as the cost of the operation.
+	const unaccepted = outcomes.filter((outcome) => !outcome.accepted);
+	if (unaccepted.length > 0) {
+		const statuses = [...new Set(unaccepted.map((outcome) => outcome.status))].join(", ");
+		throw new Error(
+			`--profile ${operation}: ${unaccepted.length} of ${outcomes.length} requests were not accepted (statuses ${statuses})`,
+		);
+	}
 	const rows = await context.sql<
 		Array<{ calls: number; rows: number; mean_ms: number; total_ms: number; query: string }>
 	>`
@@ -759,9 +782,11 @@ async function profileOperation(
 
 interface RequestOutcome {
 	status: number;
+	/** The service answered 200 with `allowed: false`. */
 	denied: boolean;
+	/** The service answered 200 with the operation allowed. */
+	accepted: boolean;
 	ledgerCalls: number;
-	accepted?: boolean;
 }
 
 interface Sample extends RequestOutcome {
@@ -783,7 +808,7 @@ async function drive(
 			try {
 				outcome = await request(worker, iteration);
 			} catch {
-				outcome = { status: 0, denied: false, ledgerCalls: 0 };
+				outcome = { status: 0, denied: false, accepted: false, ledgerCalls: 0 };
 			}
 			samples.push({ ...outcome, ms: performance.now() - startedAt });
 			iteration += 1;
@@ -837,7 +862,7 @@ function createClient(baseUrl: string, apiKey: string): LoadClient {
 		async consume(billingAccountId, operationId, timeoutMs) {
 			const { status, data } = await post(
 				`${usage(billingAccountId)}/consume`,
-				{ featureId: "model_tokens", value: "1" },
+				consumeRequestBody(),
 				true,
 				operationId,
 				timeoutMs,
@@ -852,15 +877,20 @@ function createClient(baseUrl: string, apiKey: string): LoadClient {
 		async check(billingAccountId) {
 			const { status, data } = await post(
 				`${usage(billingAccountId)}/check`,
-				{ featureId: "model_tokens", value: "1" },
+				checkRequestBody(),
 				false,
 			);
-			return { status, denied: data?.allowed === false, ledgerCalls: 1 };
+			return {
+				status,
+				denied: data?.allowed === false,
+				accepted: status === 200 && data?.allowed === true,
+				ledgerCalls: 1,
+			};
 		},
 		async reserveAndConfirm(billingAccountId, quantity) {
 			const reserved = await post(
 				`${usage(billingAccountId)}/reservations`,
-				{ featureKey: "model_tokens", quantity, expiresInSeconds: 60 },
+				reserveRequestBody(quantity),
 				true,
 			);
 			const reservationId = reserved.data?.reservationId;
@@ -868,17 +898,19 @@ function createClient(baseUrl: string, apiKey: string): LoadClient {
 				return {
 					status: reserved.status,
 					denied: reserved.data?.allowed === false,
+					accepted: false,
 					ledgerCalls: 1,
 				};
 			}
 			const confirmed = await post(
 				`${usage(billingAccountId)}/reservations/${reservationId}/confirm`,
-				{ quantity },
+				confirmRequestBody(quantity),
 				true,
 			);
 			return {
 				status: confirmed.status,
 				denied: confirmed.data?.allowed === false,
+				accepted: confirmed.status === 200 && confirmed.data?.allowed === true,
 				ledgerCalls: 2,
 			};
 		},
@@ -1151,18 +1183,18 @@ function printTable(results: readonly RunResult[]): void {
 		}
 	}
 	writeStdout(
-		"\n| Scenario | Operation | Conc. | RPS | Ledger calls/s | Client p50 ms | Client p99 ms | Server p99 ms (bucket) | Errors | Denied | Xact/s | WAL MB | Dead tuples | Lock waits max/mean | Proj. created | Proj. delivered | Proj. backlog | Stmts/req | DB ms/req | Service CPU % | PG CPU % |",
+		"\n| Scenario | Operation | Conc. | RPS | Ledger calls/s | Client p50 ms | Client p99 ms | Server p99 ms (bucket) | Errors | Accepted | Denied | Xact/s | WAL MB | Dead tuples | Lock waits max/mean | Proj. created | Proj. delivered | Proj. backlog | Stmts/req | DB ms/req | Service CPU % | PG CPU % |",
 	);
 	writeStdout(
-		"| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+		"| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
 	);
 	for (const result of results) {
 		const errors = Object.entries(result.statuses)
-			.filter(([status]) => Number(status) >= 400 || Number(status) === 0)
+			.filter(([status]) => !isSuccessStatus(Number(status)))
 			.map(([status, count]) => `${status}:${count}`)
 			.join(" ");
 		writeStdout(
-			`| ${result.scenario} | ${result.operation} | ${result.concurrency} | ${result.rps} | ${result.ledgerCallsPerSecond} | ${result.clientMs.p50} | ${result.clientMs.p99} | ${result.serverMs.p99 ?? "n/a"} | ${errors === "" ? "none" : errors} | ${result.denied} | ${result.db.xactPerSecond} | ${result.db.walMb} | ${result.db.deadTuplesDelta} | ${result.db.lockWaitSamples.max}/${result.db.lockWaitSamples.mean} | ${result.db.projectionJobsCreated} | ${result.db.projectionDelivered} | ${result.db.projectionBacklogAfter} | ${result.db.statementsPerRequest ?? "n/a"} | ${result.db.dbExecMsPerRequest ?? "n/a"} | ${result.cpu.servicePercent ?? "n/a"} | ${result.cpu.postgresPercent ?? "n/a"} |`,
+			`| ${result.scenario} | ${result.operation} | ${result.concurrency} | ${result.rps} | ${result.ledgerCallsPerSecond} | ${result.clientMs.p50} | ${result.clientMs.p99} | ${result.serverMs.p99 ?? "n/a"} | ${errors === "" ? "none" : errors} | ${result.accepted}/${result.requests} | ${result.denied} | ${result.db.xactPerSecond} | ${result.db.walMb} | ${result.db.deadTuplesDelta} | ${result.db.lockWaitSamples.max}/${result.db.lockWaitSamples.mean} | ${result.db.projectionJobsCreated} | ${result.db.projectionDelivered} | ${result.db.projectionBacklogAfter} | ${result.db.statementsPerRequest ?? "n/a"} | ${result.db.dbExecMsPerRequest ?? "n/a"} | ${result.cpu.servicePercent ?? "n/a"} | ${result.cpu.postgresPercent ?? "n/a"} |`,
 		);
 	}
 }
