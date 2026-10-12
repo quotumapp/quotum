@@ -5,6 +5,8 @@ import type {
 	CommercialPreviewNextCycle,
 	CommercialPreviewPromotion,
 } from "./commercial";
+import type { BillingError } from "./errors";
+import { invalidQuantityError } from "./licensed-quantity";
 import {
 	applyDiscountToLines,
 	type CommercialPromotion,
@@ -25,9 +27,30 @@ export type PricedCommercialPreview = Pick<
 	| "warnings"
 >;
 
+const maxSafeMinor = BigInt(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A flat line's subtotal. JavaScript numbers hold integers exactly only up to 2^53 - 1, so the
+ * product is formed as a bigint and refused, rather than rounded, when it does not fit.
+ */
+function flatSubtotalMinor(line: CommercialLineItem): number {
+	if (Number.isSafeInteger(line.unitAmountMinor) && Number.isSafeInteger(line.quantity)) {
+		const subtotal = BigInt(line.unitAmountMinor) * BigInt(line.quantity);
+		if (subtotal <= maxSafeMinor) return Number(subtotal);
+	}
+	throw amountOutOfRange(`The total for ${line.key}`);
+}
+
+function amountOutOfRange(subject: string): BillingError {
+	return invalidQuantityError(
+		`${subject} exceeds ${Number.MAX_SAFE_INTEGER} minor units; lower a quantity`,
+	);
+}
+
 /**
  * Prices Checkout lines with an optional discount code. Flat lines are exact; tiered lines leave
- * every amount to Stripe so the preview never shows a total Checkout will not charge.
+ * every amount to Stripe so the preview never shows a total Checkout will not charge. A flat total
+ * past the largest exactly representable amount is refused with `INVALID_QUANTITY`.
  */
 export function priceCommercialLines(input: {
 	lines: readonly CommercialLineItem[];
@@ -37,12 +60,15 @@ export function priceCommercialLines(input: {
 	hostedEntry: boolean;
 }): PricedCommercialPreview {
 	const subtotals = input.lines.map((line) =>
-		line.pricingModel === "flat" ? line.unitAmountMinor * line.quantity : null,
+		line.pricingModel === "flat" ? flatSubtotalMinor(line) : null,
 	);
 	const exact = subtotals.every((subtotal) => subtotal !== null);
-	const subtotalMinor = exact
-		? subtotals.reduce<number>((sum, value) => sum + (value ?? 0), 0)
-		: null;
+	let subtotalMinor: number | null = null;
+	if (exact) {
+		const total = subtotals.reduce<bigint>((sum, value) => sum + BigInt(value ?? 0), 0n);
+		if (total > maxSafeMinor) throw amountOutOfRange("The subtotal");
+		subtotalMinor = Number(total);
+	}
 	const discounted =
 		input.promotion === null
 			? null

@@ -21,7 +21,9 @@ custom plan for an unknown billing account, and a provider binding that is not r
 plan takes a version above every version it has had; numbers may skip, and an unchanged plan keeps
 its version. A plan
 `version` and `tierRank` and a price's `minimumQuantity` and `maximumQuantity` are Postgres
-integers (at most 2,147,483,647), and a plan uses each price `key` once. Publishes are serialized
+integers (at most 2,147,483,647), and a plan uses each price `key` once. A purchased quantity is
+held to the same bound when `maximumQuantity` is null (see
+[licensed quantities](subscriptions.md#licensed-quantities)). Publishes are serialized
 per project: of concurrent publishes over the same `expectedRevision` one wins, and the others
 answer `409 CATALOG_REVISION_CONFLICT` naming the revision that now exists.
 `GET /v1/admin/catalog` returns the active intent and needs project authentication only. It

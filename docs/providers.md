@@ -369,7 +369,8 @@ Checkout flow:
 
 1. The backend reads `GET /v1/catalog?provider=stripe&channel=web` and calls
    `POST /v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions` with exactly
-   one `productKey` or `planKey`, licensed `quantities` for a plan, optional `email`, redirect
+   one `productKey` or `planKey`, licensed `quantities` for a plan (at most 2,147,483,647 each,
+   see [licensed quantities](subscriptions.md#licensed-quantities)), optional `email`, redirect
    overrides, an optional `expiresAt` (Unix seconds, within Stripe's 30-minute to 24-hour window),
    and an `Idempotency-Key`. The response is `{sessionId,url,duplicate}`.
 2. The frontend redirects the user to Stripe.
