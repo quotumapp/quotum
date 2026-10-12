@@ -40,16 +40,20 @@ function literal(value: unknown): string {
  * account's reads use. A custom plan sees the values and, for an account whose reservations are
  * mostly settled, mistakes it for one with thousands open.
  */
+let probeCount = 0;
+
 async function measureGeneric(statement: DrizzleSQL): Promise<Measured> {
+	probeCount += 1;
+	const name = `history_probe_${probeCount}`;
 	const text = renderDrizzleSql(statement).replace(/\n-- params:.*$/s, "");
 	const params = renderDrizzleSqlParams(statement).map(literal).join(", ");
 	const database = context.db as unknown as TransactionalQueryExecutor;
 	return await database.transaction(async (tx) => {
 		await tx.execute(drizzleSql.raw(`SET LOCAL plan_cache_mode = force_generic_plan`));
-		await tx.execute(drizzleSql.raw(`PREPARE history_probe AS ${text}`));
+		await tx.execute(drizzleSql.raw(`PREPARE ${name} AS ${text}`));
 		const [row] = await executeRows<Record<string, unknown>>(
 			tx,
-			drizzleSql.raw(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE history_probe(${params})`),
+			drizzleSql.raw(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE ${name}(${params})`),
 		);
 		const document = row?.["QUERY PLAN"];
 		const [entry] = (typeof document === "string" ? JSON.parse(document) : document) as Array<{
@@ -62,6 +66,13 @@ async function measureGeneric(statement: DrizzleSQL): Promise<Measured> {
 			plan: JSON.stringify(entry),
 		};
 	});
+}
+
+/** The buffer budget of a read that touches only the open reservations, with the plan on a miss. */
+function within(measured: Measured): string {
+	return measured.buffers < 50
+		? "within budget"
+		: `read ${measured.buffers} buffers: ${measured.plan}`;
 }
 
 /** The plan text for the statement planned for its own parameter values. */
@@ -152,6 +163,9 @@ localDescribe("Reservation history", () => {
 			JOIN customers noise ON noise.billing_account_id LIKE 'noise-%'
 			CROSS JOIN generate_series(1, 100) AS series(n)
 		`;
+		// The statements join `customers`, so the planner must know how selective an account id is;
+		// statistics left by an earlier test of the same database say otherwise until autoanalyze runs.
+		await context.sql`ANALYZE customers`;
 		await context.sql`ANALYZE reservations`;
 		await context.sql`ANALYZE reservation_allocations`;
 		const [row] = await context.sql<Array<{ project: string; customer: string; wallet: string }>>`
@@ -190,7 +204,7 @@ localDescribe("Reservation history", () => {
 		// Walking the account's 50,003 reservations cost hundreds of buffers; the three open ones
 		// cost a handful.
 		expect(measured.plan).toContain("idx_billing_reservations_customer_active");
-		expect(measured.buffers).toBeLessThan(50);
+		expect(within(measured)).toBe("within budget");
 	});
 
 	it("sums held quantities from the open reservations, not every hold an allocation had", async () => {
@@ -200,7 +214,7 @@ localDescribe("Reservation history", () => {
 
 		// Reading `reservation_allocations` by allocation visited all 50,000 settled holds.
 		expect(measured.plan).toContain("idx_billing_reservations_customer_active");
-		expect(measured.buffers).toBeLessThan(50);
+		expect(within(measured)).toBe("within budget");
 	});
 
 	it("never reads the whole hold table, whatever the planner thinks of the account", async () => {
