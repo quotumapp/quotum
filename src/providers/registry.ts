@@ -1,6 +1,7 @@
 import type { ProjectProviderServiceSet } from "../app/types";
 import { CapabilityError, NotConfiguredError } from "../billing/errors";
 import type { BillingRepository } from "../db/repository";
+import type { BillingLogger } from "../observability/logger";
 import { noRuntimeConnections, type RuntimeConnectionResolver } from "../projects/connections";
 import type { ProjectInstanceContext } from "../projects/context";
 import {
@@ -61,6 +62,7 @@ export interface ProviderRegistryDependencies {
 	/** App-wide services; any value other than undefined replaces the connection build. */
 	legacyServices?: { [Key in keyof ProjectProviderServiceSet]?: ProjectProviderServiceSet[Key] };
 	clientFactories?: ProviderClientFactories;
+	logger?: BillingLogger;
 	entries?: readonly AnyProviderRegistryEntry[];
 }
 
@@ -147,6 +149,7 @@ export function createProviderRegistry({
 	overrides,
 	legacyServices,
 	clientFactories = {},
+	logger,
 	entries = defaultProviderRegistryEntries,
 }: ProviderRegistryDependencies): ProviderRegistry {
 	const entriesByProvider = new Map<BillingProvider, AnyProviderRegistryEntry>();
@@ -216,6 +219,7 @@ export function createProviderRegistry({
 				repository: getRepository().forProject(project),
 				providerOperations: getRepository().providerOperations,
 				clientFactories,
+				logger,
 			}),
 			accountIdentity: entry.accountIdentity(config),
 		};
@@ -259,6 +263,7 @@ export function createProviderRegistry({
 				repository: getRepository().forProject(project),
 				providerOperations: getRepository().providerOperations,
 				clientFactories,
+				logger,
 			});
 		},
 		adapter,

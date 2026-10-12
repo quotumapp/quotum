@@ -8,6 +8,7 @@ import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../bill
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../billing/recurring";
 import type { WebBillingService } from "../billing/web-provider";
 import type { ProjectScopedBillingRepository } from "../db/repository";
+import type { BillingLogger } from "../observability/logger";
 import type { RuntimeConnectionConfigs } from "../projects/connections";
 import type { ProjectInstanceContext } from "../projects/context";
 import {
@@ -303,6 +304,8 @@ export interface ProviderBuildInput<P extends BillingProvider> {
 	repository: ProjectScopedBillingRepository;
 	clientFactories: ProviderClientFactories;
 	providerOperations: import("../billing/provider-operations").ProviderOperationRecoveryStore;
+	/** Where a provider service reports what it keeps rather than applies; absent means nowhere. */
+	logger?: BillingLogger;
 }
 
 /** Builds provider clients from the config the default client would use; tests inject fakes. */

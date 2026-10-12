@@ -144,7 +144,7 @@ export const stripeRegistryEntry: ProviderRegistryEntry<"stripe"> = {
 	label: "Stripe",
 	notConfiguredStatus: 503,
 	accountIdentity: (config) => config.accountIdentity ?? config.connectedAccountId ?? null,
-	build({ project, config, repository, clientFactories }) {
+	build({ project, config, repository, clientFactories, logger }) {
 		const clientConfig = buildStripeConfig(config);
 		return new StripeBillingService({
 			config: {
@@ -156,6 +156,7 @@ export const stripeRegistryEntry: ProviderRegistryEntry<"stripe"> = {
 				clientFactories.stripe?.(clientConfig, project.projectInstanceKey) ??
 				new StripeBillingClient(clientConfig),
 			repository,
+			logger,
 		});
 	},
 	wrap: wrapStripeService,

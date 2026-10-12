@@ -56,10 +56,16 @@ import type {
 	StripeCheckoutRequestState,
 	StripeRecordingResult,
 	StripeRecurringCheckoutPlan,
-	StripeReversalSkipReason,
+	StripeSkipReason,
 	StripeWebStoreProductRow,
 } from "../../db/repository";
+import {
+	IdentityConflictError,
+	isStripeIdentityConflictReason,
+	stripeIdentityConflictReason,
+} from "../../db/repository/identity-conflicts";
 import { paymentSetupReconcileEventType } from "../../db/repository/store-events";
+import { type BillingLogger, safelyLogWarn } from "../../observability/logger";
 import type { BillingCadenceUnit } from "../../shared/cadence";
 import type { AutoTopupWorkerProvider } from "../../workers/auto-topup";
 import type { PromotionStripeProvider } from "../../workers/promotion-maintenance";
@@ -327,6 +333,8 @@ export interface StripeBillingServiceDependencies {
 	config: StripeBillingServiceConfig;
 	client: StripeBillingClientDependency;
 	repository: StripeBillingRepositoryDependency;
+	/** Where an event kept as skipped is reported; without one it is only stored. */
+	logger?: BillingLogger;
 }
 
 export interface CreateStripeCheckoutSessionInput {
@@ -372,7 +380,7 @@ export interface StripeWebhookResult {
 
 /** A webhook result plus why its recording was skipped, which only the replay worker reads. */
 interface StripeEventOutcome extends StripeWebhookResult {
-	readonly skipReason?: StripeReversalSkipReason;
+	readonly skipReason?: StripeSkipReason;
 }
 
 type StripeCheckoutMode = "payment" | "subscription";
@@ -2229,7 +2237,38 @@ export class StripeBillingService
 			}
 		}
 
-		return this.recordCommand(command, replayStoreEventId);
+		let outcome: StripeEventOutcome;
+		try {
+			outcome = await this.recordCommand(command, replayStoreEventId);
+		} catch (error) {
+			// A recording keeps its own identity conflict as a skipped event. One that reaches here
+			// comes from a command with no recording of its own, such as a customer link.
+			if (!(error instanceof IdentityConflictError)) throw error;
+			const reason = stripeIdentityConflictReason(error);
+			outcome = {
+				...(await this.recordNormalizationFailure(
+					parsedEvent,
+					new Error(`${reason}: ${error.message}`),
+					replayStoreEventId,
+				)),
+				skipReason: reason,
+			};
+		}
+		this.reportIdentityConflict(parsedEvent, outcome);
+		return outcome;
+	}
+
+	private reportIdentityConflict(event: ParsedStripeEvent, outcome: StripeEventOutcome): void {
+		const { logger, config } = this.dependencies;
+		if (logger === undefined || !isStripeIdentityConflictReason(outcome.skipReason)) return;
+		// Object ids only: the stored event row carries the conflicting customer, payment and event.
+		safelyLogWarn(logger, "Stripe event kept as skipped on an identity conflict", {
+			provider: "stripe",
+			project: config.projectKey ?? null,
+			eventId: event.id,
+			eventType: event.type,
+			reason: outcome.skipReason,
+		});
 	}
 
 	private async enqueuePaymentSetupEvent(

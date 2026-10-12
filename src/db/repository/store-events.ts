@@ -7,6 +7,7 @@ import type {
 	StoreEventProcessingStatus,
 } from "../../billing/types";
 import { canonicalJson } from "../../shared/canonical-json";
+import { IdentityConflictError } from "./identity-conflicts";
 import { executeOne, jsonb } from "./query";
 import type {
 	QueryExecutor,
@@ -136,7 +137,8 @@ export async function recordStoreEventProcessingResult(
 			`,
 		);
 		if (existing === null && input.raiseIdentityMismatch) {
-			throw new Error(
+			throw new IdentityConflictError(
+				"event_identity_changed",
 				`store event identity mismatch for provider ${input.provider} null external event fingerprint ${eventFingerprint}`,
 			);
 		}
@@ -242,7 +244,8 @@ export async function recordStoreEventProcessingResult(
 	`,
 	);
 	if (existing === null && input.raiseIdentityMismatch) {
-		throw new Error(
+		throw new IdentityConflictError(
+			"event_identity_changed",
 			`store event identity mismatch for provider ${input.provider} external event ${input.externalEventId}`,
 		);
 	}

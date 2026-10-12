@@ -14,6 +14,7 @@ import type {
 	SubscriptionStatus,
 } from "../../billing/types";
 import type { BillingCadenceUnit } from "../../shared/cadence";
+import type { StripeIdentityConflictSkipReason } from "./identity-conflicts";
 
 export interface ProjectionSyncJobRow {
 	id: string;
@@ -418,11 +419,13 @@ export type StripeReversalSkipReason =
 	/** Stripe could not be asked which invoice the payment settled. */
 	| "stripe_reversal_invoice_lookup_failed";
 
+export type StripeSkipReason = StripeReversalSkipReason | StripeIdentityConflictSkipReason;
+
 export interface StripeRecordingResult {
 	processingStatus: "processed" | "skipped" | "ignored";
 	billingAccountId: string | null;
 	entitlements: EntitlementSnapshot | null;
-	skipReason?: StripeReversalSkipReason;
+	skipReason?: StripeSkipReason;
 }
 
 export interface QueryExecutor {
