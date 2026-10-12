@@ -688,8 +688,9 @@ every resolved address is in an approved network. Public receivers always need H
    assessment sources. Keep `availability: "planned"` until the provider is admitted, which adds
    it to `billingProviders`, the provider CHECK constraints and the Drizzle schema in one change.
    `tests/db/provider-check-constraints.test.ts` fails until the provider CHECK constraints in the
-   migrations and their Drizzle `check()` mirrors match the admitted providers; checkout requests
-   admit only providers that implement checkout.
+   migrations and their Drizzle `check()` mirrors match the admitted providers, and
+   `tests/integration/schema-parity.test.ts` compares every mirrored CHECK definition with the
+   migrated database; checkout requests admit only providers that implement checkout.
    A verified or conditional entry cites a test tagged `// capability: <operation>`.
 3. Implement the `ProviderAdapter` groups in `src/providers/contract.ts` that the declaration's
    supported operations require, and add the adapter's entry to `src/providers/registry.ts`. The

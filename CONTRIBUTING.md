@@ -57,11 +57,15 @@ temporary report as before; credential directories are always removed.
   your database, and describe the change in the pull request. Incremental migrations start at 1.0.
 - The integration lane compares every billing table in `src/db/schema.ts` with the migrated
   Postgres catalog (`tests/integration/schema-parity.test.ts`): columns, primary/unique/foreign
-  keys and delete actions, named indexes with column order, direction and predicates, and CHECK
-  names. Keep the mirror in step with SQL. There are no CHECK exceptions; do not add new
-  exclusions. Partition children and migration bookkeeping are excluded. The platform-owned
-  project foreign key is asserted explicitly at the test's composition boundary so billing
-  declares no platform table.
+  keys and delete actions, named indexes with column order, direction and predicates, and every
+  CHECK constraint by name and by definition. Postgres canonicalizes each mirror expression
+  before it is compared with `pg_get_constraintdef`, so spelling differences such as `IN (...)`
+  versus `= ANY (ARRAY[...])` do not matter, but a different value list or a different
+  expression tree does. Spell a range as `BETWEEN` where the migration does: Postgres keeps the
+  group `BETWEEN` expands to, and flattens a written-out `>=` and `<=` pair. Keep the mirror in
+  step with SQL. There are no CHECK exceptions; do not add new exclusions. Partition children and
+  migration bookkeeping are excluded. The platform-owned project foreign key is asserted
+  explicitly at the test's composition boundary so billing declares no platform table.
 - PostgreSQL 18 is the minimum version, so its SQL is available to migrations and queries. A new
   UUID key defaults to `uuidv7()` in the billing baselines and to `gen_random_uuid()` in the
   platform and merchant baselines; `tests/db/migrations/postgres-schema.test.ts` checks both.
