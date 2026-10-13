@@ -254,7 +254,7 @@ refusals, and the buyer receives no access from the purchase itself.
   redeemed a code: `redeemedAt` is all the buyer learns. `reversedAt` and `reversalReason` appear
   when a full refund or dispute withdrew the unredeemed codes, which is how an operator finds
   the redeemed ones to review. The SDK reads it as `promotions.accountGifts`.
-- **Operators.** A minted code's `createdBy` is `system:gift-purchase`.
+- **Operators.** A minted code's `createdBy` is the string `"system:gift-purchase"`.
   `GET /v1/admin/promotions/:promotionKey/codes` lists it with the operator's own, names the
   purchase and ordinal in `gift`, and takes `source=gift` or `source=operator` to keep one kind.
   Find codes about to expire unredeemed with `source=gift&active=true` and each `expiresAt`.
