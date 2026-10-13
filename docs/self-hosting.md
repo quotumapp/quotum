@@ -151,6 +151,10 @@ the operator key. `quotum catalog status` shows what is live and needs no operat
 `inactive`, which has no project key, add `--instance <key> --actor you@example.com` to each command
 instead; see [catalog without a project key](catalog.md#without-a-project-key---instance).
 
+Bindings adopt products Quotum already holds. Adopt each Stripe product first with
+`quotum catalog bindings adopt <file>`; native-store products have no registration command (see
+[known limits](#known-limits)).
+
 ## 6. Keep backends on a private network (optional)
 
 If your backends share a private network with Quotum, approve that network for projections with
@@ -207,8 +211,14 @@ rely on them.
 
 ## Known limits
 
-- `quotum catalog provision` skips instances that already have a published catalog. It does not
-  create Apple or Google Play products; create them in those stores.
+- **Store products.** `quotum catalog bindings adopt` registers an existing Stripe product and
+  price in any environment. No command registers an Apple or Google Play product with Quotum, in
+  any mode: `quotum catalog provision` imports Stripe web mappings only, only for a non-production
+  instance that has no published catalog, and the merchant catalog editor never creates the
+  `products` or `store_products` rows. A catalog that binds a native-store product cannot publish
+  until that product's mapping exists, so until a command does, native-store mappings are created
+  directly in the database, outside any supported workflow. Selling on the web through Stripe is
+  the path this guide covers.
 - Headless deployments have no activation screen or step-up. Declare production `active` in the
   bootstrap manifest. [`quotum environments activate`](deployment.md#activate-a-production-environment)
   activates one that is already ready, for example after `quotum catalog ... --instance` or a
