@@ -208,6 +208,12 @@ differs from the proposal's answers `409 ACTION_MISMATCH`.
 Disabling the write flag prevents new proposals and approvals. Existing write-consented connections
 can inspect results and cancel pending proposals while their authorization remains valid.
 
+A [headless](deployment.md#headless-mode) deployment has no proposals at all. Applying a change
+needs a merchant sign-in, a browser decision and, for production, step-up confirmation, and none of
+those exist without the console. A headless process refuses `QUOTUM_MCP_WRITES_ENABLED=true`, like
+`QUOTUM_MCP_ENABLED=true`, at startup, and the stdio server stays read-only. Make changes with the [operator CLI](deployment.md#operator-cli) or the
+`/v1` API, and use the agent to read state and explain it.
+
 Finished and abandoned proposals are deleted 30 days after they were created, and a connection's
 record 30 days after it expired or was revoked. A deleted connection answers like a revoked one.
 See [merchant platform retention](operations.md#merchant-platform-retention).
