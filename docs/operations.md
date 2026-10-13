@@ -166,6 +166,27 @@ The two kinds rotate independently: replacing one never revokes the other.
 The audit trail records `credential.issued`, `credential.rotated` and `credential.revoked` with the
 `access`.
 
+### Stop an instance
+
+The full key cannot be withdrawn, only rotated, so there is no "revoke" for a backend's access. To
+stop an environment's traffic, from fastest and most reversible:
+
+- **Suspend it.** `quotum environments suspend <instance> --reason <why> --actor <you>` answers
+  the environment's project keys with `401 UNAUTHORIZED` at once, while provider webhooks,
+  reconciliation and the workers carry on. `quotum environments resume <instance>` ends it. While
+  suspended, `quotum credentials`, `quotum connections` and `quotum environments readiness` answer
+  `CONTEXT_UNAVAILABLE`, so rotate a leaked key before suspending, or resume first. See
+  [suspend and resume](deployment.md#suspend-and-resume-an-environment).
+- **Replace the key and discard the new one.** `quotum credentials rotate <instance> --access full
+  --credentials-out <new-file> --actor <you>` rejects the old key from the next request. Delete the
+  file and nobody holds the replacement, but a valid key still exists, so suspension is the cleaner
+  stop.
+- **End one integration.** `quotum connections disable <instance> <kind> --expected-revision <n>`
+  turns off one provider or projection connection. It does not stop `/v1` requests.
+
+None of these deletes data or revokes the read-only key; withdraw that separately with
+`quotum credentials revoke <instance> --access read_only`.
+
 ### Replacing retired `qpk_v1` credentials
 
 Earlier releases issued `qpk_v1.<uuid>.<secret>` credentials. They no longer authenticate and are
