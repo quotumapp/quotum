@@ -353,7 +353,8 @@ unchanged-catalog rule, and `bindings list` and `adopt` take the same JSON. Erro
   instance's Stripe connection, so [commit it](providers.md#headless-connection-setup) first; a
   connection made through the console's Stripe OAuth cannot be read here and answers
   `CONNECTION_UNAVAILABLE`. Production Apple and Google store products have no adoption command in
-  either mode (`quotum catalog provision` imports them for non-production instances only).
+  either mode. `quotum catalog provision` imports Stripe web mappings only, for non-production
+  instances without a published catalog.
 - There is no operator key, rate limit or step-up: the operator holds the database already.
 
 Then `quotum environments readiness` and `activate` finish the job.
