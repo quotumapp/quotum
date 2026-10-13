@@ -124,7 +124,11 @@ reseeded after each database reset; the browser authorizes through the UI origin
 API origin is the public issuer. OAuth tokens, OTP identifiers, receiver secrets and captured email
 bodies must never be attached to reports.
 
-OTP expiry is fixture-owned. The disposable wrapper observes successful, ordinary OTP-send HTTP
+`GET /second-factor/code?email=<address>` returns the code an enrolled person's authenticator would
+show now (`steps=-1|0|1` picks a neighbouring step, `pending=true` the authenticator being set up),
+for browser tests that cannot read an app. It exists only in the test entrypoint.
+
+Expiry of the emailed setup code is fixture-owned. The disposable wrapper observes successful, ordinary OTP-send HTTP
 requests, correlates one captured message with one changed verification row, and later updates that
 row's expiry directly. Ambiguous observations fail closed and reset clears the fixture mapping.
 Production auth has no observer callback or test branch for these controls; the fixture neither

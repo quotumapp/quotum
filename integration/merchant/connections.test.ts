@@ -16,7 +16,7 @@ import type {
 } from "../../src/platform/contracts";
 import { seedIntegrationProjectsAndCatalog } from "../../tests/integration/helpers/catalog-fixtures";
 import { publishAiCreditsCatalog } from "../../tests/integration/helpers/metering-catalog";
-import { MerchantBrowser, merchantFixture, password } from "./fixture";
+import { MerchantBrowser, merchantFixture } from "./fixture";
 
 const validator = createConnectionValidation();
 /** Reported by the stubbed billing port for every readiness read; it never gates activation. */
@@ -390,15 +390,7 @@ async function grant(browser: MerchantBrowser, target: string, action: string) {
 		returnTo: "/",
 	});
 	await f.sql`DELETE FROM platform_rate_limits`;
-	await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
-	await browser.json("/api/auth/two-factor/send-otp", {});
-	await browser.json("/api/auth/two-factor/verify-otp", {
-		code: f.mailer.otp("owner@example.com"),
-		trustDevice: false,
-	});
-	return (
-		await browser.json<{ grant: string }>(`/api/platform/step-up/${challenge.id}/complete`, {})
-	).grant;
+	return browser.completeStepUp(challenge.id);
 }
 it("activates only reviewed production readiness and discloses its credential once", async () => {
 	const browser = new MerchantBrowser(f);

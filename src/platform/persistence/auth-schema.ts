@@ -64,6 +64,7 @@ export const session = pgTable(
 		authIssuer: text("auth_issuer"),
 		authSubject: text("auth_subject"),
 		proofAt: timestamp("proof_at", { withTimezone: true }),
+		bootstrapAt: timestamp("bootstrap_at", { withTimezone: true }),
 		mcpRequestHash: text("mcp_request_hash"),
 		...dates(),
 	},
@@ -98,6 +99,10 @@ export const twoFactor = pgTable(
 		verified: boolean("verified").default(true),
 		failedVerificationCount: integer("failed_verification_count").notNull().default(0),
 		lockedUntil: timestamp("locked_until", { withTimezone: true }),
+		pendingSecret: text("pending_secret"),
+		lastUsedStep: bigint("last_used_step", { mode: "number" }),
+		enrolledAt: timestamp("enrolled_at", { withTimezone: true }),
+		backupCodesRemaining: integer("backup_codes_remaining").notNull().default(0),
 	},
 	(table) => [
 		index("auth_two_factors_user_idx").on(table.userId),

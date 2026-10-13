@@ -9,7 +9,8 @@
     {
       "code": "ACCOUNT_TEMPORARILY_LOCKED",
       "sources": [
-        "src/platform/auth.ts"
+        "src/platform/auth.ts",
+        "src/platform/second-factor.ts"
       ]
     },
     {
@@ -290,6 +291,18 @@
       ]
     },
     {
+      "code": "CODE_ALREADY_USED",
+      "sources": [
+        "src/platform/second-factor.ts"
+      ]
+    },
+    {
+      "code": "CODE_REQUIRED",
+      "sources": [
+        "src/platform/second-factor-routes.ts"
+      ]
+    },
+    {
       "code": "COMMERCIAL_EXECUTION_CONFLICT",
       "sources": [
         "src/db/repository/commercial-actions.ts"
@@ -483,6 +496,12 @@
       ]
     },
     {
+      "code": "ENROLMENT_NOT_STARTED",
+      "sources": [
+        "src/platform/second-factor.ts"
+      ]
+    },
+    {
       "code": "ENTERPRISE_CONTRACT_NOT_FOUND",
       "sources": [
         "src/db/repository/controls-enterprise.ts"
@@ -549,6 +568,12 @@
         "src/platform/mcp/changes.ts",
         "src/platform/security.ts",
         "src/platform/store.ts"
+      ]
+    },
+    {
+      "code": "FRESH_SIGN_IN_REQUIRED",
+      "sources": [
+        "src/platform/second-factor-routes.ts"
       ]
     },
     {
@@ -641,7 +666,8 @@
     {
       "code": "IDENTITY_MISSING",
       "sources": [
-        "src/platform/auth.ts"
+        "src/platform/auth.ts",
+        "src/platform/second-factor-routes.ts"
       ]
     },
     {
@@ -660,6 +686,12 @@
       "code": "INVALID_BILLING_ACCOUNT_ID",
       "sources": [
         "src/billing/entitlements.ts"
+      ]
+    },
+    {
+      "code": "INVALID_CODE",
+      "sources": [
+        "src/platform/second-factor.ts"
       ]
     },
     {
@@ -919,6 +951,12 @@
       "code": "ORIGIN_REJECTED",
       "sources": [
         "src/platform/security.ts"
+      ]
+    },
+    {
+      "code": "OTP_NOT_ALLOWED",
+      "sources": [
+        "src/platform/auth.ts"
       ]
     },
     {
@@ -1509,6 +1547,18 @@
       ]
     },
     {
+      "code": "SECOND_FACTOR_BOOTSTRAP_REQUIRED",
+      "sources": [
+        "src/platform/second-factor-routes.ts"
+      ]
+    },
+    {
+      "code": "SECOND_FACTOR_REQUIRED",
+      "sources": [
+        "src/platform/second-factor.ts"
+      ]
+    },
+    {
       "code": "SERVICE_UNAUTHORIZED",
       "sources": [
         "src/platform/app.ts"
@@ -1548,12 +1598,6 @@
     },
     {
       "code": "STEP_UP_EXPIRED",
-      "sources": [
-        "src/platform/step-up.ts"
-      ]
-    },
-    {
-      "code": "STEP_UP_IDENTITY_MISMATCH",
       "sources": [
         "src/platform/step-up.ts"
       ]

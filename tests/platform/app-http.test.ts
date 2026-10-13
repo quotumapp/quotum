@@ -106,7 +106,6 @@ describe("merchant request bodies", () => {
 			"/api/platform/provisioning/00000000-0000-4000-8000-000000000001/retry",
 			"/api/platform/provisioning/00000000-0000-4000-8000-000000000001/credential",
 			"/api/platform/provisioning/00000000-0000-4000-8000-000000000001/rotate",
-			"/api/platform/step-up/00000000-0000-4000-8000-000000000001/complete",
 		]) {
 			const response = await app.handle(mutation(path, {}));
 

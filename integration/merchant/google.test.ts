@@ -3,7 +3,14 @@ import { createHash, randomBytes } from "node:crypto";
 import type { OnboardingDraftView } from "../../src/platform/contracts";
 import { authorizationFingerprint } from "../../src/platform/mcp/authorization";
 import { FakeMerchantGoogle } from "../../src/testing/merchant-fakes";
-import { MerchantBrowser, merchantFixture, merchantTestScope, testConfig } from "./fixture";
+import {
+	authenticatorSecret,
+	MerchantBrowser,
+	merchantFixture,
+	merchantTestScope,
+	testConfig,
+	totpCode,
+} from "./fixture";
 
 const google = new FakeMerchantGoogle();
 const f = merchantFixture({
@@ -58,12 +65,6 @@ describe("Google OAuth using signed local provider tokens", () => {
 			revision: organization.revision,
 		});
 		await browser.json("/api/platform/onboarding/provision", { revision: project.revision });
-		const challenge = await browser.json<{ id: string }>("/api/platform/step-up", {
-			scope: merchantTestScope,
-			action: "credentials.rotate_read_only",
-			target: crypto.randomUUID(),
-			returnTo: "/orgs/acme/projects/example/sandbox/mcp",
-		});
 		const query = new URLSearchParams({
 			response_type: "code",
 			client_id: "quotum-claude-code",
@@ -104,9 +105,12 @@ describe("Google OAuth using signed local provider tokens", () => {
 		expect(proof.mcp_request_hash).toBe(authorizationFingerprint(oauthQuery));
 		expect(proof.auth_method).toBe("google");
 		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
-		expect(
-			(await browser.request(`/api/platform/step-up/${challenge.id}/complete`, {})).status,
-		).toBe(403);
+		// The MCP proof is not a console sign-in, so it cannot set an authenticator up either.
+		const enrol = await browser.request("/api/platform/second-factor/enrolment", {});
+		expect([enrol.status, (await enrol.json()).error.code]).toEqual([
+			403,
+			"FRESH_SIGN_IN_REQUIRED",
+		]);
 		await browser.json("/api/platform/oauth/selection", {
 			oauth_query: selection.search.slice(1),
 			scope: merchantTestScope,
@@ -127,6 +131,30 @@ describe("Google OAuth using signed local provider tokens", () => {
 		expect(clientCallback.origin + clientCallback.pathname).toBe("http://localhost:8788/callback");
 		expect(clientCallback.searchParams.get("code")).toBeTruthy();
 		expect(clientCallback.searchParams.get("state")).toBe(query.get("state"));
+	});
+	it("sets an authenticator up on a live Google session only after a fresh Google sign-in", async () => {
+		const browser = new MerchantBrowser(f);
+		await oauth(browser);
+		await browser.json("/api/platform/session/exchange", {});
+		// Signed in with Google and no authenticator: the cookie alone cannot enrol one.
+		const bare = await browser.request("/api/platform/second-factor/enrolment", {});
+		expect([bare.status, (await bare.json()).error.code]).toEqual([403, "FRESH_SIGN_IN_REQUIRED"]);
+		// A fresh Google sign-in leaves a proof, which is not exchanged for another session.
+		await oauth(browser, false);
+		const setup = await browser.json<{ secret: string }>(
+			"/api/platform/second-factor/enrolment",
+			{},
+		);
+		const confirmed = await browser.json<{ recoveryCodes: string[] }>(
+			"/api/platform/second-factor/enrolment/confirm",
+			{ code: await totpCode(authenticatorSecret(setup.secret)) },
+		);
+		expect(confirmed.recoveryCodes).toHaveLength(10);
+		const view = await browser.json<{ secondFactor: unknown; authMethod: string }>(
+			"/api/platform/session",
+		);
+		expect(view.authMethod).toBe("google");
+		expect(view.secondFactor).toEqual({ enrolled: true, recoveryCodesRemaining: 10 });
 	});
 	it("requires state, PKCE and verified nonce-bound Google identity, without email OTP", async () => {
 		const browser = new MerchantBrowser(f);

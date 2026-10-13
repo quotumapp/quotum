@@ -4,7 +4,7 @@ import { MerchantError } from "./security";
 
 export interface MerchantEmail {
 	to: string;
-	kind: "verification" | "reset" | "otp" | "invitation" | "invite_request";
+	kind: "verification" | "reset" | "otp" | "invitation" | "invite_request" | "security_notice";
 	subject: string;
 	text: string;
 	html: string;
@@ -52,6 +52,22 @@ export function linkMessage(
 		subject,
 		text: `${subject}\n\n${link}\n\nIf you did not request this, ignore this email.`,
 		html: `<p>${escapeHtml(subject)}</p><p><a href="${escapeHtml(link)}">Continue to Quotum</a></p><p>If you did not request this, ignore this email.</p>`,
+	};
+}
+/**
+ * Tells a person that something changed on their sign-in. It is a notice, never a way in: it
+ * carries no link or code, and a delivery failure must not undo the change it reports.
+ */
+export function securityNotice(to: string, event: string): MerchantEmail {
+	const subject = subjectLine(`Quotum security notice: ${event}`);
+	const advice =
+		"If this was you, there is nothing to do. If it was not, change your password and ask your Quotum administrator to review your access.";
+	return {
+		to,
+		kind: "security_notice",
+		subject,
+		text: `${subject}\n\n${advice}`,
+		html: `<p>${escapeHtml(subject)}</p><p>${escapeHtml(advice)}</p>`,
 	};
 }
 export class CloudflareMerchantMailer implements MerchantMailer {

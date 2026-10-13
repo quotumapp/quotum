@@ -46,6 +46,9 @@ CREATE TABLE platform_auth_sessions (
 	auth_issuer text,
 	auth_subject text,
 	proof_at timestamptz,
+	-- An emailed code proved the mailbox of an account with no authenticator yet. It is not a
+	-- sign-in: only enrolling an authenticator turns it into one (auth_method and proof_at).
+	bootstrap_at timestamptz,
 	-- A transient proof may serve exactly one OAuth authorization transaction.
 	mcp_request_hash text,
 	created_at timestamptz NOT NULL DEFAULT now(),
@@ -76,7 +79,14 @@ CREATE TABLE platform_auth_two_factors (
 	backup_codes text NOT NULL,
 	verified boolean DEFAULT true,
 	failed_verification_count integer NOT NULL DEFAULT 0,
-	locked_until timestamptz
+	locked_until timestamptz,
+	-- An authenticator being set up or replaced waits here until it produces a valid code, so the
+	-- active secret keeps working in the meantime.
+	pending_secret text,
+	-- The newest TOTP step accepted. A code is valid once: only a later step is accepted after it.
+	last_used_step bigint,
+	enrolled_at timestamptz,
+	backup_codes_remaining integer NOT NULL DEFAULT 0
 );
 
 CREATE INDEX platform_auth_two_factors_user_idx ON platform_auth_two_factors(user_id);
@@ -211,6 +221,8 @@ CREATE TABLE platform_step_up_grants (
 	expires_at timestamptz NOT NULL,
 	verified_at timestamptz,
 	consumed_at timestamptz,
+	-- Wrong codes entered against this challenge; five end it, so one challenge cannot be guessed at.
+	failed_attempts integer NOT NULL DEFAULT 0,
 	created_at timestamptz NOT NULL DEFAULT now()
 );
 

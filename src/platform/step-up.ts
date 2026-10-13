@@ -1,5 +1,6 @@
 import type { MerchantScope, StepUpChallengeView } from "./contracts";
 import type { MerchantSql } from "./database";
+import { type MerchantSecondFactor, notEnrolled } from "./second-factor";
 import {
 	digest,
 	IDLE_MS,
@@ -61,9 +62,15 @@ interface ChallengeRow {
 	created_at: Date;
 	verified_at: Date | null;
 	consumed_at: Date | null;
+	failed_attempts: number;
 }
+/** Wrong codes one challenge takes before it is closed; the account lockout counts them too. */
+const MAX_CHALLENGE_ATTEMPTS = 5;
 export class MerchantStepUp {
-	constructor(private readonly store: MerchantStore) {}
+	constructor(
+		private readonly store: MerchantStore,
+		private readonly secondFactor: MerchantSecondFactor,
+	) {}
 	async create(
 		identity: MerchantIdentity,
 		key: string,
@@ -103,6 +110,9 @@ export class MerchantStepUp {
 				"The saved request must match the reviewed action.",
 				409,
 			);
+		// A challenge is confirmed with a code from the person's authenticator, so one without an
+		// authenticator is told to set it up now rather than after the challenge has been stored.
+		if (!(await this.secondFactor.isEnrolled(identity.authUserId))) throw notEnrolled();
 		return this.store.idempotent(identity, key, ["step-up.create", input], async (tx) => {
 			const member = await this.store.membership(
 				tx,
@@ -145,7 +155,7 @@ export class MerchantStepUp {
 			if (!row) throw new Error("Challenge insert failed");
 			return {
 				id: row.id,
-				method: identity.authMethod,
+				factor: "totp" as const,
 				action: input.action,
 				target: input.target,
 				scope: input.scope,
@@ -163,7 +173,12 @@ export class MerchantStepUp {
 		const [row] = await tx<
 			ChallengeRow[]
 		>`SELECT * FROM platform_step_up_grants WHERE id=${id} AND session_id=${identity.sessionId}`;
-		if (!row || row.expires_at <= this.store.now() || row.consumed_at)
+		if (
+			!row ||
+			row.expires_at <= this.store.now() ||
+			row.consumed_at ||
+			row.failed_attempts >= MAX_CHALLENGE_ATTEMPTS
+		)
 			throw new MerchantError(
 				"STEP_UP_EXPIRED",
 				"This confirmation has expired. Review the action and try again.",
@@ -175,7 +190,7 @@ export class MerchantStepUp {
 		const row = await this.record(this.store.sql, identity, id);
 		return {
 			id: row.id,
-			method: identity.authMethod,
+			factor: "totp" as const,
 			action: row.action,
 			target: row.target,
 			scope: row.scope,
@@ -187,95 +202,88 @@ export class MerchantStepUp {
 	async complete(
 		identity: MerchantIdentity,
 		id: string,
-		authToken: string,
+		code: string,
 	): Promise<{ grant: string; token: string; csrf: string; expiresAt: string }> {
+		const challenge = await this.record(this.store.sql, identity, id);
+		if (challenge.verified_at)
+			throw new MerchantError("STEP_UP_USED", "This confirmation has already been completed.", 409);
+		try {
+			await this.secondFactor.verifyCode(identity.authUserId, code);
+		} catch (error) {
+			// A wrong code is charged to this challenge on a statement of its own, so the charge
+			// survives the refusal that follows.
+			if (
+				error instanceof MerchantError &&
+				(error.code === "INVALID_CODE" || error.code === "CODE_ALREADY_USED")
+			)
+				await this.store
+					.sql`UPDATE platform_step_up_grants SET failed_attempts=failed_attempts+1 WHERE id=${id} AND session_id=${identity.sessionId}`;
+			throw error;
+		}
 		return this.store.sql.begin(async (tx) => {
 			const sessions =
 				await tx`SELECT id FROM platform_merchant_sessions WHERE id=${identity.sessionId} AND revoked_at IS NULL AND absolute_expires_at>${this.store.now()} AND last_seen_at>${new Date(this.store.now().getTime() - IDLE_MS)} FOR UPDATE`;
 			if (!sessions.length)
 				throw new MerchantError("SESSION_EXPIRED", "Your session expired. Sign in again.", 401);
 			await tx`SELECT id FROM platform_step_up_grants WHERE id=${id} FOR UPDATE`;
-			const challenge = await this.record(tx, identity, id);
-			if (challenge.verified_at)
+			const locked = await this.record(tx, identity, id);
+			if (locked.verified_at)
 				throw new MerchantError(
 					"STEP_UP_USED",
 					"This confirmation has already been completed.",
 					409,
 				);
-			const [proof] = await tx<
-				{
-					id: string;
-					user_id: string;
-					auth_method: string;
-					auth_issuer: string;
-					auth_subject: string;
-					proof_at: Date;
-					created_at: Date;
-				}[]
-			>`SELECT * FROM platform_auth_sessions WHERE token=${authToken} AND expires_at>${this.store.now()} AND proof_at>=${challenge.created_at} AND mcp_request_hash IS NULL FOR UPDATE`;
-			if (
-				!proof ||
-				proof.user_id !== identity.authUserId ||
-				proof.auth_method !== identity.authMethod ||
-				proof.auth_issuer !== identity.issuer ||
-				proof.auth_subject !== identity.subject ||
-				proof.created_at < challenge.created_at
-			)
-				throw new MerchantError(
-					"STEP_UP_IDENTITY_MISMATCH",
-					"Authenticate again using the same account to confirm this action.",
-					403,
-				);
 			const member = await this.store.membership(
 				tx,
 				identity.principalId,
-				challenge.scope.organizationSlug,
+				locked.scope.organizationSlug,
 				true,
 			);
-			requireCapability(
-				member.role,
-				actionCapability(challenge.action, challenge.scope.environment),
-			);
+			requireCapability(member.role, actionCapability(locked.action, locked.scope.environment));
 			const token = randomToken();
 			const csrf = randomToken();
 			const grant = randomToken();
 			const expires = new Date(this.store.now().getTime() + STEP_UP_MS);
 			await tx`UPDATE platform_merchant_sessions SET token_hash=${this.store.hash(token)},csrf_hash=${this.store.hash(csrf)},last_seen_at=${this.store.now()} WHERE id=${identity.sessionId} AND revoked_at IS NULL`;
 			await tx`UPDATE platform_step_up_grants SET token_hash=${this.store.hash(grant)},verified_at=${this.store.now()},expires_at=${expires} WHERE id=${id}`;
-			await tx`DELETE FROM platform_auth_sessions WHERE id=${proof.id}`;
-			await tx`UPDATE platform_auth_accounts SET access_token=NULL,refresh_token=NULL,id_token=NULL WHERE user_id=${identity.authUserId} AND provider_id='google'`;
 			await this.store.audit(
 				tx,
 				identity.principalId,
 				member.organization_id,
 				"step_up.completed",
 				id,
-				{ action: challenge.action, environment: challenge.scope.environment },
+				{ action: locked.action, environment: locked.scope.environment },
 			);
 			return { token, csrf, grant, expiresAt: expires.toISOString() };
 		});
 	}
-	async consume(
-		tx: MerchantSql,
-		identity: MerchantIdentity,
-		scope: MerchantScope,
-		action: string,
-		target: string,
-		token: string | null,
-	): Promise<void> {
-		if (!token)
-			throw new MerchantError(
-				"STEP_UP_REQUIRED",
-				"Confirm your identity before performing this action.",
-				403,
-			);
-		const rows =
-			await tx`UPDATE platform_step_up_grants SET consumed_at=${this.store.now()} WHERE token_hash=${this.store.hash(token)} AND session_id=${identity.sessionId} AND scope=${JSON.stringify(scope)}::text::jsonb AND action=${action} AND target=${target} AND verified_at IS NOT NULL AND consumed_at IS NULL AND expires_at>${this.store.now()} RETURNING id`;
-		if (!rows.length)
-			throw new MerchantError(
-				"STEP_UP_EXPIRED",
-				"This confirmation expired or does not match the action. Review it and confirm again.",
-				409,
-			);
-	}
+}
+
+/**
+ * Spends a verified grant on the one action it was issued for. It runs inside the guarded work's
+ * transaction, so a rollback gives the grant back.
+ */
+export async function consumeStepUpGrant(
+	store: MerchantStore,
+	tx: MerchantSql,
+	identity: MerchantIdentity,
+	scope: MerchantScope,
+	action: string,
+	target: string,
+	token: string | null,
+): Promise<void> {
+	if (!token)
+		throw new MerchantError(
+			"STEP_UP_REQUIRED",
+			"Confirm your identity before performing this action.",
+			403,
+		);
+	const rows =
+		await tx`UPDATE platform_step_up_grants SET consumed_at=${store.now()} WHERE token_hash=${store.hash(token)} AND session_id=${identity.sessionId} AND scope=${JSON.stringify(scope)}::text::jsonb AND action=${action} AND target=${target} AND verified_at IS NOT NULL AND consumed_at IS NULL AND expires_at>${store.now()} RETURNING id`;
+	if (!rows.length)
+		throw new MerchantError(
+			"STEP_UP_EXPIRED",
+			"This confirmation expired or does not match the action. Review it and confirm again.",
+			409,
+		);
 }

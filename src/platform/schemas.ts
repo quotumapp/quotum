@@ -87,7 +87,17 @@ export const MerchantSessionViewSchema = z.object({
 	projects: z.array(MerchantProjectViewSchema),
 	context: z.union([z.null(), MerchantScopeSchema]),
 	onboarding: z.union([z.null(), OnboardingDraftViewSchema]),
+	secondFactor: z.object({ enrolled: z.boolean(), recoveryCodesRemaining: z.number().int() }),
 	csrfToken: z.string(),
+});
+
+export const SecondFactorEnrolmentViewSchema = z.object({
+	otpauthUri: z.string(),
+	secret: z.string(),
+});
+
+export const SecondFactorRecoveryCodesViewSchema = z.object({
+	recoveryCodes: z.array(z.string()),
 });
 
 export const ProvisioningOperationViewSchema = z.object({
@@ -154,7 +164,8 @@ export const StepUpChallengeViewSchema = z.object({
 		})
 		.optional(),
 	id: z.string(),
-	method: MerchantAuthMethodSchema,
+	// What confirms the action: a code from the person's authenticator app, or a recovery code.
+	factor: z.literal("totp"),
 	action: z.string(),
 	target: z.string(),
 	scope: MerchantScopeSchema,

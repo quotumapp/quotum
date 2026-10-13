@@ -24,7 +24,7 @@ matching merchant UI and BFF before enabling it; [deployment](deployment.md#remo
 the public routes and schema ordering.
 
 Add `https://api.example.com/mcp` to a coding client. Authorization opens the merchant application,
-requires a fresh password plus email OTP or Google sign-in, then asks for one organization,
+requires a fresh password plus authenticator code, or Google sign-in, then asks for one organization,
 project, and environment and explicit consent to the requested scopes. A client that requests change
 proposals can still be connected read-only: the consent page shows **Propose changes** as a separate
 choice, and leaving it unticked drops only `quotum.billing.write`. A role that cannot approve any
@@ -57,7 +57,8 @@ request and refresh rechecks current principal, membership, environment, and gra
 A refresh token that was already rotated, presented after its 30-second replay window, also revokes
 the authorization. Each revocation writes an `mcp.revoked` audit event whose `reason` says why a
 client had to sign in again: `user` (Disconnect in the console), `client` (the client's own
-`/oauth/revoke`), `code_replay`, `refresh_replay`, `issuance_failed` or `password_reset`.
+`/oauth/revoke`), `code_replay`, `refresh_replay`, `issuance_failed`, `password_reset` or
+`second_factor_reset` (an operator reset the person's authenticator).
 
 Discovery lives on the API origin at `/.well-known/oauth-authorization-server` and
 `/.well-known/oauth-protected-resource/mcp`. The authorization endpoint is on the UI origin, so the
@@ -175,8 +176,9 @@ environment administration, global reconciliation and usage consumption are excl
 Every effective change requires the same connected merchant to open the returned URL, review it,
 and choose **Approve and apply**, including in sandbox. Production and sensitive recovery/correction
 actions also require the existing step-up authentication: the console opens a challenge bound to
-`POST /api/platform/mcp/changes/{id}/approve` and the proposal's hash, and sends the approval with
-the grant once the identity is confirmed. The backend rechecks the live session,
+`POST /api/platform/mcp/changes/{id}/approve` and the proposal's hash, asks the merchant for a code
+from their authenticator app (or a recovery code) without leaving the page, and sends the approval
+with the grant once the code is confirmed. The backend rechecks the live session,
 connection and role. The agent must present the URL to the user, never approve it itself. There is
 no MCP execute tool and no arbitrary HTTP passthrough.
 

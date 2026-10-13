@@ -8,7 +8,7 @@ import { allowedOnInactiveEnvironment } from "../application/billing-port";
 import type { MerchantCapability, MerchantScope } from "../contracts";
 import type { MerchantSql } from "../database";
 import { digest, IDLE_MS, MerchantError, requireCapability } from "../security";
-import { canonicalJson, MerchantStepUp, mutationTarget } from "../step-up";
+import { canonicalJson, consumeStepUpGrant, mutationTarget } from "../step-up";
 import type { MerchantIdentity, MerchantStore } from "../store";
 import { environmentStatus, MCP_WRITE_SCOPE, McpAuthorizations } from "./authorization";
 
@@ -379,7 +379,8 @@ export class McpChanges {
 			if (!grants.length)
 				throw new MerchantError("MCP_AUTHORIZATION_REVOKED", "Reconnect Quotum.", 401);
 			if (approve && row.sensitive)
-				await new MerchantStepUp(this.store).consume(
+				await consumeStepUpGrant(
+					this.store,
 					tx,
 					identity,
 					row.scope,

@@ -20,6 +20,7 @@ import type { McpChanges } from "./mcp/changes";
 import { registerMcpRoutes } from "./mcp/routes";
 import { MerchantOnboarding } from "./onboarding";
 import * as responses from "./platform-responses";
+import { registerSecondFactorRoutes } from "./second-factor-routes";
 import {
 	assertCsrf,
 	authRateLimitError,
@@ -65,6 +66,8 @@ export const MERCHANT_AUTH_POST_PATHS = new Set([
 	"/sign-in/social",
 	"/two-factor/send-otp",
 	"/two-factor/verify-otp",
+	"/two-factor/verify-totp",
+	"/two-factor/verify-backup-code",
 	"/send-verification-email",
 	"/request-password-reset",
 	"/reset-password",
@@ -154,7 +157,7 @@ export function createMerchantApp({
 		app.use(requestObservabilityMiddleware);
 	}
 	const team = new MerchantTeam(store, mailer);
-	const stepUp = new MerchantStepUp(store);
+	const stepUp = new MerchantStepUp(store, auth.secondFactor);
 	const current = (request: Request) => store.authenticate(request);
 	const invitationHash = async (request: Request, raw?: string) => {
 		if (raw) return store.hash(raw);
@@ -868,28 +871,30 @@ export function createMerchantApp({
 
 	app.post(
 		"/api/platform/step-up/:id/complete",
-		async ({ params, request, set }) => {
+		async ({ params, body, request, set }) => {
+			const input = postApiPlatformStepUpByIdCompleteBodySchema.parse(body);
 			const result = await stepUp.complete(
 				await current(request),
 				z.uuid().parse(params.id),
-				await transient(request),
+				input.code,
 			);
 			appendSetCookie(set, sessionCookie(result.token));
 			appendSetCookie(set, csrfCookie(result.csrf));
-			clearTransientCookies(set);
 			return {
 				success: true as const,
 				data: { grant: result.grant, expiresAt: result.expiresAt },
 			};
 		},
 		{
-			// This operation never reads a request body.
-			parse: "none",
+			parse: [MERCHANT_JSON_PARSE],
 			...route(
 				"postApiPlatformStepUpByIdComplete",
 				"/api/platform/step-up/:id/complete",
 				{ 200: responses.postApiPlatformStepUpByIdCompleteResponse200Schema },
-				{ params: z.object({ id: z.uuid() }), body: unreadBodySchema },
+				{
+					params: z.object({ id: z.uuid() }),
+					body: postApiPlatformStepUpByIdCompleteBodySchema,
+				},
 			),
 		},
 	);
@@ -906,6 +911,7 @@ export function createMerchantApp({
 
 	if (connections) registerConnectionRoutes(app, store, connections, stripeOAuth);
 	registerMcpRoutes(app, store, auth, mcpChanges);
+	registerSecondFactorRoutes(app, store, auth, mailer);
 
 	return app;
 
@@ -993,6 +999,24 @@ export function createMerchantApp({
 		if (rateLimited !== null) throw rateLimited;
 		const headers = new Headers(response.headers);
 		const payload: unknown = await response.json().catch(() => null);
+		if (
+			path === "/sign-in/email" &&
+			payload &&
+			typeof payload === "object" &&
+			"twoFactorRedirect" in payload &&
+			payload.twoFactorRedirect === true
+		) {
+			// The library lists the methods it has configured, and emailed codes are one of them. Say
+			// what this account can actually use: an authenticator and recovery codes once enrolled,
+			// otherwise the emailed code that leads to setting one up.
+			const methods = "twoFactorMethods" in payload ? payload.twoFactorMethods : null;
+			Object.assign(payload, {
+				twoFactorMethods:
+					Array.isArray(methods) && methods.includes("totp")
+						? ["totp", "backup_code"]
+						: ["email_enrolment"],
+			});
+		}
 		// The library's duplicate-email fast path is generic, but a concurrent insert
 		// can hit its unique constraint instead. Preserve the same non-enumerating result.
 		if (
@@ -1045,6 +1069,11 @@ function redactAuthResponse(value: unknown): unknown {
 			.map(([key, item]) => [key, redactAuthResponse(item)]),
 	);
 }
+
+const postApiPlatformStepUpByIdCompleteBodySchema = z.strictObject({
+	// A six-digit code from the authenticator app, or a recovery code.
+	code: z.string().min(1).max(32),
+});
 
 const postApiPlatformSignupIntentBodySchema = z.strictObject({
 	accepted: z.literal(true),

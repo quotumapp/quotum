@@ -24,7 +24,6 @@ import { createIntegrationBillingEnv } from "../../tests/integration/helpers/loc
 import {
 	MerchantBrowser,
 	merchantFixture,
-	password,
 	serviceToken,
 	grant as stepUpGrant,
 	testConfig,
@@ -1178,13 +1177,13 @@ describe("merchant platform transactions", () => {
 			(await anon.json<InvitationView>("/api/platform/invitations/preview", { token })).status,
 		).toBe("inviter_authority_lost");
 	});
-	it("binds a fresh password+OTP step-up to one session, scope, action, and payload", async () => {
+	it("binds a fresh second-factor step-up to one session, scope, action, and payload", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.signup();
 		await onboard(browser);
 		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
-		// The proof is dated by the application clock; one running behind the database clock must
-		// still count as fresh.
+		// The challenge and grant are dated by the application clock; one running behind the
+		// database clock must still work.
 		f.advance(-60_000);
 
 		const scope = {
@@ -1212,21 +1211,17 @@ describe("merchant platform transactions", () => {
 			(await browser.json<StepUpChallengeView>(`/api/platform/step-up/${challenge.id}`)).request
 				?.idempotencyKey,
 		).toBe("publish-once");
+		// A code is required, and a wrong one is spent against this challenge.
 		expect(
 			(await browser.request(`/api/platform/step-up/${challenge.id}/complete`, {})).status,
-		).toBe(401);
-		await f.sql`DELETE FROM platform_rate_limits`;
-		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
-		await browser.json("/api/auth/two-factor/send-otp", {});
-		await browser.json("/api/auth/two-factor/verify-otp", {
-			code: f.mailer.otp("owner@example.com"),
-			trustDevice: false,
+		).toBe(400);
+		const wrong = await browser.request(`/api/platform/step-up/${challenge.id}/complete`, {
+			code: await browser.wrongCode(),
 		});
+		expect([wrong.status, (await wrong.json()).error.code]).toEqual([400, "INVALID_CODE"]);
+		await f.sql`DELETE FROM platform_rate_limits`;
 		const previous = browser.cookies.get(SESSION_COOKIE);
-		const complete = await browser.json<{ grant: string }>(
-			`/api/platform/step-up/${challenge.id}/complete`,
-			{},
-		);
+		const complete = { grant: await browser.completeStepUp(challenge.id) };
 		expect(browser.cookies.get(SESSION_COOKIE) !== previous).toBe(true);
 		const changed = await browser.request(
 			path,
@@ -1276,16 +1271,7 @@ describe("merchant platform transactions", () => {
 			request: { method: "POST", path, body, idempotencyKey: "replay-once" },
 		});
 		await f.sql`DELETE FROM platform_rate_limits`;
-		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
-		await browser.json("/api/auth/two-factor/send-otp", {});
-		await browser.json("/api/auth/two-factor/verify-otp", {
-			code: f.mailer.otp("owner@example.com"),
-			trustDevice: false,
-		});
-		const { grant } = await browser.json<{ grant: string }>(
-			`/api/platform/step-up/${challenge.id}/complete`,
-			{},
-		);
+		const grant = await browser.completeStepUp(challenge.id);
 		// Store-event replay has no downstream idempotency: every dispatch would replay the event.
 		const dispatch = spyOn(f.billingPort, "dispatch").mockResolvedValue({
 			status: 200,

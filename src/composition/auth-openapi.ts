@@ -149,7 +149,8 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 				operation.responses = {
 					...operation.responses,
 					200: {
-						description: "Continue with email OTP",
+						description:
+							"Continue with an authenticator code or a recovery code, or with the emailed code that starts setting up an authenticator",
 						content: {
 							"application/json": {
 								schema: {
@@ -157,7 +158,10 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 									required: ["twoFactorRedirect"],
 									properties: {
 										twoFactorRedirect: { const: true },
-										twoFactorMethods: { type: "array", items: { type: "string" } },
+										twoFactorMethods: {
+											type: "array",
+											items: { enum: ["totp", "backup_code", "email_enrolment"] },
+										},
 									},
 								},
 							},
@@ -165,7 +169,15 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 					},
 				};
 			}
-			if (["/sign-in/email", "/sign-in/social", "/two-factor/verify-otp"].includes(suffix)) {
+			if (
+				[
+					"/sign-in/email",
+					"/sign-in/social",
+					"/two-factor/verify-otp",
+					"/two-factor/verify-totp",
+					"/two-factor/verify-backup-code",
+				].includes(suffix)
+			) {
 				const body = operation.requestBody;
 				if (body && "content" in body) {
 					const schema = body.content["application/json"]?.schema;
@@ -180,7 +192,15 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 						};
 				}
 			}
-			if (["/two-factor/verify-otp", "/oauth2/continue", "/oauth2/consent"].includes(suffix)) {
+			if (
+				[
+					"/two-factor/verify-otp",
+					"/two-factor/verify-totp",
+					"/two-factor/verify-backup-code",
+					"/oauth2/continue",
+					"/oauth2/consent",
+				].includes(suffix)
+			) {
 				const response = operation.responses?.[200];
 				if (response && "content" in response) {
 					const media = response.content?.["application/json"];
@@ -210,6 +230,16 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 			}
 			paths[`/api/auth${suffix}`] = { post: operation };
 		}
+	}
+	// The library documents each second-factor verification differently, but all three answer with
+	// the same body: the person, and a session token that Quotum removes.
+	const verified = paths["/api/auth/two-factor/verify-otp"]?.post?.responses?.[200];
+	for (const sibling of [
+		"/api/auth/two-factor/verify-totp",
+		"/api/auth/two-factor/verify-backup-code",
+	]) {
+		const operation = paths[sibling]?.post;
+		if (operation && verified) operation.responses = { ...operation.responses, 200: verified };
 	}
 	paths["/api/auth/callback/google"] = {
 		get: {

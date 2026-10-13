@@ -3,7 +3,7 @@ import type { PlatformProjectInstanceRecord } from "../application/ports";
 import type { MerchantCapability, MerchantScope } from "../contracts";
 import type { MerchantSql } from "../database";
 import { MerchantError, requireCapability } from "../security";
-import { MerchantStepUp } from "../step-up";
+import { consumeStepUpGrant } from "../step-up";
 import type { MerchantIdentity, MerchantStore } from "../store";
 import { type ConnectionGate, ConnectionLifecycle } from "./lifecycle";
 import type { StripeOAuthPort } from "./oauth-port";
@@ -212,7 +212,7 @@ export class MerchantConnections {
 		grant: string | null,
 	) {
 		if (scope.environment === "production")
-			await new MerchantStepUp(this.store).consume(tx, identity, scope, action, target, grant);
+			await consumeStepUpGrant(this.store, tx, identity, scope, action, target, grant);
 	}
 	receipt(
 		tx: MerchantSql,

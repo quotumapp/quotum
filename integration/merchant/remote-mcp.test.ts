@@ -3,16 +3,19 @@ import { createHash, randomBytes } from "node:crypto";
 import { createRemoteMcpApp } from "../../src/composition/remote-mcp";
 import type { MerchantScope, OnboardingDraftView } from "../../src/platform/contracts";
 import { MCP_GRANT_CLAIM, McpAuthorizations } from "../../src/platform/mcp/authorization";
+import { resetSecondFactor } from "../../src/platform/operator-second-factor";
 import { PlatformRetentionSweep } from "../../src/platform/retention";
 import { CSRF_COOKIE } from "../../src/platform/security";
 import { assertOpenApiResponse } from "../../tests/helpers/openapi";
 import {
+	authenticatorSecret,
 	MerchantBrowser,
 	merchantFixture,
 	merchantTestScope,
 	password,
 	serviceToken,
 	testConfig,
+	totpCode,
 } from "./fixture";
 
 const origin = "https://api.example.test";
@@ -107,9 +110,10 @@ async function signIn(browser: OAuthBrowser, write = false) {
 	expect(login.pathname).toBe("/sign-in");
 	const oauth_query = login.search.slice(1);
 	await browser.native("/api/auth/sign-in/email", { email, password, oauth_query });
-	await browser.native("/api/auth/two-factor/send-otp", {});
-	const verified = await browser.native("/api/auth/two-factor/verify-otp", {
-		code: f.mailer.otp(email),
+	// A code works once, and these tests authorize far more often than a person would.
+	await f.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL,failed_verification_count=0,locked_until=NULL`;
+	const verified = await browser.native("/api/auth/two-factor/verify-totp", {
+		code: await totpCode(f.authenticators.get(email) ?? ""),
 		trustDevice: false,
 		oauth_query,
 	});
@@ -239,6 +243,56 @@ async function revocationReasons() {
 }
 
 describe("remote MCP browser authorization", () => {
+	it("lets an account with no authenticator set one up inside an authorization", async () => {
+		const browser = await owner();
+		// An account from before authenticators existed: nothing but the emailed code to prove it.
+		await resetSecondFactor(f.sql, { email, operator: "test", reason: "synthetic" });
+		f.authenticators.delete(email);
+		f.advance(31_000);
+		const verifier = randomBytes(32).toString("base64url");
+		const query = new URLSearchParams({
+			response_type: "code",
+			client_id: clientId,
+			redirect_uri: redirect,
+			scope: "quotum.read offline_access",
+			state: crypto.randomUUID(),
+			code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+			code_challenge_method: "S256",
+			resource,
+		});
+		const started = await browser.native(`/api/auth/oauth2/authorize?${query}`);
+		const oauth_query = new URL(started.url, testConfig.origin).search.slice(1);
+		const signedIn = await browser.native("/api/auth/sign-in/email", {
+			email,
+			password,
+			oauth_query,
+		});
+		expect(signedIn.twoFactorMethods).toEqual(["email_enrolment"]);
+		await browser.native("/api/auth/two-factor/send-otp", {});
+		const mailed = await browser.native("/api/auth/two-factor/verify-otp", {
+			code: f.mailer.otp(email),
+			trustDevice: false,
+			oauth_query,
+		});
+		const selection = new URL(mailed.url, testConfig.origin);
+		expect(selection.pathname).toBe("/oauth/select");
+		// The emailed code proved the mailbox only: the authorization cannot proceed on it.
+		const early = await browser.raw("/api/platform/oauth/context", {
+			oauth_query: selection.search.slice(1),
+		});
+		expect(early.status).toBe(401);
+		const setup = await browser.native("/api/platform/second-factor/enrolment", {});
+		await browser.native("/api/platform/second-factor/enrolment/confirm", {
+			code: await totpCode(authenticatorSecret(setup.data.secret)),
+		});
+		const context = await browser.json<{ principal: { email: string } }>(
+			"/api/platform/oauth/context",
+			{ oauth_query: selection.search.slice(1) },
+		);
+		expect(context.principal.email).toBe(email);
+		// Setting the authenticator up did not turn the proof into a console session.
+		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
+	});
 	it("lets a consented code outlive browser proof freshness, but never its own expiry", async () => {
 		const browser = await owner();
 		const pending = await authorize(browser, merchantTestScope, async () => {

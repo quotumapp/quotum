@@ -1,13 +1,26 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { type BetterAuthOptions, type BetterAuthPlugin, betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
+import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
 import { twoFactor } from "better-auth/plugins/two-factor";
 import { verifyGoogleIdToken } from "better-auth/social-providers";
 import { toDisplayName } from "../shared/input-bounds";
 import type { MerchantEmail, MerchantMailer } from "./email";
-import { linkMessage } from "./email";
+import { linkMessage, securityNotice } from "./email";
 import { createMcpAuthProvider } from "./mcp/auth-provider";
 import { McpAuthorizations } from "./mcp/authorization";
+import {
+	lockedError,
+	MerchantSecondFactor,
+	RECOVERY_CODE_COUNT,
+	replayedCode,
+	SECOND_FACTOR_LOCK_SECONDS,
+	SECOND_FACTOR_MAX_FAILURES,
+	type SecretSealer,
+	TOTP_DIGITS,
+	TOTP_PERIOD_SECONDS,
+	UNENROLLED_SECRET,
+} from "./second-factor";
 import { cookieValue, MerchantError, normalizeEmail } from "./security";
 import type { MerchantStore } from "./store";
 
@@ -18,7 +31,7 @@ const GOOGLE_ISSUER = "https://accounts.google.com";
  * accounts by provider and account id again and no longer stores an issuer, so it is derived
  * from the provider here; the values match what Better Auth 1.7.0-1.7.2 wrote for existing rows.
  */
-const ACCOUNT_ISSUERS = { credential: "local:credential", google: GOOGLE_ISSUER } as const;
+export const ACCOUNT_ISSUERS = { credential: "local:credential", google: GOOGLE_ISSUER } as const;
 export function createMerchantAuth(
 	store: MerchantStore,
 	mailer: MerchantMailer,
@@ -28,6 +41,14 @@ export function createMerchantAuth(
 	const { config } = store;
 	const mcpAuth = createMcpAuthProvider(store);
 	const failures = new AsyncLocalStorage<MerchantError[]>();
+	// Authenticator secrets and recovery codes are sealed with the library's own key, so they
+	// carry its versioned envelope and a later key rotation does not orphan them.
+	const sealingKey = async () => (await auth.$context).secretConfig;
+	const sealer: SecretSealer = {
+		seal: async (plain) => symmetricEncrypt({ key: await sealingKey(), data: plain }),
+		open: async (sealed) => symmetricDecrypt({ key: await sealingKey(), data: sealed }),
+	};
+	const secondFactor = new MerchantSecondFactor(store, sealer);
 	const send = async (message: MerchantEmail) => {
 		try {
 			await mailer.send(message);
@@ -92,6 +113,9 @@ export function createMerchantAuth(
 		baseURL: config.origin,
 		basePath: "/api/auth",
 		secret: config.secret,
+		// Version 1 is the configured secret, so cookie signing is unchanged and values written
+		// before versioned envelopes existed stay readable through `secret` above.
+		secrets: [{ version: 1, value: config.secret }],
 		database,
 		trustedOrigins: [config.origin],
 		logger: { disabled: true },
@@ -196,10 +220,19 @@ export function createMerchantAuth(
 			verifiedGoogle,
 			...mcpAuth.plugins,
 			twoFactor({
-				totpOptions: { disable: true },
+				totpOptions: { digits: TOTP_DIGITS, period: TOTP_PERIOD_SECONDS },
+				backupCodeOptions: {
+					amount: RECOVERY_CODE_COUNT,
+					length: 10,
+					storeBackupCodes: "encrypted",
+				},
 				twoFactorCookieMaxAge: 600,
 				trustDeviceMaxAge: 0,
-				accountLockout: { enabled: true, maxFailedAttempts: 5, durationSeconds: 900 },
+				accountLockout: {
+					enabled: true,
+					maxFailedAttempts: SECOND_FACTOR_MAX_FAILURES,
+					durationSeconds: SECOND_FACTOR_LOCK_SECONDS,
+				},
 				otpOptions: {
 					digits: 6,
 					period: 10,
@@ -209,9 +242,9 @@ export function createMerchantAuth(
 						await send({
 							to: user.email,
 							kind: "otp",
-							subject: "Your Quotum verification code",
-							text: `Your verification code is ${otp}. It expires in 10 minutes.`,
-							html: `<p>Your verification code is <strong>${otp}</strong>.</p><p>It expires in 10 minutes.</p>`,
+							subject: "Your Quotum authenticator setup code",
+							text: `Your code to set up an authenticator app is ${otp}. It expires in 10 minutes.`,
+							html: `<p>Your code to set up an authenticator app is <strong>${otp}</strong>.</p><p>It expires in 10 minutes.</p>`,
 						});
 					},
 				},
@@ -264,9 +297,9 @@ export function createMerchantAuth(
 						};
 					},
 					after: async (user) => {
-						// Email-only accounts still need the plugin's persistent account lockout row.
-						// TOTP and backup-code endpoints are disabled; these placeholders are not usable factors.
-						await store.sql`INSERT INTO platform_auth_two_factors(user_id,secret,backup_codes,verified) VALUES(${user.id},'email-otp-only','[]',false) ON CONFLICT(user_id) DO NOTHING`;
+						// Every account owns one factor row from the start, and the plugin's account lockout counts
+						// on it. Until an authenticator is confirmed the row is an unusable placeholder.
+						await store.sql`INSERT INTO platform_auth_two_factors(user_id,secret,backup_codes,verified) VALUES(${user.id},${UNENROLLED_SECRET},'[]',false) ON CONFLICT(user_id) DO NOTHING`;
 					},
 				},
 			},
@@ -274,14 +307,50 @@ export function createMerchantAuth(
 		hooks: {
 			before: createAuthMiddleware(async (ctx) => {
 				await mcpAuth.before(ctx);
+				// The signed challenge cookie names who is signing in; without one the plugin answers.
+				const secondStep = [
+					"/two-factor/send-otp",
+					"/two-factor/verify-otp",
+					"/two-factor/verify-totp",
+				].includes(ctx.path ?? "");
+				const challengeCookie = ctx.context.createAuthCookie("two_factor");
+				const challenge = secondStep
+					? await ctx.getSignedCookie(challengeCookie.name, ctx.context.secret)
+					: null;
+				const proof = challenge
+					? await ctx.context.internalAdapter.findVerificationValue(challenge)
+					: null;
+				const challenged = proof && proof.expiresAt > new Date() ? proof.value : null;
+				if (challenged && ctx.path !== "/two-factor/verify-totp") {
+					// An emailed code only proves the mailbox, for an account that has no authenticator yet.
+					// Once one is confirmed it is the only way in, besides a recovery code.
+					if (await secondFactor.isEnrolled(challenged))
+						throw new APIError("FORBIDDEN", {
+							code: "OTP_NOT_ALLOWED",
+							message: "Use the code shown in your authenticator app, or a recovery code.",
+						});
+				}
+				if (
+					challenged &&
+					ctx.path === "/two-factor/verify-totp" &&
+					typeof ctx.body?.code === "string"
+				) {
+					// The plugin accepts a code again anywhere inside its window. Claim the step first so a
+					// code signs in once. A wrong code falls through, so the plugin counts it as before.
+					const claim = await secondFactor.claimTotp(challenged, ctx.body.code);
+					if (claim.status === "locked" || claim.status === "replayed") {
+						if (claim.status === "replayed") await secondFactor.recordFailure(challenged);
+						const error = claim.status === "locked" ? lockedError(claim.until) : replayedCode();
+						failures.getStore()?.push(error);
+						throw new APIError(claim.status === "locked" ? "TOO_MANY_REQUESTS" : "UNAUTHORIZED", {
+							code: error.code,
+							message: error.message,
+						});
+					}
+				}
 				if (ctx.path === "/two-factor/send-otp") {
 					// Check before the plugin replaces an existing code. Better Auth 1.7.2
 					// deliberately swallows sendOTP callback errors, so it cannot own throttling.
-					const cookie = ctx.context.createAuthCookie("two_factor");
-					const challenge = await ctx.getSignedCookie(cookie.name, ctx.context.secret);
-					const proof = challenge
-						? await ctx.context.internalAdapter.findVerificationValue(challenge)
-						: null;
 					if (!proof || proof.expiresAt <= new Date())
 						throw new APIError("UNAUTHORIZED", {
 							code: "INVALID_TWO_FACTOR_COOKIE",
@@ -325,19 +394,39 @@ export function createMerchantAuth(
 				const data = ctx.context.newSession;
 				if (!data) return;
 				const method =
-					ctx.path === "/two-factor/verify-otp"
+					ctx.path === "/two-factor/verify-totp" || ctx.path === "/two-factor/verify-backup-code"
 						? "password"
 						: ctx.path === "/callback/google" ||
 								(ctx.path === "/callback/:id" && ctx.params?.id === "google")
 							? "google"
 							: null;
-				if (!method) return;
+				if (!method && ctx.path !== "/two-factor/verify-otp") return;
 				if (!data.user.emailVerified) {
 					await store.sql`DELETE FROM platform_auth_sessions WHERE id=${data.session.id}`;
 					throw new APIError("FORBIDDEN", {
 						code: "EMAIL_NOT_VERIFIED",
 						message: "Verify your email before continuing.",
 					});
+				}
+				if (!method) {
+					// An emailed code proves the mailbox of an account with no authenticator yet. It is a
+					// stage towards enrolling one, never a sign-in: it carries no method or proof time, so
+					// the session exchange, step-up and MCP authorization all refuse it.
+					await store.sql`UPDATE platform_auth_sessions SET bootstrap_at=${store.now()} WHERE id=${data.session.id}`;
+					return;
+				}
+				if (ctx.path === "/two-factor/verify-backup-code") {
+					await secondFactor.syncRecoveryCount(data.user.id);
+					// A recovery code is what someone without the authenticator uses, so the person is told.
+					// The notice reports the sign-in; a delivery failure must not undo it.
+					await mailer
+						.send(
+							securityNotice(
+								data.user.email,
+								"a recovery code was used to sign in to your account",
+							),
+						)
+						.catch(() => {});
 				}
 				const provider = method === "password" ? "credential" : "google";
 				const [account] = await store.sql<
@@ -355,6 +444,7 @@ export function createMerchantAuth(
 	const handler = auth.handler;
 	return {
 		...auth,
+		secondFactor,
 		handler: (request: Request) =>
 			failures.run([], async () => {
 				const response = await handler(request);

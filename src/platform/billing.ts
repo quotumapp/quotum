@@ -3,7 +3,7 @@ import { billingOperation, type MerchantBillingPort } from "./application/billin
 import type { MerchantCapability, MerchantScope } from "./contracts";
 import type { MerchantSql } from "./database";
 import { idempotencyKey, MerchantError, requireCapability } from "./security";
-import { actionCapability, MerchantStepUp, mutationTarget } from "./step-up";
+import { actionCapability, consumeStepUpGrant, mutationTarget } from "./step-up";
 import type { MerchantIdentity, MerchantStore } from "./store";
 
 interface BillingRoute {
@@ -115,7 +115,6 @@ export function merchantBillingRoute(
 	return null;
 }
 export function createMerchantBilling(store: MerchantStore, billing: MerchantBillingPort) {
-	const steps = new MerchantStepUp(store);
 	return async (request: Request, identity: MerchantIdentity): Promise<Response> => {
 		const scope: MerchantScope = {
 			kind: "merchant",
@@ -176,7 +175,8 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 			const latest = await store.membership(tx, identity.principalId, scope.organizationSlug, true);
 			requireCapability(latest.role, route.capability);
 			if (route.sensitive && route.action)
-				await steps.consume(
+				await consumeStepUpGrant(
+					store,
 					tx,
 					identity,
 					scope,

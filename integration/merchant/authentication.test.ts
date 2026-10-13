@@ -1,6 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { ABSOLUTE_MS, IDLE_MS, SESSION_COOKIE } from "../../src/platform/security";
-import { MerchantBrowser, merchantFixture, password, testConfig } from "./fixture";
+import {
+	authenticatorSecret,
+	MerchantBrowser,
+	merchantFixture,
+	password,
+	testConfig,
+	totpCode,
+} from "./fixture";
 
 const f = merchantFixture();
 beforeEach(() => f.reset());
@@ -32,7 +39,7 @@ describe("real Better Auth merchant authentication", () => {
 		});
 	});
 
-	it("requires verification, password, and OTP before custom session exchange", async () => {
+	it("requires verification, password, and an authenticator before custom session exchange", async () => {
 		const browser = new MerchantBrowser(f);
 		await browser.json("/api/platform/config");
 		await browser.json("/api/platform/signup-intent", {
@@ -69,6 +76,8 @@ describe("real Better Auth merchant authentication", () => {
 			password,
 		});
 		expect(signIn.twoFactorRedirect).toBe(true);
+		// No authenticator yet: the emailed code is only the way to set one up.
+		expect(signIn.twoFactorMethods).toEqual(["email_enrolment"]);
 		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
 		await browser.json("/api/auth/two-factor/send-otp", {});
 		const otp = f.mailer.otp("owner@example.com");
@@ -77,8 +86,22 @@ describe("real Better Auth merchant authentication", () => {
 			trustDevice: false,
 		});
 		expect(verified.token).toBeUndefined();
+		// An emailed code proves the mailbox; it is not a sign-in.
+		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
+		const setup = await browser.json<{ otpauthUri: string; secret: string }>(
+			"/api/platform/second-factor/enrolment",
+			{},
+		);
+		expect(setup.otpauthUri).toStartWith("otpauth://totp/Quotum:owner%40example.com");
+		const confirmed = await browser.json<{ recoveryCodes: string[] }>(
+			"/api/platform/second-factor/enrolment/confirm",
+			{ code: await totpCode(authenticatorSecret(setup.secret)) },
+		);
+		expect(confirmed.recoveryCodes).toHaveLength(10);
 		await browser.json("/api/platform/session/exchange", {});
 		expect((await browser.request("/api/platform/session")).status).toBe(200);
+		const view = await browser.json<{ secondFactor: unknown }>("/api/platform/session");
+		expect(view.secondFactor).toEqual({ enrolled: true, recoveryCodesRemaining: 10 });
 		const raw = browser.cookies.get(SESSION_COOKIE);
 		const [session] = await f.sql`SELECT token_hash,auth_method FROM platform_merchant_sessions`;
 		expect(session.auth_method).toBe("password");
@@ -104,6 +127,8 @@ describe("real Better Auth merchant authentication", () => {
 		for (const path of [
 			"/two-factor/disable",
 			"/two-factor/enable",
+			"/two-factor/get-totp-uri",
+			"/two-factor/generate-backup-codes",
 			"/sign-in/email-otp",
 			"/link-social",
 			"/get-session",
@@ -297,9 +322,9 @@ describe("real Better Auth merchant authentication", () => {
 		expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(5);
 		expect(results.filter((r) => r.status === "rejected")).toHaveLength(15);
 	});
-	it("locks OTP verification for fifteen minutes after five failures and never stores the code", async () => {
+	it("locks an emailed enrolment code for fifteen minutes after five failures and never stores it", async () => {
 		const owner = new MerchantBrowser(f);
-		await owner.signup();
+		await owner.register();
 		const browser = new MerchantBrowser(f);
 		await browser.json("/api/platform/config");
 		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
@@ -330,7 +355,7 @@ describe("real Better Auth merchant authentication", () => {
 	});
 	it("rejects expired OTPs and trusted devices without issuing an authenticated session", async () => {
 		const owner = new MerchantBrowser(f);
-		await owner.signup();
+		await owner.register();
 		const browser = new MerchantBrowser(f);
 		await browser.json("/api/platform/config");
 		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
@@ -349,7 +374,7 @@ describe("real Better Auth merchant authentication", () => {
 	});
 	it("throttles sends before replacing a usable OTP and surfaces delivery failures", async () => {
 		const owner = new MerchantBrowser(f);
-		await owner.signup();
+		await owner.register();
 		const browser = new MerchantBrowser(f);
 		await browser.json("/api/platform/config");
 		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
@@ -360,7 +385,6 @@ describe("real Better Auth merchant authentication", () => {
 		expect(throttled.status).toBe(429);
 		expect(Number(throttled.headers.get("retry-after"))).toBeGreaterThan(0);
 		await browser.json("/api/auth/two-factor/verify-otp", { code });
-		await browser.json("/api/platform/session/exchange", {});
 		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
 		f.advance(31_000);
 		f.mailer.fail = true;
@@ -433,5 +457,184 @@ describe("real Better Auth merchant authentication", () => {
 		for (const response of responses) expect(response.status).toBe(200);
 		expect(await f.sql`SELECT id FROM platform_auth_users`).toHaveLength(1);
 		expect(await f.sql`SELECT id FROM platform_auth_accounts`).toHaveLength(1);
+	});
+	it("signs in with the authenticator once per code and refuses emailed codes after enrolment", async () => {
+		const owner = new MerchantBrowser(f);
+		await owner.signup();
+		const secret = f.authenticators.get("owner@example.com") ?? "";
+		const browser = new MerchantBrowser(f);
+		await browser.json("/api/platform/config");
+		const signIn = await browser.json("/api/auth/sign-in/email", {
+			email: "owner@example.com",
+			password,
+		});
+		expect(signIn.twoFactorMethods).toEqual(["totp", "backup_code"]);
+		// Emailed codes only set an authenticator up; an enrolled person is never sent one.
+		const mailed = f.mailer.messages.length;
+		f.advance(31_000);
+		for (const path of ["send-otp", "verify-otp"]) {
+			const refused = await browser.request(`/api/auth/two-factor/${path}`, { code: "123456" });
+			expect([refused.status, (await refused.json()).code]).toEqual([403, "OTP_NOT_ALLOWED"]);
+		}
+		expect(f.mailer.messages).toHaveLength(mailed);
+		await f.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL`;
+		const code = await totpCode(secret);
+		await browser.json("/api/auth/two-factor/verify-totp", { code, trustDevice: false });
+		await browser.json("/api/platform/session/exchange", {});
+		expect((await browser.request("/api/platform/session")).status).toBe(200);
+		// The code is spent: it does not sign in a second time while it is still inside its window.
+		const again = new MerchantBrowser(f);
+		await again.json("/api/platform/config");
+		await again.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
+		const replay = await again.request("/api/auth/two-factor/verify-totp", {
+			code,
+			trustDevice: false,
+		});
+		expect([replay.status, (await replay.json()).error?.code]).toEqual([409, "CODE_ALREADY_USED"]);
+		expect((await again.request("/api/platform/session/exchange", {})).status).toBe(401);
+		// A later step's code is accepted.
+		await again.json("/api/auth/two-factor/verify-totp", {
+			code: await totpCode(secret, 1),
+			trustDevice: false,
+		});
+		await again.json("/api/platform/session/exchange", {});
+		expect((await again.request("/api/platform/session")).status).toBe(200);
+	});
+	it("signs in with a recovery code once and keeps the remaining count", async () => {
+		const owner = new MerchantBrowser(f);
+		await owner.signup();
+		const [first, second] = f.recoveryCodes.get("owner@example.com") ?? [];
+		expect(first).toBeDefined();
+		const signIn = async () => {
+			const browser = new MerchantBrowser(f);
+			await browser.json("/api/platform/config");
+			await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
+			return browser;
+		};
+		const browser = await signIn();
+		await browser.json("/api/auth/two-factor/verify-backup-code", { code: first });
+		await browser.json("/api/platform/session/exchange", {});
+		const view = await browser.json<{ secondFactor: unknown }>("/api/platform/session");
+		expect(view.secondFactor).toEqual({ enrolled: true, recoveryCodesRemaining: 9 });
+		const again = await signIn();
+		expect(
+			(await again.request("/api/auth/two-factor/verify-backup-code", { code: first })).status,
+		).toBe(401);
+		await again.json("/api/auth/two-factor/verify-backup-code", { code: second });
+		await again.json("/api/platform/session/exchange", {});
+	});
+	it("locks the authenticator for fifteen minutes after five wrong codes", async () => {
+		const owner = new MerchantBrowser(f);
+		await owner.signup();
+		const secret = f.authenticators.get("owner@example.com") ?? "";
+		const browser = new MerchantBrowser(f);
+		await browser.json("/api/platform/config");
+		await browser.json("/api/auth/sign-in/email", { email: "owner@example.com", password });
+		const valid = new Set([
+			await totpCode(secret, -1),
+			await totpCode(secret),
+			await totpCode(secret, 1),
+		]);
+		const wrong = ["000000", "111111", "222222", "333333"].find((code) => !valid.has(code)) ?? "";
+		await f.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL`;
+		for (let attempt = 0; attempt < 5; attempt++)
+			expect(
+				(await browser.request("/api/auth/two-factor/verify-totp", { code: wrong })).status,
+			).toBe(401);
+		const [factor] = await f.sql<
+			{ failed_verification_count: number; locked_until: Date }[]
+		>`SELECT failed_verification_count,locked_until FROM platform_auth_two_factors`;
+		expect(factor?.failed_verification_count).toBe(5);
+		expect((factor?.locked_until.getTime() ?? 0) - Date.now()).toBeGreaterThan(14 * 60_000);
+		const locked = await browser.request("/api/auth/two-factor/verify-totp", {
+			code: await totpCode(secret),
+		});
+		expect([locked.status, (await locked.json()).error?.code]).toEqual([
+			429,
+			"ACCOUNT_TEMPORARILY_LOCKED",
+		]);
+		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
+	});
+	it("replaces an authenticator only with a current code, and regenerates recovery codes the same way", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		const email = "owner@example.com";
+		const secret = f.authenticators.get(email) ?? "";
+		const [oldCode] = f.recoveryCodes.get(email) ?? [];
+		// A live session alone cannot start a replacement.
+		const bare = await browser.request("/api/platform/second-factor/enrolment", {});
+		expect([bare.status, (await bare.json()).error.code]).toEqual([400, "CODE_REQUIRED"]);
+		await f.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL`;
+		const setup = await browser.json<{ secret: string }>("/api/platform/second-factor/enrolment", {
+			code: await totpCode(secret),
+		});
+		const replacement = authenticatorSecret(setup.secret);
+		// The old authenticator keeps working until the new one proves itself.
+		const [pending] = await f.sql<
+			{ verified: boolean; pending: boolean }[]
+		>`SELECT verified,pending_secret IS NOT NULL AS pending FROM platform_auth_two_factors`;
+		expect(pending).toEqual({ verified: true, pending: true });
+		const confirmed = await browser.json<{ recoveryCodes: string[] }>(
+			"/api/platform/second-factor/enrolment/confirm",
+			{ code: await totpCode(replacement) },
+		);
+		expect(confirmed.recoveryCodes).toHaveLength(10);
+		f.authenticators.set(email, replacement);
+		f.recoveryCodes.set(email, confirmed.recoveryCodes);
+		// The replaced authenticator and its recovery codes no longer sign in.
+		await f.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL`;
+		const stale = new MerchantBrowser(f);
+		await stale.json("/api/platform/config");
+		await stale.json("/api/auth/sign-in/email", { email, password });
+		expect(
+			(
+				await stale.request("/api/auth/two-factor/verify-totp", {
+					code: await totpCode(secret),
+				})
+			).status,
+		).toBe(401);
+		expect(
+			(await stale.request("/api/auth/two-factor/verify-backup-code", { code: oldCode })).status,
+		).toBe(401);
+		// Regenerating needs a code too, and replaces the set as a whole.
+		expect(
+			(await browser.request("/api/platform/second-factor/recovery-codes", { code: "000000" }))
+				.status,
+		).toBe(400);
+		await f.sql`UPDATE platform_auth_two_factors SET last_used_step=NULL`;
+		const regenerated = await browser.json<{ recoveryCodes: string[] }>(
+			"/api/platform/second-factor/recovery-codes",
+			{ code: await totpCode(replacement) },
+		);
+		expect(regenerated.recoveryCodes).toHaveLength(10);
+		expect(regenerated.recoveryCodes.some((code) => confirmed.recoveryCodes.includes(code))).toBe(
+			false,
+		);
+		const actions = await f.sql<
+			{ action: string }[]
+		>`SELECT action FROM platform_audit_events WHERE action LIKE 'second_factor.%' ORDER BY created_at,action`;
+		expect(actions.map((row) => row.action).sort()).toEqual([
+			"second_factor.enrolled",
+			"second_factor.recovery_codes_regenerated",
+			"second_factor.replaced",
+		]);
+	});
+	it("does not let a session that never enrolled set an authenticator up", async () => {
+		const browser = new MerchantBrowser(f);
+		await browser.signup();
+		// A session from before authenticators existed: signed in, but no factor behind it.
+		await f.sql`UPDATE platform_auth_two_factors SET verified=false,secret='email-otp-only',backup_codes='[]',backup_codes_remaining=0`;
+		const start = await browser.request("/api/platform/second-factor/enrolment", {});
+		expect([start.status, (await start.json()).error.code]).toEqual([
+			403,
+			"SECOND_FACTOR_BOOTSTRAP_REQUIRED",
+		]);
+		const confirm = await browser.request("/api/platform/second-factor/enrolment/confirm", {
+			code: "123456",
+		});
+		expect([confirm.status, (await confirm.json()).error.code]).toEqual([
+			403,
+			"SECOND_FACTOR_BOOTSTRAP_REQUIRED",
+		]);
 	});
 });

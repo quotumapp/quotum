@@ -43,5 +43,6 @@ test("disposable fixture expires only its observed OTP through ordinary HTTP and
 		trustDevice: false,
 	});
 	expect(allowed.status).toBe(200);
-	expect((await other.request("/api/platform/session/exchange", {})).status).toBe(200);
+	// An emailed code proves the mailbox of an account with no authenticator; it is not a sign-in.
+	expect((await other.request("/api/platform/session/exchange", {})).status).toBe(401);
 });
