@@ -390,7 +390,9 @@ cannot be bought or switched to through Stripe: `checkout-sessions`, the `checko
 `setup_payment` and `subscription_change` previews and a direct plan change answer
 `409 PLAN_NOT_PURCHASABLE_VIA_STRIPE` naming the plan. A consumable or non-consumable Stripe product
 stored without a price amount and currency answers `409 PRODUCT_NOT_PURCHASABLE_VIA_STRIPE`. Fix the
-catalog or the Stripe mapping; the request is not retried.
+catalog or the Stripe mapping; the request is not retried. A [gift](catalog.md#gifts) product
+answers the same code while its gift is not on sale: it has no published gift, the gift was
+retired, or its promotion no longer gives a plan.
 
 A plan's `trialDays` becomes the Checkout subscription's trial only for an account that has not had
 a trial of that plan before, through a [Quotum trial](grants.md#trials) or a provider subscription
@@ -755,6 +757,12 @@ Key subscription rows by `(projectKey, subscriptionId)`, or by
 `(projectKey, provider, channel, externalSubscriptionId)`. Never use event/delivery IDs as row
 identity. Entitlements select one source per key, so key their cache by account and entitlement key;
 they cannot enumerate every subscription. A `planKey` comes from the pinned version, not today's catalog.
+
+A [gift](catalog.md#gifts) purchase is a `purchase` fact like a top-up's, with `purchaseKind:
+"consumable"` and `creditAmount: 0`; tell it from a top-up by its `productKey`. It grants the
+buyer nothing, so a receiver deriving access from facts reads no entitlement from it, and its
+refund or dispute is a `reversal` fact with `creditAmount: 0`. The codes are not in the fact: read
+them through [Gift codes](promotions.md#gift-codes).
 
 A payload carries at most one of the facts `purchase`, `reversal`, `trial` and `planGrant`. A `reversal` with
 `creditAmount: 0` and a `subscription` fact reports a

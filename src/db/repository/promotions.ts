@@ -55,6 +55,7 @@ import { allocationSpendOrderSql } from "./allocation-order";
 import { linkAppleOfferInTx } from "./apple-promotions";
 import { RepositoryModule } from "./base";
 import { enqueueUsageProjection } from "./entitlements";
+import { promotionBacksGifts } from "./gift-sales";
 import { ensureCustomer } from "./identities";
 import { lockCustomerRow } from "./invalidations";
 import {
@@ -374,6 +375,15 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 	): Promise<PromotionRecord> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
+			// The row lock waits for a gift purchase that is minting its codes, so the check below sees
+			// them. An archived promotion refuses every redemption, which would strand a sold code.
+			await executeOne(
+				tx,
+				drizzleSql`SELECT id FROM promotions WHERE project_id = ${projectId} AND key = ${key} FOR UPDATE`,
+			);
+			if (await promotionBacksGifts(tx, projectId, key)) {
+				throw promotionError("PROMOTION_HAS_ACTIVE_GIFTS");
+			}
 			const archived = await executeOne<{ id: string }>(
 				tx,
 				drizzleSql`

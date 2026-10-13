@@ -71,7 +71,7 @@ export const getV1CatalogResponse200Schema = z.object({
 			z.object({
 				key: z.string(),
 				name: z.string(),
-				kind: z.enum(["topup", "one_time"]),
+				kind: z.enum(["topup", "gift", "one_time"]),
 				currency: z.string(),
 				amountMinor: z.number(),
 				credits: z.number(),

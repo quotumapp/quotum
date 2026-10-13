@@ -16,6 +16,8 @@ import {
 	getEntitlementSnapshot,
 	recomputeCustomerEntitlements,
 } from "./entitlements";
+import { readGiftSale } from "./gift-sales";
+import { deactivateGiftCodesForPurchaseInTx, mintGiftCodesForPurchaseInTx } from "./gifts";
 import {
 	bindStripeEventCustomer,
 	ensureCustomer,
@@ -47,6 +49,7 @@ import {
 	recordStripeSkippedEventInTransaction,
 } from "./store-events";
 import {
+	giftNotOnSale,
 	planNotPurchasableViaStripe,
 	productNotPurchasableViaStripe,
 } from "./stripe-purchasability";
@@ -213,21 +216,44 @@ export class StripeBillingRepository extends RepositoryModule {
 			currency: string;
 			amount_minor: string | number;
 			credits: number;
+			is_gift: boolean;
 		}>(
 			this.database,
 			drizzleSql`
 				SELECT
 					product.key, COALESCE(NULLIF(product.name, ''), product.key) AS name,
 					product.type AS product_type, upper(store.currency) AS currency,
-					store.price_amount AS amount_minor, product.credit_amount AS credits
+					store.price_amount AS amount_minor, product.credit_amount AS credits,
+					gift.store_product_id IS NOT NULL AS is_gift
 				FROM store_products store
 				JOIN products product
 					ON product.project_id = store.project_id AND product.id = store.product_id
+				-- A gift is on sale while its gift is in the published catalog and its promotion gives a plan.
+				LEFT JOIN LATERAL (
+					SELECT bindings.store_product_id
+					FROM provider_gift_bindings bindings
+					JOIN gift_options options
+						ON options.project_id = bindings.project_id AND options.id = bindings.gift_option_id
+					JOIN promotions promotion
+						ON promotion.project_id = options.project_id
+						AND promotion.id = options.promotion_id
+						AND promotion.status = 'active'
+						AND promotion.effect_kind = 'plan_grant'
+					JOIN projects project
+						ON project.id = bindings.project_id
+						AND project.published_catalog_revision_id = options.catalog_revision_id
+					WHERE bindings.project_id = store.project_id
+						AND bindings.store_product_id = store.id
+						AND bindings.status = 'published'
+				) gift ON true
 				WHERE store.project_id = ${projectId}
 					AND store.provider = 'stripe' AND store.channel = 'web'
 					AND store.active = true AND product.active = true
 					AND product.type IN ('consumable', 'non_consumable')
 					AND store.price_amount > 0 AND store.currency IS NOT NULL
+					-- A consumable without credits is sold only as a gift.
+					AND (NOT (product.type = 'consumable' AND product.credit_amount = 0)
+						OR gift.store_product_id IS NOT NULL)
 				ORDER BY product.created_at, product.key
 			`,
 		);
@@ -239,7 +265,7 @@ export class StripeBillingRepository extends RepositoryModule {
 			oneTimePurchases: oneTimeRows.map((row) => ({
 				key: row.key,
 				name: row.name,
-				kind: row.product_type === "consumable" ? "topup" : "one_time",
+				kind: row.is_gift ? "gift" : row.product_type === "consumable" ? "topup" : "one_time",
 				currency: row.currency,
 				amountMinor: Number(row.amount_minor),
 				credits: row.credits,
@@ -532,7 +558,13 @@ export class StripeBillingRepository extends RepositoryModule {
 		) {
 			throw productNotPurchasableViaStripe(productKey);
 		}
-		return parseStripeWebStoreProductRow((row as { value: unknown }).value);
+		const product = parseStripeWebStoreProductRow((row as { value: unknown }).value);
+		// A consumable that carries no credits is a gift, which is sold only while its gift is.
+		if (product.productType === "consumable" && product.creditAmount === 0) {
+			const sale = await readGiftSale(this.database, projectId, product.storeProductId);
+			if (!sale.onSale) throw giftNotOnSale(productKey, sale.reason);
+		}
+		return product;
 	}
 
 	async getStripeRecurringCheckoutPlanByKey(
@@ -1059,6 +1091,16 @@ export class StripeBillingRepository extends RepositoryModule {
 					purchaseId,
 					purchasedAt: input.purchasedAt,
 				});
+				// A gift carries no credits. Its codes are minted by purchase and ordinal, so the second
+				// completion event of one payment adds nothing.
+				if (storeProduct.credit_amount === 0) {
+					await mintGiftCodesForPurchaseInTx(tx, {
+						projectId,
+						purchaseId,
+						storeProductId: storeProduct.id,
+						purchasedAt: input.purchasedAt,
+					});
+				}
 			}
 			await upsertOneTimeStripeInvoice(tx, {
 				projectId,
@@ -1637,8 +1679,17 @@ export class StripeBillingRepository extends RepositoryModule {
 			);
 			if (fullyReversed) {
 				await reversePromotionRedemptionsForPurchaseInTx(tx, projectId, target.purchase_id);
+				// A gift's unredeemed codes go with the payment; a redeemed one keeps its running grant.
+				await deactivateGiftCodesForPurchaseInTx(tx, {
+					projectId,
+					purchaseId: target.purchase_id,
+					reason: input.reversalReason,
+					reversedAt: input.reversedAt,
+					actor: "provider:stripe",
+				});
 			}
-			if (target.purchase_kind === "consumable") {
+			// A gift carries no credits, so there is no allocation to scale back.
+			if (target.purchase_kind === "consumable" && target.credit_amount > 0) {
 				await setPurchaseAllocationReversal(tx, {
 					projectId,
 					purchaseId: target.purchase_id,

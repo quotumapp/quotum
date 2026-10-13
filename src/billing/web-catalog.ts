@@ -38,7 +38,7 @@ export interface WebCatalog {
 	oneTimePurchases: Array<{
 		key: string;
 		name: string;
-		kind: "topup" | "one_time";
+		kind: "topup" | "gift" | "one_time";
 		currency: string;
 		amountMinor: number;
 		credits: number;
