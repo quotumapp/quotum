@@ -352,9 +352,10 @@ unchanged-catalog rule, and `bindings list` and `adopt` take the same JSON. Erro
 - A Stripe-bound plan publishes only once its product is adopted, so adopt first. Adoption reads the
   instance's Stripe connection, so [commit it](providers.md#headless-connection-setup) first; a
   connection made through the console's Stripe OAuth cannot be read here and answers
-  `CONNECTION_UNAVAILABLE`. Production Apple and Google store products have no adoption command in
-  either mode. `quotum catalog provision` imports Stripe web mappings only, for non-production
-  instances without a published catalog.
+  `CONNECTION_UNAVAILABLE`. Apple and Google store products are
+  [registered](#register-an-app-store-or-google-play-product) the same way and need no connection.
+  `quotum catalog provision` imports Stripe web mappings only, for non-production instances without
+  a published catalog.
 - There is no operator key, rate limit or step-up: the operator holds the database already.
 
 Then `quotum environments readiness` and `activate` finish the job.
@@ -406,8 +407,8 @@ it. Existing subscribers retain their pinned versions. No Stripe objects are cre
 The API equivalents are `GET /v1/admin/catalog/bindings` and
 `POST /v1/admin/catalog/bindings/adopt`; POST takes the JSON above, `X-Billing-Actor` and an
 `Idempotency-Key`. Its response is `{ "success": true, "data": { "productId": "<uuid>",
-"storeProductId": "<uuid>", "productKey": "premium-monthly", "externalProductId": "prod_example",
-"externalPriceId": "price_example", "active": true } }`. Receipts retain actor and request identity.
+"storeProductId": "<uuid>", "productKey": "premium-monthly", "provider": "stripe", "channel": "web",
+"externalProductId": "prod_example", "externalPriceId": "price_example", "active": true } }`. Receipts retain actor and request identity.
 The CLI derives its request key from the canonical input; retrying the same file is safe.
 
 A refused adoption answers `STRIPE_BINDING_INVALID` or `CONNECTION_UNAVAILABLE`.
@@ -419,6 +420,50 @@ properties) or `binding_identity_conflict` (the price or the product key already
 same code with `422` and `details.reason: "provider_lookup_failed"` means Stripe could not return
 the product or price; `details.httpStatus` carries Stripe's status when it sent one.
 `CONNECTION_UNAVAILABLE` with `503` means the instance has no Stripe connection to read with.
+
+### Register an App Store or Google Play product
+
+`bindings adopt` also registers a product sold through the App Store or Google Play. Neither
+store offers Quotum a product lookup, so nothing is read from the store and no connection is
+needed: you declare the product, and the first publish and the first real purchase confirm it.
+That also makes it work before connections exist, and with `--instance` on an environment that has
+no project key. Add `provider` to the file:
+
+```json
+{
+  "provider": "apple",
+  "productKey": "premium-monthly-ios",
+  "name": "Premium monthly on iOS",
+  "kind": "subscription",
+  "entitlementKey": "premium",
+  "credits": 100,
+  "externalProductId": "com.acme.premium.monthly",
+  "billingPeriod": "month"
+}
+```
+
+- `provider` is `apple` or `google`; the channel follows it (`ios`, `android`). A file without
+  `provider` is a Stripe adoption, as before.
+- `externalProductId` is the App Store product identifier, or the Google Play subscription or
+  in-app product id.
+- `kind` is `subscription` or `topup`; a gift is sold on the web through Stripe only. A
+  subscription needs `billingPeriod` (`day`, `week`, `month`, `quarter`, `semi_annual` or `year`)
+  and takes `billingPeriodCount` (default `1`); a top-up is one-time and takes neither. A plan
+  bound to the product must bill on the same cadence, or publish answers
+  `PROVIDER_BINDING_NOT_READY`.
+- A Google subscription can name `externalPriceId`, its base plan id. Omitted, the product matches
+  any base plan. Apple products have none.
+- `currency` and `priceAmountMinor` go together, and are needed only when a catalog binds a price
+  (`providerBindings` on a price). A plan whose provider owns the price needs neither.
+- One product key can hold a Stripe, an App Store and a Google Play mapping, which are the
+  `providerBindings` a plan lists. Registering a key that already exists needs the same name,
+  entitlement key and credits.
+
+The rules are Stripe's: adoption is additive, an exact repeat returns the same IDs, and a mapping is
+never rewritten, so a different declared period or product id needs a new product key. A refusal
+answers `STORE_BINDING_INVALID` with `409` and `details.reason`: `idempotency_key_reused`,
+`product_identity_conflict` or `binding_identity_conflict`. The response and `bindings list` carry
+`provider` and `channel` for every mapping.
 
 `catalog provision` remains a development bootstrap import. It now refuses production instances
 and already-published catalogs explicitly. It is listed in `quotum catalog --help`.

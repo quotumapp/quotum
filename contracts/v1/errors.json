@@ -1571,6 +1571,12 @@
       ]
     },
     {
+      "code": "STORE_BINDING_INVALID",
+      "sources": [
+        "src/catalog/bindings.ts"
+      ]
+    },
+    {
       "code": "STORE_EVENT_NOT_REPLAYABLE",
       "sources": [
         "src/db/repository/store-event-replay.ts"

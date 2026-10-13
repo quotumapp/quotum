@@ -64,6 +64,8 @@ const binding: BindingResult = {
 	productId: "00000000-0000-4000-8000-000000000001",
 	storeProductId: "00000000-0000-4000-8000-000000000002",
 	productKey: "premium",
+	provider: "stripe",
+	channel: "web",
 	externalProductId: "prod_test",
 	externalPriceId: "price_test",
 	active: true,
@@ -135,6 +137,61 @@ describe("catalog binding routes", () => {
 		expect(adopted.status).toBe(200);
 		expect(await adopted.json()).toEqual({ success: true, data: binding });
 		expect(calls).toEqual([{ input: adoption, actor: "operator-test", key: "adopt-1" }]);
+	});
+
+	it("hands an Apple or Google Play adoption to the service and lists every provider", async () => {
+		const apple = {
+			provider: "apple" as const,
+			productKey: "premium_ios",
+			name: "Premium on iOS",
+			kind: "subscription" as const,
+			entitlementKey: "premium",
+			credits: 100,
+			externalProductId: "com.acme.premium.monthly",
+			billingPeriod: "month" as const,
+		};
+		const appleBinding: BindingResult = {
+			...binding,
+			productKey: "premium_ios",
+			provider: "apple",
+			channel: "ios",
+			externalProductId: apple.externalProductId,
+			externalPriceId: null,
+		};
+		const calls: BindingAdoption[] = [];
+		const app = withOpenApiAssertions(
+			bindingsApp({
+				catalogBindings: {
+					list: async () => [binding, appleBinding],
+					adopt: async (_project, input) => {
+						calls.push(input);
+						return appleBinding;
+					},
+				},
+			}),
+		);
+
+		const adopted = await testRequest(app, "/v1/admin/catalog/bindings/adopt", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify(apple),
+		});
+		expect(adopted.status).toBe(200);
+		expect(await adopted.json()).toEqual({ success: true, data: appleBinding });
+		expect(calls).toEqual([apple]);
+
+		const listed = await testRequest(app, "/v1/admin/catalog/bindings", {
+			headers: operatorHeaders,
+		});
+		expect(await listed.json()).toEqual({ success: true, data: [binding, appleBinding] });
+
+		// A Google field on an Apple product is an unknown field, not a silently ignored one.
+		const mismatched = await testRequest(app, "/v1/admin/catalog/bindings/adopt", {
+			method: "POST",
+			headers: operatorHeaders,
+			body: JSON.stringify({ ...apple, externalPriceId: "monthly-base" }),
+		});
+		expect(mismatched.status).toBe(400);
 	});
 
 	it("rejects an adoption without an actor or with unknown fields", async () => {

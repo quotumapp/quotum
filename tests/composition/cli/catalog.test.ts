@@ -69,6 +69,33 @@ describe("catalog CLI", () => {
 		expect(fixture.calls[0]?.headers.get("x-billing-actor")).toBeTruthy();
 	});
 
+	it("sends an App Store or Google Play adoption file as written", async () => {
+		const fixture = catalogServer();
+		const directory = await mkdtemp(join(tmpdir(), "billing-binding-test-"));
+		temporaryDirectories.push(directory);
+		const file = join(directory, "ios.json");
+		const apple = {
+			provider: "apple",
+			productKey: "premium_ios",
+			name: "Premium on iOS",
+			kind: "subscription",
+			entitlementKey: "premium",
+			credits: 100,
+			externalProductId: "com.acme.premium.monthly",
+			billingPeriod: "month",
+		};
+		await writeFile(file, JSON.stringify(apple));
+		const result = await runCli(["bindings", "adopt", file], fixture.baseUrl);
+		expect(result.exitCode).toBe(0);
+		expect(fixture.calls[0]?.body).toEqual(apple);
+
+		// A file that mixes the stores' fields is refused before any request.
+		await writeFile(file, JSON.stringify({ ...apple, externalPriceId: "price_test" }));
+		const mixed = await runCli(["bindings", "adopt", file], fixture.baseUrl);
+		expect(mixed.exitCode).not.toBe(0);
+		expect(fixture.calls).toHaveLength(1);
+	});
+
 	it("runs the same command through `quotum catalog`", async () => {
 		const fixture = catalogServer();
 		const result = await runCli(["status"], fixture.baseUrl, ["src/cli.ts", "catalog"]);

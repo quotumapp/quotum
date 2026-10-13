@@ -241,6 +241,44 @@ describe("operator catalog commands with --instance", () => {
 		});
 	});
 
+	it("registers an App Store product on an inactive environment with no connection", async () => {
+		await seedOperatorOrganization(f, "inactive");
+		await withScratchDirectory(async (directory) => {
+			const file = join(directory, "ios.json");
+			await writeFile(
+				file,
+				JSON.stringify({
+					provider: "apple",
+					productKey: "pro_ios",
+					name: "Pro on iOS",
+					kind: "subscription",
+					entitlementKey: "pro",
+					credits: 0,
+					externalProductId: "com.acme.pro.monthly",
+					billingPeriod: "month",
+				}),
+			);
+			// No Stripe client and no connection: nothing is read from the store.
+			const adopted = await runOperatorCatalog(["bindings", "adopt", file, "--instance", "alpha"]);
+			expect(adopted.code).toBe(0);
+			expect(adopted.json).toMatchObject({
+				productKey: "pro_ios",
+				provider: "apple",
+				channel: "ios",
+				externalProductId: "com.acme.pro.monthly",
+				externalPriceId: null,
+				active: true,
+			});
+			const retry = await runOperatorCatalog(["bindings", "adopt", file, "--instance", "alpha"]);
+			expect(retry.json).toEqual(adopted.json);
+			const listed = await runOperatorCatalog(["bindings", "list", "--instance", "alpha"]);
+			expect(listed.json as unknown).toEqual([adopted.json]);
+			expect(await f.sql`SELECT actor FROM catalog_binding_adoptions`).toEqual([
+				{ actor: "operator:ops-runbook" },
+			]);
+		});
+	});
+
 	it("prepares an inactive Stripe environment from the CLI and activates it", async () => {
 		await seedOperatorOrganization(f, "inactive");
 		const resolver = new PostgresProjectInstanceContextResolver(f.client);

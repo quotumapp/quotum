@@ -10,9 +10,11 @@ mode.
 Store product mappings must already exist before a catalog binding can adopt them. Their provisioning
 is an operator prerequisite: the merchant catalog editor does not create `products` or `store_products`
 rows. The development import (`quotum catalog provision`, or `bun run catalog:provision` from a
-checkout) currently creates Stripe/web mappings only and skips instances with a published catalog.
-Apple/iOS and Google/Android mappings require separate operator provisioning; there is no
-native-store provisioning command in the current service. A store product records its billing
+checkout) creates Stripe/web mappings only and skips instances with a published catalog. Stripe
+products are adopted with `quotum catalog bindings adopt`, and so are Apple/iOS and Google/Android
+products, which you
+[declare](catalog.md#register-an-app-store-or-google-play-product) because neither store offers a
+product lookup. Paddle mappings still require separate operator provisioning. A store product records its billing
 period as `billing_period` (`one_time` or a billing unit) and `billing_period_count`. A price
 binding adopts it only when that period spans the same time as the price's interval, and so does a
 `providerPriced` binding, whose provider owns the amount: a yearly plan on a monthly store product
@@ -27,7 +29,7 @@ checkout and common commercial preview/execute for fixed base plans, signed webh
 entitlement and `billing_state_v1` projection persistence. Only one fixed recurring item, quantity
 one, without a trial is qualified. The Paddle price must have minimum and maximum quantity both
 set to one; checkout validates its product, currency, amount and cadence before any write. Catalog
-mappings require operator provisioning, as with native stores; the Stripe import does not create them.
+mappings require operator provisioning; neither the Stripe import nor `bindings adopt` creates them.
 
 On 2026-10-03, real Paddle sandbox checkouts, signed event delivery and signed projections passed.
 A deliberately discarded successful transaction-create response recovered automatically with one

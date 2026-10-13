@@ -1,10 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { CatalogBindings } from "../../src/catalog/bindings";
+import { noRuntimeConnections } from "../../src/projects/connections";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
+	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
 
@@ -148,6 +151,39 @@ localDescribe("provider-priced plan binding cadence", () => {
 			);
 		}
 		expect(await context.sql`SELECT id FROM catalog_drafts`).toHaveLength(0);
+	});
+
+	it("publishes a plan bound to a store product an operator registered, and refuses another cadence", async () => {
+		const bindings = new CatalogBindings(context.db as never, noRuntimeConnections, () => {
+			throw new Error("A native adoption must not call a provider");
+		});
+		const project = integrationProjectContext();
+		const declared = (productKey: string, provider: "apple" | "google") => ({
+			provider,
+			productKey,
+			name: productKey,
+			kind: "subscription" as const,
+			entitlementKey: "premium",
+			credits: 0,
+			externalProductId: `registered.${productKey}`,
+			billingPeriod: "month" as const,
+		});
+		await bindings.adopt(project, declared("dash_apple", "apple"), "operator", "apple-1");
+		await bindings.adopt(project, declared("dash_google", "google"), "operator", "google-1");
+
+		const { preview } = operator();
+		for (const binding of [appleBinding, googleBinding]) {
+			const refused = await preview(providerPricedCatalog(1, "year", binding));
+			expect(refused.status).toBe(409);
+			expect(refused.body.error.code).toBe("PROVIDER_BINDING_NOT_READY");
+			expect(refused.body.error.message).toBe(
+				`Provider binding ${binding.provider}/${binding.channel}/${binding.productKey} sells every month but plan dash bills every year`,
+			);
+		}
+		const accepted = await preview(providerPricedCatalog(1, "month", appleBinding));
+		expect(accepted.status).toBe(200);
+		const alsoAndroid = await preview(providerPricedCatalog(1, "month", googleBinding));
+		expect(alsoAndroid.status).toBe(200);
 	});
 
 	it("refuses a binding that sells another count or a one-time purchase", async () => {
