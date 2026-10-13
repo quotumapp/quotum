@@ -60,7 +60,9 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. Changes to an organization with members need `--member-override-reason`. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. Changes to an organization with members need `--member-override-reason`. |
 | `quotum environments readiness` / `activate` | Check whether a production environment is ready, or [activate it](#activate-a-production-environment) and issue its first project key. Changes to an organization with members need `--member-override-reason`. |
+| `quotum environments suspend <instance> --reason <why>` / `resume <instance>` | [Stop an active environment at once and bring it back](#suspend-and-resume-an-environment). Needs only `POSTGRES_URI`. Changes to an organization with members need `--member-override-reason`. |
 | `quotum organizations add-owner <organization> --email <address>` | Hand an organization to a person: [make a merchant user who has signed in an owner](#hand-an-organization-to-an-owner). Refused in headless mode. |
+| `quotum organizations rename <organization> --name <name>` / `quotum projects rename <organization> <project> --name <name>` | [Change a display name](#rename-an-organization-or-project). The slug and keys never change. Works headless. |
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
 | `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |
 | `quotum mcp` | The read-only [stdio MCP server](mcp.md#run-over-stdio). |
@@ -353,6 +355,45 @@ and credential commands do. The audit event `membership.operator_owner_added` na
 the reason, and never the address. The command is refused in [headless mode](#headless-mode), where
 no one can sign in. Once the organization has an owner, `quotum connections list` and `quotum
 credentials status` still read it, and changes to it take a reason (see [Operator CLI](#operator-cli)).
+
+## Rename an organization or project
+
+Bootstrap never updates a row, so a name it created can only be changed with:
+
+```sh
+quotum organizations rename <organization-slug> --name <name> --actor <you>
+quotum projects rename <organization-slug> <project-key> --name <name> --actor <you>
+```
+
+Both change the display name only. The organization slug, the project key and the environment keys
+are what URLs, manifests, credentials and webhooks use, so they never change. A project's name is
+set on the project and on each of its environments. Running either with the name already in place
+changes nothing. Both need only `POSTGRES_URI` and work headless. An organization that has members
+needs `--member-override-reason <why>`; the audit events `organization.renamed` and
+`project.renamed` record the previous name, `--actor` and the reason. Nothing is ever deleted.
+
+## Suspend and resume an environment
+
+```sh
+quotum environments suspend <instance> --reason <why> --actor <you>
+quotum environments resume <instance> --actor <you>
+```
+
+Suspending an `active` environment is immediate and reversible: `/v1` answers its project keys
+with `401 UNAUTHORIZED`, while provider webhooks, reconciliation and the workers carry on, so
+financial state stays correct. It changes no key, connection or data. While an environment is suspended, `quotum credentials`,
+`quotum connections` and `quotum environments readiness` and `activate` answer
+`CONTEXT_UNAVAILABLE`, as they do for a deactivated one: rotate a leaked key first, or resume.
+`resume` returns a `suspended` environment to `active`; a
+production environment counts against the organization's production limit again while the merchant
+platform runs, and a headless deployment has none to enforce. The commands move only between those
+two states: an `inactive`, `deactivating` or `deactivated` environment is refused, and running a
+command on an environment that is already there changes nothing. Both need only `POSTGRES_URI`, and
+the audit events `environment.suspended` and `environment.resumed` record `--actor`, the reason and,
+for an organization with members, `--member-override-reason`.
+
+Suspension is not deactivation. Deactivation is the slower workflow that drains subscriptions,
+invoices and jobs and then revokes every key; it is not available from the CLI.
 
 ## Merchant proxy service principal
 

@@ -1,8 +1,10 @@
 import { merchantPlatformEnabled } from "../../platform/config";
 import { addOrganizationOwner } from "../../platform/operator-owner";
+import { renameOrganization } from "../../platform/operator-topology";
 import {
 	CliUsageError,
 	type CommandOutput,
+	displayNameOption,
 	memberOverrideReason,
 	openOperatorSql,
 	operatorActor,
@@ -49,6 +51,27 @@ async function organizationsCommand(argv: readonly string[], env: Environment): 
 				return await addOrganizationOwner(database.sql, {
 					organizationSlug: positionals[0] ?? "",
 					email,
+					operator,
+					memberOverrideReason: reason,
+				});
+			} finally {
+				await database.close();
+			}
+		}
+		case "rename": {
+			const { positionals, options } = parseArguments(
+				args,
+				["name", "actor", "member-override-reason"],
+				1,
+			);
+			const name = displayNameOption(options);
+			const operator = operatorActor(options, env);
+			const reason = memberOverrideReason(options);
+			const database = openOperatorSql(env);
+			try {
+				return await renameOrganization(database.sql, {
+					organizationSlug: positionals[0] ?? "",
+					name,
 					operator,
 					memberOverrideReason: reason,
 				});

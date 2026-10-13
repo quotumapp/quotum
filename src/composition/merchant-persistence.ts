@@ -8,6 +8,9 @@ import {
 	activateProjectProduction,
 	BunPlatformQueryExecutor,
 	BunProjectInstanceStore,
+	renameProjectInstances,
+	resumeProjectInstance,
+	suspendProjectInstance,
 } from "./project-instance-persistence";
 
 /** Every instance operation uses the same connection/transaction as merchant persistence. */
@@ -36,6 +39,15 @@ export function merchantSql(client: SQL): MerchantSql {
 				options?: { enforceProductionLimit?: boolean },
 			) =>
 				activateProjectProduction(client, instanceId, organizationId, catalogRevisionId, options),
+			suspend: (instanceId: string, organizationId: string) =>
+				suspendProjectInstance(client, instanceId, organizationId),
+			resume: (
+				instanceId: string,
+				organizationId: string,
+				options?: { enforceProductionLimit?: boolean },
+			) => resumeProjectInstance(client, instanceId, organizationId, options),
+			renameForProject: (platformProjectId: string, organizationId: string, name: string) =>
+				renameProjectInstances(client, platformProjectId, organizationId, name),
 		},
 	});
 }

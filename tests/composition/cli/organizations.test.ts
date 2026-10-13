@@ -30,6 +30,29 @@ describe("quotum organizations", () => {
 		}
 	});
 
+	it("validates rename arguments before it touches the database", async () => {
+		const rename = ["rename", "acme", "--name", "Acme Corp", "--actor", "ops-runbook"];
+		for (const [argv, message] of [
+			[["rename"], "Expected 1 argument before the options."],
+			[["rename", "acme", "--actor", "ops"], "--name <name> is required."],
+			[["rename", "acme", "--name", " ", "--actor", "ops"], "--name must be 1-120 printable"],
+			[["rename", "acme", "--name", "x".repeat(121), "--actor", "ops"], "--name must be 1-120"],
+			[["rename", "acme", "--name", "Acme"], "Name the operator with --actor"],
+			[[...rename, "--slug", "globex"], "Unknown option --slug."],
+		] as const) {
+			const result = await run([...argv]);
+			expect(result.code).toBe(64);
+			expect(result.err).toContain(message);
+		}
+	});
+
+	it("renames without the console, so a headless deployment can fix a name", async () => {
+		// Headless is the default; the command fails only at the missing database.
+		const result = await run(["rename", "acme", "--name", "Acme Corp", "--actor", "ops"], {});
+		expect(result.code).toBe(1);
+		expect(result.err).toContain("POSTGRES_URI is required");
+	});
+
 	it("refuses a headless deployment, which has no merchant application to sign in to", async () => {
 		// Headless is the default, so an unset flag is refused like an explicit false.
 		for (const flag of [undefined, "false"]) {

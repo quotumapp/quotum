@@ -1,3 +1,4 @@
+import { setEnvironmentSuspension } from "../../platform/operator-topology";
 import { renderPlatformCredentialOutput } from "../../platform-bootstrap";
 import {
 	CliUsageError,
@@ -8,11 +9,13 @@ import {
 	type OperatorContextDependencies,
 	type OperatorTarget,
 	openOperatorContext,
+	openOperatorInstances,
 	operatorActor,
 	parseArguments,
 	requestKey,
 	reserveSecretFile,
 	runOperatorCommand,
+	statedReason,
 } from "./operator-context";
 
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -116,6 +119,34 @@ async function environmentsCommand(
 					throw error;
 				}
 			});
+		}
+		case "suspend":
+		case "resume": {
+			const suspended = subcommand === "suspend";
+			const { positionals, options } = parseArguments(
+				args,
+				["reason", "actor", "member-override-reason"],
+				1,
+			);
+			const reason = statedReason(options, "reason");
+			if (suspended && reason === undefined)
+				throw new CliUsageError("--reason <why> is required to suspend an environment.");
+			const operator = operatorActor(options, env);
+			const override = memberOverrideReason(options);
+			const database = openOperatorInstances(env);
+			try {
+				const target = await database.target(positionals[0] ?? "");
+				return await setEnvironmentSuspension(database.sql, {
+					target,
+					suspended,
+					reason,
+					operator,
+					memberOverrideReason: override,
+					enforceProductionLimit: database.merchantEnabled,
+				});
+			} finally {
+				await database.close();
+			}
 		}
 		default:
 			throw new CliUsageError(
