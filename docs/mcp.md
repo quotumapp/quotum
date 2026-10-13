@@ -57,7 +57,8 @@ request and refresh rechecks current principal, membership, environment, and gra
 A refresh token that was already rotated, presented after its 30-second replay window, also revokes
 the authorization. Each revocation writes an `mcp.revoked` audit event whose `reason` says why a
 client had to sign in again: `user` (Disconnect in the console), `client` (the client's own
-`/oauth/revoke`), `code_replay`, `refresh_replay`, `issuance_failed` or `password_reset`.
+`/oauth/revoke`), `code_replay`, `refresh_replay`, `issuance_failed`, `password_reset` or
+`second_factor_reset` (an operator reset the person's authenticator).
 
 Discovery lives on the API origin at `/.well-known/oauth-authorization-server` and
 `/.well-known/oauth-protected-resource/mcp`. The authorization endpoint is on the UI origin, so the
