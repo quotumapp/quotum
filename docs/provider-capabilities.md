@@ -24,8 +24,9 @@ returns them yet.
   are not error codes.
 - `details.providerCompatibility` lists every incompatible binding in catalog order: per plan, the
   plan itself when it has a trial or is an add-on, then its base price and item prices; then
-  top-ups. An entry names its `target` (`kind` `plan`, `price` or `topup`, the plan or top-up
-  `key`, and `priceKey` for a price), the binding's `provider`, `channel` and `productKey`, the
+  top-ups, then gifts. An entry names its `target` (`kind` `plan`, `price`, `topup` or `gift`, the
+  plan, top-up or gift `key`, and `priceKey` for a price), the binding's `provider`, `channel` and
+  `productKey`, the
   `requiredOperations`, `compatible: false`, and the blocked `verdicts`. The message names the
   first entry and counts the others, as in `Plan pro cannot bind apple: catalog.trial is not
   supported (and 2 more)`.
