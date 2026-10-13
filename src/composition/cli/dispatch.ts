@@ -266,7 +266,8 @@ export const quotumCommands: readonly QuotumCommand[] = [
 	{
 		path: ["audit"],
 		file: "composition/cli/audit.ts",
-		usage: "audit list [--organization <slug>] [--action <name>] [--since <time>] [--limit <n>]",
+		usage:
+			"audit list [--organization <slug>] [--action <name>] [--since <time>] [--until <time>] [--before <event-id>] [--limit <n>]",
 		summary: "List the platform audit trail, newest first",
 		environment: "POSTGRES_URI, optional BILLING_POSTGRES_PREPARED_STATEMENTS",
 		details: [
