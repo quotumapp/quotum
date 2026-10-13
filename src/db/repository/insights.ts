@@ -9,6 +9,10 @@ import { NotFoundBillingError } from "../../billing/errors";
 import type {
 	AvailableActionFacts,
 	CustomerBillingSummary,
+	InvoiceDetail,
+	InvoiceItem,
+	InvoiceListInput,
+	InvoicePage,
 	ProjectUsageEventItem,
 	ProjectUsageEventListInput,
 	ProjectUsageEventPage,
@@ -20,6 +24,7 @@ import type {
 } from "../../billing/insights";
 import type { BillingChannel, BillingProvider, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { type StripeInvoiceView, stripeInvoiceView } from "../../providers/stripe/invoice-view";
 import { RepositoryModule } from "./base";
 import { defaultPlanAllowanceEndingSql } from "./default-plan-sql";
 import { type MeterLimitWindowBalance, readMeterLimitWindowBalances } from "./entitlements";
@@ -105,6 +110,80 @@ export class BillingInsightsRepository extends RepositoryModule {
 		return {
 			items,
 			nextCursor: hasMore && lastRow !== undefined ? usageEventCursor(lastRow) : null,
+		};
+	}
+
+	async listInvoices(
+		project: ProjectInstanceContext,
+		input: InvoiceListInput,
+	): Promise<InvoicePage> {
+		const projectId = project.projectInstanceId;
+		const customer = await requireCustomer(this.database, projectId, input.billingAccountId);
+		const rows = await executeRows<InvoiceListRow>(
+			this.database,
+			drizzleSql`
+				SELECT invoice.id, invoice.subscription_id, invoice.external_invoice_id,
+					invoice.external_subscription_id, invoice.status, invoice.amount_paid,
+					invoice.currency, invoice.paid_at, invoice.provider_created_at,
+					to_char(invoice.provider_created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+						AS cursor_created_at,
+					invoice.raw_payload
+				FROM billing_invoices invoice
+				WHERE invoice.project_id = ${projectId}
+					AND invoice.customer_id = ${customer.id}
+					${input.status === undefined ? drizzleSql`` : drizzleSql`AND invoice.status = ${input.status}`}
+					${
+						input.cursor === null
+							? drizzleSql``
+							: drizzleSql`AND (invoice.provider_created_at, invoice.id) < (${input.cursor.createdAt}::timestamptz, ${input.cursor.id}::uuid)`
+					}
+				ORDER BY invoice.provider_created_at DESC, invoice.id DESC
+				LIMIT ${input.limit + 1}
+			`,
+		);
+		const hasMore = rows.length > input.limit;
+		const pageRows = hasMore ? rows.slice(0, input.limit) : rows;
+		const lastRow = pageRows.at(-1);
+		return {
+			items: pageRows.map((row) => invoiceItem(row, stripeInvoiceView(row.raw_payload))),
+			nextCursor:
+				hasMore && lastRow !== undefined
+					? { createdAt: lastRow.cursor_created_at, id: lastRow.id }
+					: null,
+		};
+	}
+
+	/** The URLs are bearer links, so the caller decides whether to hand them out. */
+	async getInvoice(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		invoiceId: string,
+	): Promise<InvoiceDetail> {
+		const projectId = project.projectInstanceId;
+		const customer = await requireCustomer(this.database, projectId, billingAccountId);
+		const row = await executeOne<InvoiceRow>(
+			this.database,
+			drizzleSql`
+				SELECT invoice.id, invoice.subscription_id, invoice.external_invoice_id,
+					invoice.external_subscription_id, invoice.status, invoice.amount_paid,
+					invoice.currency, invoice.paid_at, invoice.provider_created_at,
+					invoice.raw_payload
+				FROM billing_invoices invoice
+				WHERE invoice.project_id = ${projectId}
+					AND invoice.customer_id = ${customer.id}
+					AND invoice.id = ${invoiceId}
+			`,
+		);
+		if (row === null) {
+			throw new NotFoundBillingError("Invoice was not found", "INVOICE_NOT_FOUND");
+		}
+		const view = stripeInvoiceView(row.raw_payload);
+		return {
+			...invoiceItem(row, view),
+			lines: view.lines,
+			linesTruncated: view.linesTruncated,
+			hostedInvoiceUrl: view.hostedInvoiceUrl,
+			invoicePdfUrl: view.invoicePdfUrl,
 		};
 	}
 
@@ -388,6 +467,44 @@ export class BillingInsightsRepository extends RepositoryModule {
 			})),
 		};
 	}
+}
+
+interface InvoiceRow {
+	id: string;
+	subscription_id: string | null;
+	external_invoice_id: string;
+	external_subscription_id: string | null;
+	status: string;
+	amount_paid: string | number;
+	currency: string;
+	paid_at: Date | string | null;
+	provider_created_at: Date | string;
+	raw_payload: unknown;
+}
+
+interface InvoiceListRow extends InvoiceRow {
+	cursor_created_at: string;
+}
+
+function invoiceItem(row: InvoiceRow, view: StripeInvoiceView): InvoiceItem {
+	return {
+		id: row.id,
+		externalInvoiceId: row.external_invoice_id,
+		// A top-up invoice stands alone; every subscription invoice names its subscription.
+		kind: row.external_subscription_id === null ? "auto_topup" : "subscription",
+		subscriptionId: row.subscription_id,
+		externalSubscriptionId: row.external_subscription_id,
+		status: row.status,
+		number: view.number,
+		currency: row.currency,
+		amountPaidMinor: Number(row.amount_paid),
+		totalMinor: view.totalMinor,
+		amountDueMinor: view.amountDueMinor,
+		periodStart: view.periodStart,
+		periodEnd: view.periodEnd,
+		paidAt: row.paid_at === null ? null : iso(row.paid_at),
+		createdAt: iso(row.provider_created_at),
+	};
 }
 
 interface UsageEventRow {

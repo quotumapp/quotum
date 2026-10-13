@@ -561,6 +561,8 @@ export function createApp({
 			listProjectUsageEvents: (...args) => getRepository().listProjectUsageEvents(...args),
 			getUsageSeries: (...args) => getRepository().getUsageSeries(...args),
 			getCustomerBillingSummary: (...args) => getRepository().getCustomerBillingSummary(...args),
+			listInvoices: (...args) => getRepository().listInvoices(...args),
+			getInvoice: (...args) => getRepository().getInvoice(...args),
 		},
 	});
 	registerCapabilityRoutes({ app, reads: capabilityReads });

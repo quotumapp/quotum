@@ -11,6 +11,9 @@ import {
 } from "../app/customer-routes";
 import {
 	dateRange,
+	invoiceIdSchema,
+	invoicesQuerySchema,
+	parseInvoiceCursor,
 	parseUsageEventsRangeAndCursor,
 	projectUsageEventsQuerySchema,
 	usageEventsQuerySchema,
@@ -51,7 +54,7 @@ import {
 	isBillingError,
 } from "../billing/errors";
 import { requireIdempotencyKey } from "../billing/idempotency-key";
-import { encodeUsageCursor } from "../billing/insights";
+import { encodeInvoiceCursor, encodeUsageCursor, withoutInvoiceLinks } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
 import { providerOperationReceipt } from "../billing/provider-operations";
 import { publicOperationLookup } from "../billing/usage-api";
@@ -243,6 +246,32 @@ export function createMerchantBillingPort(input: {
 				);
 			case "account.summary":
 				return ok(await repo.getCustomerBillingSummary(project, account()));
+			case "account.invoices": {
+				const body = parse(invoicesQuerySchema, command.query);
+				const page = await repo.listInvoices(project, {
+					billingAccountId: account(),
+					status: body.status,
+					limit: body.limit,
+					cursor: parseInvoiceCursor(body.cursor),
+				});
+				return {
+					status: 200,
+					body: {
+						success: true,
+						data: page.items,
+						pagination: {
+							nextCursor: page.nextCursor === null ? null : encodeInvoiceCursor(page.nextCursor),
+						},
+					},
+				};
+			}
+			case "account.invoice":
+				// The console and MCP act without a project credential, so no bearer links.
+				return ok(
+					withoutInvoiceLinks(
+						await repo.getInvoice(project, account(), parse(invoiceIdSchema, event)),
+					),
+				);
 			case "account.billing": {
 				const getBillingAccount = requireProviderMethod(
 					await stripe(),

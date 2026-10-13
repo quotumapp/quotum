@@ -735,6 +735,12 @@
       ]
     },
     {
+      "code": "INVOICE_NOT_FOUND",
+      "sources": [
+        "src/db/repository/insights.ts"
+      ]
+    },
+    {
       "code": "LICENSE_ALREADY_ASSIGNED",
       "sources": [
         "src/db/repository/controls-enterprise.ts"

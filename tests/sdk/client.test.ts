@@ -401,6 +401,41 @@ describe("BillingClient", () => {
 		expect(page).toEqual({ data: [], nextCursor: "next-page" });
 	});
 
+	it("lists and reads invoices with encoded identifiers and a bounded query", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return new URL(request.url).pathname.endsWith("/invoices")
+					? Response.json({ success: true, data: [], pagination: { nextCursor: "next-page" } })
+					: Response.json({ success: true, data: { id: "invoice-1", lines: [] } });
+			},
+		});
+
+		const page = await client.invoices.list("account/one", {
+			status: "paid",
+			limit: 10,
+			cursor: "opaque-cursor",
+		});
+		const invoice = await client.invoices.get("account/one", "invoice/1");
+
+		expect(new URL(calls[0]?.url ?? "").pathname).toBe(
+			"/v1/billing-accounts/account%2Fone/invoices",
+		);
+		expect(new URL(calls[0]?.url ?? "").searchParams.toString()).toBe(
+			"status=paid&limit=10&cursor=opaque-cursor",
+		);
+		expect(new URL(calls[1]?.url ?? "").pathname).toBe(
+			"/v1/billing-accounts/account%2Fone/invoices/invoice%2F1",
+		);
+		expect(calls.map((call) => call.method)).toEqual(["GET", "GET"]);
+		expect(page).toEqual({ data: [], nextCursor: "next-page" });
+		expect(invoice).toMatchObject({ id: "invoice-1" });
+	});
+
 	it("manages promotions with operator identity and validates codes with project credentials", async () => {
 		const calls: Request[] = [];
 		const client = new BillingClient({

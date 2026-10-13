@@ -15,6 +15,9 @@ import { BillingError } from "../billing/errors";
 import type {
 	AvailableActionFacts,
 	CustomerBillingSummary,
+	InvoiceDetail,
+	InvoiceListInput,
+	InvoicePage,
 	ProjectUsageEventListInput,
 	ProjectUsageEventPage,
 	UsageEventListInput,
@@ -694,6 +697,21 @@ export class BillingRepository {
 		input: UsageSeriesInput,
 	): Promise<UsageSeriesPoint[]> {
 		return await this.insights.getUsageSeries(project, input);
+	}
+
+	async listInvoices(
+		project: ProjectInstanceContext,
+		input: InvoiceListInput,
+	): Promise<InvoicePage> {
+		return await this.insights.listInvoices(project, input);
+	}
+
+	async getInvoice(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		invoiceId: string,
+	): Promise<InvoiceDetail> {
+		return await this.insights.getInvoice(project, billingAccountId, invoiceId);
 	}
 
 	async getCustomerBillingSummary(

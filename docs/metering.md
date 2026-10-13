@@ -12,6 +12,8 @@ GET    /v1/billing-accounts/:billingAccountId/usage/receipts/:receiptId/deductio
 GET    /v1/billing-accounts/:billingAccountId/entities/:entityId
 GET    /v1/billing-accounts/:billingAccountId/balances/:featureKey[?entityId=:entityId]
 GET    /v1/billing-accounts/:billingAccountId/billing-summary
+GET    /v1/billing-accounts/:billingAccountId/invoices
+GET    /v1/billing-accounts/:billingAccountId/invoices/:invoiceId
 GET    /v1/billing-accounts/:billingAccountId/usage/events
 GET    /v1/billing-accounts/:billingAccountId/usage/series
 POST   /v1/billing-accounts/:billingAccountId/usage/check
@@ -411,6 +413,41 @@ Usage reads default to the last 30 days, reject ranges over 90 days, and page wi
 that share a millisecond are neither skipped nor repeated between pages. Series support `hour` or
 `day` buckets. These reads and `billing-summary` never authorize work; product projections are
 display caches and cannot replace the metering calls.
+
+## Invoice reads
+
+`GET /v1/billing-accounts/:billingAccountId/invoices` lists a billing account's provider invoices,
+newest first, and `GET .../invoices/:invoiceId` returns one with its lines. Both read Quotum's own
+copy of the invoice, so they never call the provider and never authorize work, and a read-only
+project credential may call them.
+
+- **What is listed.** Two kinds, named by `kind`. `subscription` invoices are Stripe invoices
+  attached to a subscription that Quotum recorded from an `invoice.paid` or
+  `invoice.payment_failed` event, so `status` is `paid` or, after a failed payment, `open`; they
+  include the usage-period invoices Quotum issues while the subscription is live. `auto_topup`
+  invoices are recorded when an automatic top-up settles and carry only `status`, `currency`,
+  `amountPaidMinor`, `paidAt` and `createdAt`. Draft and voided invoices, an invoice that never
+  produced a paid or failed event, and usage invoices issued after the subscription ended are not
+  listed. Apple, Google and Paddle purchases have no invoices.
+- **Paging.** `limit` is 1 to 100 in decimal digits (default 25), `status` filters on one value,
+  and `cursor` is the opaque `pagination.nextCursor` of the previous page. The cursor names the
+  last invoice's exact creation time and ID, so invoices created in the same second are neither
+  skipped nor repeated. `createdAt` is the invoice's creation time at the provider.
+- **Amounts.** `amountPaidMinor`, `totalMinor` and `amountDueMinor` are integers in the currency's
+  minor unit. The period is the service period from the invoice lines, not Stripe's usage window.
+- **Lines.** The detail carries the lines of the stored provider event. Stripe truncates long
+  invoices, and `linesTruncated` says when it did; Quotum does not fetch the rest.
+- **Links.** `hostedInvoiceUrl` and `invoicePdfUrl` are bearer links that let anyone holding them
+  view the invoice and, while it is open, pay it. They are returned only to a full project
+  credential and are `null` for a read-only credential, in the merchant console and over MCP.
+- **Erased customers.** Customer erasure removes the stored provider payload. The invoice still
+  lists with its status, currency and amount paid; `number`, `totalMinor`, `amountDueMinor`, the
+  period and the lines are then `null` or empty.
+
+An unknown billing account answers `404 BILLING_ACCOUNT_NOT_FOUND`, an invoice that does not belong
+to the account `404 INVOICE_NOT_FOUND`, and an invoice ID that is not a UUID or a cursor that did
+not come from this list `400 INVALID_REQUEST`. `recentInvoices` in `billing-summary` stays a fixed
+slice of the 12 most recent for dashboards; use this list for history.
 
 ## Usage operation recovery
 

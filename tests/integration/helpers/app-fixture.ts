@@ -209,6 +209,8 @@ export function createIntegrationApp({
 				listProjectUsageEvents: (...args) => repository.listProjectUsageEvents(...args),
 				getUsageSeries: (...args) => repository.getUsageSeries(...args),
 				getCustomerBillingSummary: (...args) => repository.getCustomerBillingSummary(...args),
+				listInvoices: (...args) => repository.listInvoices(...args),
+				getInvoice: (...args) => repository.getInvoice(...args),
 			},
 			catalogControlPlane: {
 				getPublished: (...args) => repository.getPublishedCatalog(...args),

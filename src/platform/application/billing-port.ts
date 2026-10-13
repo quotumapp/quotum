@@ -58,6 +58,8 @@ export const merchantBillingOperations = [
 	["GET", "/admin/catalog/store-products", "catalog.store-products"],
 	["GET", "/admin/providers/capabilities", "providers.capabilities"],
 	["GET", "/billing-accounts/:billingAccountId/billing-summary", "account.summary"],
+	["GET", "/billing-accounts/:billingAccountId/invoices", "account.invoices"],
+	["GET", "/billing-accounts/:billingAccountId/invoices/:invoiceId", "account.invoice"],
 	["GET", "/billing-accounts/:billingAccountId/billing-account", "account.billing"],
 	["GET", "/billing-accounts/:billingAccountId/available-actions", "account.actions"],
 	[

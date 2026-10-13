@@ -109,6 +109,52 @@ describe("merchant security boundaries", () => {
 			).toMatchObject({ capability: "billing.read", sensitive: false });
 		}
 	});
+	it("exposes invoice reads to merchants as billing reads and nothing else under invoices", () => {
+		const invoiceId = "0198f2a4-6b1c-7a3e-8d5f-123456789abc";
+		for (const environment of ["sandbox", "production"] as const) {
+			expect(
+				merchantBillingRoute(
+					"GET",
+					"/api/billing/admin/billing-accounts/acct_1/invoices",
+					environment,
+				),
+			).toEqual({
+				path: "/v1/billing-accounts/acct_1/invoices",
+				readOnly: true,
+				capability: "billing.read",
+				action: null,
+				sensitive: false,
+			});
+			expect(
+				merchantBillingRoute(
+					"GET",
+					`/api/billing/admin/billing-accounts/acct_1/invoices/${invoiceId}`,
+					environment,
+				),
+			).toMatchObject({ readOnly: true, capability: "billing.read" });
+		}
+		expect(billingOperation("GET", "/v1/billing-accounts/acct%201/invoices")).toEqual({
+			operation: "account.invoices",
+			parameters: ["acct 1"],
+		});
+		expect(billingOperation("GET", `/v1/billing-accounts/acct_1/invoices/${invoiceId}`)).toEqual({
+			operation: "account.invoice",
+			parameters: ["acct_1", invoiceId],
+		});
+		expect(
+			merchantBillingRoute(
+				"POST",
+				"/api/billing/admin/billing-accounts/acct_1/invoices",
+				"sandbox",
+			),
+		).toBeNull();
+		for (const path of [
+			"/api/billing/admin/billing-accounts/acct_1/invoices/in_1",
+			`/api/billing/admin/billing-accounts/acct_1/invoices/${invoiceId}/pay`,
+			"/api/billing/admin/billing-accounts/acct_1/invoices/",
+		])
+			expect(merchantBillingRoute("GET", path, "sandbox")).toBeNull();
+	});
 	it("marks the admitted read-only POST explicitly without relaxing audited previews", () => {
 		for (const environment of ["sandbox", "production"] as const) {
 			expect(

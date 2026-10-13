@@ -6,6 +6,9 @@ import type { CustomerErasureServiceLike } from "../billing/customer-erasures";
 import type { EntitlementService } from "../billing/entitlements";
 import type {
 	CustomerBillingSummary,
+	InvoiceDetail,
+	InvoiceListInput,
+	InvoicePage,
 	ProjectUsageEventListInput,
 	ProjectUsageEventPage,
 	UsageEventListInput,
@@ -138,6 +141,12 @@ export interface BillingInsightsServiceLike {
 		project: ProjectInstanceContext,
 		billingAccountId: string,
 	): Promise<CustomerBillingSummary>;
+	listInvoices(project: ProjectInstanceContext, input: InvoiceListInput): Promise<InvoicePage>;
+	getInvoice(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		invoiceId: string,
+	): Promise<InvoiceDetail>;
 }
 
 export interface AppDependencies {
