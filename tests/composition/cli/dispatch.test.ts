@@ -156,6 +156,11 @@ describe("quotum command resolution", () => {
 			"composition/cli/projects.ts",
 			["rename", "acme", "alpha", "--name", "Alpha App"],
 		],
+		[
+			["audit", "list", "--organization", "acme", "--limit", "10"],
+			"composition/cli/audit.ts",
+			["list", "--organization", "acme", "--limit", "10"],
+		],
 		[["mcp"], "mcp/index.ts", []],
 	] as const)("resolves %j to %s", (argv, file, args) => {
 		const resolution = resolveQuotumCommand(argv);
@@ -200,6 +205,8 @@ describe("quotum command resolution", () => {
 			["organizations", "remove-owner", "acme"],
 			["projects"],
 			["projects", "delete", "acme", "alpha"],
+			["audit"],
+			["audit", "export"],
 			["environments"],
 			["environments", "deactivate", "acme"],
 			["catalog"],
