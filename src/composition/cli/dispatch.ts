@@ -264,6 +264,24 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => args[0] === "rename",
 	},
 	{
+		path: ["audit"],
+		file: "composition/cli/audit.ts",
+		usage:
+			"audit list [--organization <slug>] [--action <name>] [--since <time>] [--until <time>] [--before <event-id>] [--limit <n>]",
+		summary: "List the platform audit trail, newest first",
+		environment: "POSTGRES_URI, optional BILLING_POSTGRES_PREPARED_STATEMENTS",
+		details: [
+			"  audit list [--organization <slug>] [--action <name>] [--since <time>] [--until <time>]",
+			"      [--before <event-id>] [--limit <n>]",
+			"Prints one page of events as JSON, newest first: id, createdAt (UTC), organization,",
+			"principalId (null for operator commands, which name the operator in metadata), action,",
+			"target and metadata. --since is inclusive and --until exclusive; both are ISO 8601 with a",
+			"zone. --limit defaults to 50 and is at most 500. When more events remain, nextBefore is the",
+			"last event's id: pass it as --before for the next page. Read-only; works headless.",
+		],
+		accepts: (args) => args[0] === "list",
+	},
+	{
 		path: ["merchant", "service-principal"],
 		file: "composition/cli/merchant-service-principal.ts",
 		usage: "merchant service-principal <name>",
