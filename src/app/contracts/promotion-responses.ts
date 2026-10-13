@@ -106,6 +106,24 @@ const promotionCodeSchema = z.object({
 	createdAt: z.string(),
 	deactivatedBy: z.union([z.null(), z.string()]),
 	deactivatedAt: z.union([z.null(), z.string()]),
+	/** The gift purchase that minted the code; null for a code an operator created. */
+	gift: z.union([z.null(), z.object({ purchaseId: z.string(), ordinal: z.number() })]),
+});
+
+const giftSchema = z.object({
+	purchaseId: z.string(),
+	productKey: z.string(),
+	purchasedAt: z.string(),
+	reversedAt: z.union([z.null(), z.string()]),
+	reversalReason: z.union([z.null(), z.enum(["refund", "dispute"])]),
+	codes: z.array(
+		z.object({
+			code: z.string(),
+			status: z.enum(["available", "redeemed", "expired", "deactivated"]),
+			expiresAt: z.string(),
+			redeemedAt: z.union([z.null(), z.string()]),
+		}),
+	),
 });
 
 const promotionRedemptionSchema = z.object({
@@ -335,4 +353,10 @@ export const postV1AdminPromotionRedemptionsByRedemptionIdRevokeResponse200Schem
 			}),
 		),
 	}),
+});
+
+export const getV1BillingAccountsByBillingAccountIdGiftsResponse200Schema = z.object({
+	success: z.literal(true),
+	data: z.array(giftSchema),
+	pagination: paginationSchema,
 });

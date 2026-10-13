@@ -83,6 +83,8 @@ const neverReadOnly = [
 	"/v1/billing-accounts/:billingAccountId/providers/stripe/checkout-sessions/:sessionId",
 	"/v1/billing-accounts/:billingAccountId/promotion-redemptions",
 	"/v1/billing-accounts/:billingAccountId/promotion-redemptions/:redemptionId",
+	// The codes a buyer bought are bearer secrets.
+	"/v1/billing-accounts/:billingAccountId/gifts",
 ];
 
 describe("read-only credential route inventory", () => {

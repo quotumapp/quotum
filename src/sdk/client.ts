@@ -32,6 +32,7 @@ import type { PaymentSetupSession } from "../billing/payment-setup";
 import type { TrialEligibility, TrialMutationResult, TrialRecord } from "../billing/plan-grants";
 import type {
 	CreatePromotionInput,
+	GiftRecord,
 	PromotionChannel,
 	PromotionCodeInput,
 	PromotionCodeRecord,
@@ -481,6 +482,10 @@ export class BillingClient {
 						`/v1/billing-accounts/${segment(billingAccountId)}/promotion-redemptions`,
 						query,
 					),
+				),
+			accountGifts: (billingAccountId: string, query: { limit?: number; cursor?: string } = {}) =>
+				this.requestPage<GiftRecord>(
+					pathWithQuery(`/v1/billing-accounts/${segment(billingAccountId)}/gifts`, query),
 				),
 			revokeRedemption: (redemptionId: string, reason: string, idempotencyKey: string) =>
 				this.request<PromotionRevokeResult>(

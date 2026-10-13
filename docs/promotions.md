@@ -219,8 +219,45 @@ refusals, and the buyer receives no access from the purchase itself.
   the published catalog sells its codes or sold codes are neither redeemed nor expired. Retire the
   gift and let the checkouts already open finish (a Checkout session expires after at most 24
   hours) before archiving.
-- **Operators.** A minted code's `createdBy` is `system:gift-purchase`, and
-  `GET /v1/admin/promotions/:promotionKey/codes` lists it with the operator's own.
+- **Reading.** `GET /v1/billing-accounts/:billingAccountId/gifts` lists the gifts an account
+  bought, newest first, in pages of purchases with `limit` and `cursor`. A full project key
+  reads it; a read-only key answers `403 READ_ONLY_CREDENTIAL`, because the codes are bearer
+  secrets. Each gift carries its codes:
+
+  ```json
+  {
+    "success": true,
+    "data": [
+      {
+        "purchaseId": "4b0a2d0c-3c3e-4a39-8d0c-6f6b9c0c7a11",
+        "productKey": "gift_12m",
+        "purchasedAt": "2026-10-12T12:00:00.000Z",
+        "reversedAt": null,
+        "reversalReason": null,
+        "codes": [
+          {
+            "code": "K7Q2-M9XD-4TRW-P8HB-3NCF",
+            "status": "available",
+            "expiresAt": "2027-10-12T12:00:00.000Z",
+            "redeemedAt": null
+          }
+        ]
+      }
+    ],
+    "pagination": { "nextCursor": null }
+  }
+  ```
+
+  A code is `redeemed` once a redemption applied it, and stays so when the purchase is later
+  refunded or the promotion archived; otherwise `deactivated` (withdrawn, or its promotion
+  archived), `expired` once `expiresAt` passes, or `available`. The route never names who
+  redeemed a code: `redeemedAt` is all the buyer learns. `reversedAt` and `reversalReason` appear
+  when a full refund or dispute withdrew the unredeemed codes, which is how an operator finds
+  the redeemed ones to review. The SDK reads it as `promotions.accountGifts`.
+- **Operators.** A minted code's `createdBy` is `system:gift-purchase`.
+  `GET /v1/admin/promotions/:promotionKey/codes` lists it with the operator's own, names the
+  purchase and ordinal in `gift`, and takes `source=gift` or `source=operator` to keep one kind.
+  Find codes about to expire unredeemed with `source=gift&active=true` and each `expiresAt`.
 
 ### Apple subscription offers
 

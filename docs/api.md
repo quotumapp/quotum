@@ -117,7 +117,8 @@ that write nothing and call no provider, plus `POST .../usage/check`. Everything
 - `GET .../providers/apple/account-token` and `GET .../providers/google/account-link`, which create
   state on first read, and `GET .../providers/stripe/checkout-sessions/:sessionId`, which calls
   Stripe;
-- promotion code validation and the promotion redemption reads, because codes are bearer-like;
+- promotion code validation, the promotion redemption reads and `GET .../gifts`, because codes are
+  bearer-like;
 - every operator route, and `includeRawPayload=true` on a store event.
 
 The stored credential decides the access level; the prefix only lets a client refuse a full key

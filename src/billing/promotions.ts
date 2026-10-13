@@ -238,6 +238,33 @@ export interface PromotionCodeRecord {
 	createdAt: string;
 	deactivatedBy: string | null;
 	deactivatedAt: string | null;
+	/** The gift purchase that minted the code; null for a code an operator created. */
+	gift: { purchaseId: string; ordinal: number } | null;
+}
+
+/**
+ * What a buyer can do with a gift code now. `redeemed` outranks the rest: a redeemed code stays
+ * redeemed when its purchase is refunded or its promotion archived.
+ */
+export type GiftCodeStatus = "available" | "redeemed" | "expired" | "deactivated";
+
+export interface GiftCodeRecord {
+	code: string;
+	status: GiftCodeStatus;
+	expiresAt: string;
+	/** When the code was redeemed; the buyer is never told by whom. */
+	redeemedAt: string | null;
+}
+
+/** One gift purchase with the codes it minted. */
+export interface GiftRecord {
+	purchaseId: string;
+	productKey: string;
+	purchasedAt: string;
+	/** Set once a full refund or dispute withdrew the codes nobody had redeemed. */
+	reversedAt: string | null;
+	reversalReason: "refund" | "dispute" | null;
+	codes: GiftCodeRecord[];
 }
 
 /** The plan grant a redeemed `plan_grant` code gave, as it stands when the redemption is read. */
@@ -348,7 +375,12 @@ export interface PromotionServiceLike {
 	listPromotionCodes(
 		project: ProjectInstanceContext,
 		key: string,
-		input: { limit: number; cursor?: string | null; active?: boolean | null },
+		input: {
+			limit: number;
+			cursor?: string | null;
+			active?: boolean | null;
+			source?: "operator" | "gift" | null;
+		},
 	): Promise<PromotionListResult<PromotionCodeRecord>>;
 	deactivatePromotionCode(
 		project: ProjectInstanceContext,
@@ -384,6 +416,11 @@ export interface PromotionServiceLike {
 		billingAccountId: string,
 		input: { limit: number; cursor?: string | null },
 	): Promise<PromotionListResult<PromotionRedemptionRecord>>;
+	listAccountGifts(
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		input: { limit: number; cursor?: string | null },
+	): Promise<PromotionListResult<GiftRecord>>;
 	getAccountRedemption(
 		project: ProjectInstanceContext,
 		billingAccountId: string,
