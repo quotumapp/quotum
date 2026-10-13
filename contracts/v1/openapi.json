@@ -60325,6 +60325,14 @@
                           "active": {
                             "type": "boolean"
                           },
+                          "channel": {
+                            "enum": [
+                              "ios",
+                              "android",
+                              "web"
+                            ],
+                            "type": "string"
+                          },
                           "externalPriceId": {
                             "type": [
                               "string",
@@ -60341,6 +60349,15 @@
                           "productKey": {
                             "type": "string"
                           },
+                          "provider": {
+                            "enum": [
+                              "apple",
+                              "google",
+                              "stripe",
+                              "paddle"
+                            ],
+                            "type": "string"
+                          },
                           "storeProductId": {
                             "format": "uuid",
                             "type": "string"
@@ -60350,6 +60367,8 @@
                           "productId",
                           "storeProductId",
                           "productKey",
+                          "provider",
+                          "channel",
                           "externalProductId",
                           "externalPriceId",
                           "active"
@@ -60551,53 +60570,221 @@
           "content": {
             "application/json": {
               "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "credits": {
-                    "maximum": 100000,
-                    "minimum": 0,
-                    "type": "integer"
-                  },
-                  "entitlementKey": {
-                    "maxLength": 120,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "externalPriceId": {
-                    "pattern": "^price_[A-Za-z0-9]+$",
-                    "type": "string"
-                  },
-                  "externalProductId": {
-                    "pattern": "^prod_[A-Za-z0-9]+$",
-                    "type": "string"
-                  },
-                  "kind": {
-                    "enum": [
-                      "subscription",
-                      "topup",
-                      "gift"
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "credits": {
+                        "maximum": 100000,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "entitlementKey": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "externalPriceId": {
+                        "pattern": "^price_[A-Za-z0-9]+$",
+                        "type": "string"
+                      },
+                      "externalProductId": {
+                        "pattern": "^prod_[A-Za-z0-9]+$",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "subscription",
+                          "topup",
+                          "gift"
+                        ],
+                        "type": "string"
+                      },
+                      "name": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "productKey": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "provider": {
+                        "enum": [
+                          "stripe"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "productKey",
+                      "name",
+                      "kind",
+                      "externalProductId",
+                      "externalPriceId"
                     ],
-                    "type": "string"
+                    "type": "object"
                   },
-                  "name": {
-                    "maxLength": 120,
-                    "minLength": 1,
-                    "type": "string"
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "billingPeriod": {
+                        "enum": [
+                          "day",
+                          "week",
+                          "month",
+                          "quarter",
+                          "semi_annual",
+                          "year"
+                        ],
+                        "type": "string"
+                      },
+                      "billingPeriodCount": {
+                        "maximum": 1000,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "credits": {
+                        "maximum": 100000,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "currency": {
+                        "maxLength": 3,
+                        "minLength": 3,
+                        "type": "string"
+                      },
+                      "entitlementKey": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "externalProductId": {
+                        "pattern": "^[A-Za-z0-9._-]{1,255}$",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "subscription",
+                          "topup"
+                        ],
+                        "type": "string"
+                      },
+                      "name": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "priceAmountMinor": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "productKey": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "provider": {
+                        "enum": [
+                          "apple"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "provider",
+                      "productKey",
+                      "name",
+                      "kind",
+                      "entitlementKey",
+                      "credits",
+                      "externalProductId"
+                    ],
+                    "type": "object"
                   },
-                  "productKey": {
-                    "maxLength": 120,
-                    "minLength": 1,
-                    "type": "string"
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "billingPeriod": {
+                        "enum": [
+                          "day",
+                          "week",
+                          "month",
+                          "quarter",
+                          "semi_annual",
+                          "year"
+                        ],
+                        "type": "string"
+                      },
+                      "billingPeriodCount": {
+                        "maximum": 1000,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "credits": {
+                        "maximum": 100000,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "currency": {
+                        "maxLength": 3,
+                        "minLength": 3,
+                        "type": "string"
+                      },
+                      "entitlementKey": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "externalPriceId": {
+                        "pattern": "^[A-Za-z0-9_-]{1,63}$",
+                        "type": "string"
+                      },
+                      "externalProductId": {
+                        "pattern": "^[A-Za-z0-9._-]{1,255}$",
+                        "type": "string"
+                      },
+                      "kind": {
+                        "enum": [
+                          "subscription",
+                          "topup"
+                        ],
+                        "type": "string"
+                      },
+                      "name": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "priceAmountMinor": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "productKey": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "provider": {
+                        "enum": [
+                          "google"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "provider",
+                      "productKey",
+                      "name",
+                      "kind",
+                      "entitlementKey",
+                      "credits",
+                      "externalProductId"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "productKey",
-                  "name",
-                  "kind",
-                  "externalProductId",
-                  "externalPriceId"
-                ],
-                "type": "object"
+                ]
               }
             }
           },
@@ -60613,6 +60800,14 @@
                       "properties": {
                         "active": {
                           "type": "boolean"
+                        },
+                        "channel": {
+                          "enum": [
+                            "ios",
+                            "android",
+                            "web"
+                          ],
+                          "type": "string"
                         },
                         "externalPriceId": {
                           "type": [
@@ -60630,6 +60825,15 @@
                         "productKey": {
                           "type": "string"
                         },
+                        "provider": {
+                          "enum": [
+                            "apple",
+                            "google",
+                            "stripe",
+                            "paddle"
+                          ],
+                          "type": "string"
+                        },
                         "storeProductId": {
                           "format": "uuid",
                           "type": "string"
@@ -60639,6 +60843,8 @@
                         "productId",
                         "storeProductId",
                         "productKey",
+                        "provider",
+                        "channel",
                         "externalProductId",
                         "externalPriceId",
                         "active"

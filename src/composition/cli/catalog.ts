@@ -383,8 +383,10 @@ const help = `quotum catalog <command> [catalog.ts]
 Commands:
   provision                    Development import before first publish; refuses production
                                (reads the database: run it as quotum catalog provision)
-  bindings list                List Stripe product/price mappings
-  bindings adopt <file>        Adopt existing Stripe product/price IDs from JSON
+  bindings list                List provider product mappings (Stripe, App Store, Google Play)
+  bindings adopt <file>        Adopt an existing Stripe product and price, or register an App
+                               Store or Google Play product, from JSON ("provider": "apple" or
+                               "google"; the store is not queried)
   status                       Print the currently published catalog intent and revision
   diff <catalog.ts>            Validate and preview a catalog-as-code change
   push <catalog.ts> [--force]  Preview, then publish the previewed catalog intent; a catalog
