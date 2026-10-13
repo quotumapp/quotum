@@ -20,6 +20,9 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 			forPrincipal: unavailable,
 			create: unavailable,
 			activateProduction: unavailable,
+			suspend: unavailable,
+			resume: unavailable,
+			renameForProject: unavailable,
 		},
 	});
 	const store = new MerchantStore(sql, {

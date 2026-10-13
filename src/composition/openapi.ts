@@ -81,6 +81,9 @@ function documentStore(): MerchantStore {
 			forPrincipal: unavailable,
 			create: unavailable,
 			activateProduction: unavailable,
+			suspend: unavailable,
+			resume: unavailable,
+			renameForProject: unavailable,
 		},
 	});
 	return new MerchantStore(sql, {

@@ -432,3 +432,42 @@ export async function activateProjectProduction(
 		await client`UPDATE projects SET lifecycle_status='active' WHERE id=${instanceId} AND environment='production' AND lifecycle_status='inactive' AND published_catalog_revision_id=${catalogRevisionId}::bigint AND platform_project_id IN (SELECT id FROM platform_projects WHERE organization_id=${organizationId}) AND (NOT ${enforceProductionLimit}::boolean OR (SELECT count(*) FROM projects i JOIN platform_projects p ON p.id=i.platform_project_id WHERE p.organization_id=${organizationId} AND i.environment='production' AND i.lifecycle_status='active') < (SELECT production_limit FROM platform_organizations WHERE id=${organizationId})) RETURNING id`;
 	return rows.length === 1;
 }
+
+/**
+ * Suspends one active instance: `/v1` refuses it at once while webhooks and workers carry on, and
+ * `resumeProjectInstance` undoes it. Only an instance of this organization that is `active` moves.
+ */
+export async function suspendProjectInstance(
+	client: SQL,
+	instanceId: string,
+	organizationId: string,
+): Promise<boolean> {
+	const rows =
+		await client`UPDATE projects SET lifecycle_status='suspended', updated_at=now() WHERE id=${instanceId} AND lifecycle_status='active' AND internal_project=false AND platform_project_id IN (SELECT id FROM platform_projects WHERE organization_id=${organizationId}) RETURNING id`;
+	return rows.length === 1;
+}
+
+/**
+ * Returns one suspended instance to `active`. A production instance counts against the
+ * organization's `production_limit` again unless the caller waives it, as a headless operator may.
+ */
+export async function resumeProjectInstance(
+	client: SQL,
+	instanceId: string,
+	organizationId: string,
+	{ enforceProductionLimit = true }: { enforceProductionLimit?: boolean } = {},
+): Promise<boolean> {
+	const rows =
+		await client`UPDATE projects SET lifecycle_status='active', updated_at=now() WHERE id=${instanceId} AND lifecycle_status='suspended' AND internal_project=false AND platform_project_id IN (SELECT id FROM platform_projects WHERE organization_id=${organizationId}) AND (NOT ${enforceProductionLimit}::boolean OR environment<>'production' OR (SELECT count(*) FROM projects i JOIN platform_projects p ON p.id=i.platform_project_id WHERE p.organization_id=${organizationId} AND i.environment='production' AND i.lifecycle_status='active') < (SELECT production_limit FROM platform_organizations WHERE id=${organizationId})) RETURNING id`;
+	return rows.length === 1;
+}
+
+/** Gives every non-internal instance of a logical project the project's new display name. */
+export async function renameProjectInstances(
+	client: SQL,
+	platformProjectId: string,
+	organizationId: string,
+	name: string,
+): Promise<void> {
+	await client`UPDATE projects SET name=${name}, updated_at=now() WHERE platform_project_id=${platformProjectId} AND internal_project=false AND platform_project_id IN (SELECT id FROM platform_projects WHERE organization_id=${organizationId})`;
+}

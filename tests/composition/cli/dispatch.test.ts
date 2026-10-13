@@ -136,6 +136,26 @@ describe("quotum command resolution", () => {
 			"composition/cli/organizations.ts",
 			["add-owner", "acme", "--email", "owner@acme.example"],
 		],
+		[
+			["environments", "suspend", "acme", "--reason", "incident", "--actor", "ops"],
+			"composition/cli/environments.ts",
+			["suspend", "acme", "--reason", "incident", "--actor", "ops"],
+		],
+		[
+			["environments", "resume", "acme", "--actor", "ops"],
+			"composition/cli/environments.ts",
+			["resume", "acme", "--actor", "ops"],
+		],
+		[
+			["organizations", "rename", "acme", "--name", "Acme Corp"],
+			"composition/cli/organizations.ts",
+			["rename", "acme", "--name", "Acme Corp"],
+		],
+		[
+			["projects", "rename", "acme", "alpha", "--name", "Alpha App"],
+			"composition/cli/projects.ts",
+			["rename", "acme", "alpha", "--name", "Alpha App"],
+		],
 		[["mcp"], "mcp/index.ts", []],
 	] as const)("resolves %j to %s", (argv, file, args) => {
 		const resolution = resolveQuotumCommand(argv);
@@ -178,6 +198,8 @@ describe("quotum command resolution", () => {
 			["bootstrap", "--check", "--apply"],
 			["organizations"],
 			["organizations", "remove-owner", "acme"],
+			["projects"],
+			["projects", "delete", "acme", "alpha"],
 			["environments"],
 			["environments", "deactivate", "acme"],
 			["catalog"],

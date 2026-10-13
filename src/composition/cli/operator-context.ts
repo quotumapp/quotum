@@ -25,6 +25,7 @@ import type {
 } from "../../platform/connections/ports";
 import { ConnectionRepository } from "../../platform/connections/repository";
 import type { MerchantSql } from "../../platform/database";
+import type { OperatorInstanceTarget } from "../../platform/operator-topology";
 import { MerchantError, tokenHash } from "../../platform/security";
 import type { RuntimeConnectionResolver } from "../../projects/connections";
 import type { ProjectInstanceContext } from "../../projects/context";
@@ -98,11 +99,30 @@ const memberOverrideReasonPattern = /^[^\p{C}\p{Zl}\p{Zp}]{1,200}$/u;
  * events record it, and an organization with members is read-only to operators without it.
  */
 export function memberOverrideReason(options: ParsedArguments["options"]): string | undefined {
-	const reason = options.get("member-override-reason")?.trim();
+	return statedReason(options, "member-override-reason");
+}
+
+/** A reason an audit event records, from `--<name>`: 1-200 printable characters. */
+export function statedReason(
+	options: ParsedArguments["options"],
+	name: string,
+): string | undefined {
+	const reason = options.get(name)?.trim();
 	if (reason === undefined) return undefined;
 	if (!memberOverrideReasonPattern.test(reason))
-		throw new CliUsageError("--member-override-reason must be 1-200 printable characters.");
+		throw new CliUsageError(`--${name} must be 1-200 printable characters.`);
 	return reason;
+}
+
+const displayNamePattern = /^[^\p{C}\p{Zl}\p{Zp}]{1,120}$/u;
+
+/** A display name as the platform stores it: trimmed, 1-120 printable characters. */
+export function displayNameOption(options: ParsedArguments["options"]): string {
+	const name = options.get("name")?.trim();
+	if (name === undefined) throw new CliUsageError("--name <name> is required.");
+	if (!displayNamePattern.test(name))
+		throw new CliUsageError("--name must be 1-120 printable characters.");
+	return name;
 }
 
 /** `--request-key` makes a retry safe; without one, each run gets a new key and prints it. */
@@ -352,6 +372,42 @@ export function openOperatorSql(env: Environment): {
 } {
 	const { client, sql } = connectOperatorDatabase(postgresUriOf(env), env);
 	return { sql, close: () => client.close() };
+}
+
+/**
+ * The database and the instance resolver, for an operator command that reads no connection key or
+ * auth secret, such as suspending an environment. Needs `POSTGRES_URI`.
+ */
+export function openOperatorInstances(env: Environment): {
+	sql: MerchantSql;
+	/** Whether the merchant platform runs, which is when the production limit applies. */
+	merchantEnabled: boolean;
+	target(instanceKey: string): Promise<OperatorInstanceTarget>;
+	close(): Promise<void>;
+} {
+	const { client, sql } = connectOperatorDatabase(postgresUriOf(env), env);
+	const resolver = new PostgresProjectInstanceContextResolver(client);
+	return {
+		sql,
+		merchantEnabled: merchantPlatformEnabled(env),
+		async target(instanceKey) {
+			const lookup = await resolver.resolveInstanceKey(instanceKey);
+			if (lookup.kind === "not_found")
+				throw new Error(`Project instance ${instanceKey} was not found`);
+			if (lookup.kind !== "resolved")
+				throw new Error(`Project instance ${instanceKey} is not available`);
+			const { context } = lookup;
+			if (context.internalProject || context.environment === "internal")
+				throw new Error(`Project instance ${instanceKey} is internal`);
+			return {
+				instanceKey,
+				organizationId: context.organizationId,
+				platformProjectId: context.logicalProjectId,
+				instanceId: context.projectInstanceId,
+			};
+		},
+		close: () => client.close(),
+	};
 }
 
 export interface CommandOutput {
