@@ -295,6 +295,15 @@ export async function createMerchantTestRuntime(
 							code: await createOTP(secret, { digits: 6, period: 30 }).hotp(step),
 						});
 					}
+					if (request.method === "POST" && url.pathname === "/second-factor/replay") {
+						// A code is accepted once per 30-second step, and a browser test signs the same person
+						// in several times inside one step; this lets it show the same code again.
+						const { email } = z.strictObject({ email: z.email() }).parse(await request.json());
+						const rows = await database<
+							{ id: string }[]
+						>`UPDATE platform_auth_two_factors SET last_used_step=NULL,failed_verification_count=0,locked_until=NULL WHERE user_id IN (SELECT id FROM platform_auth_users WHERE email=${email}) RETURNING id`;
+						return Response.json({ cleared: rows.length === 1 });
+					}
 					if (request.method === "POST" && url.pathname === "/auth/cooldown") {
 						const { email } = z.strictObject({ email: z.email() }).parse(await request.json());
 						const [user] = await database<
