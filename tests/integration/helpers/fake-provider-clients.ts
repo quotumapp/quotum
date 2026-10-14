@@ -40,6 +40,8 @@ type AppleDateInput = Date | number | string;
 const farFutureSubscriptionExpiry = "2099-06-30T00:00:00.000Z";
 const farFutureSubscriptionPeriodEnd = 4_086_460_800;
 const seededStripeEchoCreditsAmount = 499;
+/** The client secret every embedded fake Checkout session answers. */
+export const embeddedClientSecret = "cs_test_integration_secret_fake";
 
 interface FakeAppleStoreKitClientOptions {
 	transactionId: string;
@@ -271,6 +273,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 	let loseNextSubscriptionCreate = false;
 	const portalSessionParams: Stripe.BillingPortal.SessionCreateParams[] = [];
 	const expiredSessions = new Set<string>();
+	const embeddedSessionSecrets = new Map<string, string>();
 	const invoices = new Map<
 		string,
 		{
@@ -402,6 +405,11 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 					throw new Error("Fake Stripe Checkout is temporarily unavailable");
 				}
 				idempotency.claim(idempotencyKey, "POST /v1/checkout/sessions", params);
+				if (params.ui_mode === "embedded_page") {
+					// An embedded session has no URL; Stripe answers its client secret on every read.
+					embeddedSessionSecrets.set("cs_test_integration", embeddedClientSecret);
+					return { id: "cs_test_integration", url: null, client_secret: embeddedClientSecret };
+				}
 				if (params.mode !== "setup") {
 					return {
 						id: "cs_test_integration",
@@ -507,10 +515,14 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			async retrieveCheckoutSession(sessionId: string) {
 				calls.push(`retrieveCheckoutSession:${sessionId}`);
 				const expired = expiredSessions.has(sessionId);
+				const clientSecret = embeddedSessionSecrets.get(sessionId);
 				return stripeCheckoutSessionObject({
 					id: sessionId,
 					...(options.checkoutSession ?? {}),
 					...(expired ? { status: "expired", payment_status: "unpaid" } : {}),
+					...(clientSecret === undefined
+						? {}
+						: { ui_mode: "embedded_page", client_secret: clientSecret, url: null }),
 				});
 			},
 			async expireCheckoutSession(sessionId: string) {

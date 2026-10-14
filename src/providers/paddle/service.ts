@@ -68,7 +68,13 @@ export class PaddleBillingService implements WebBillingService {
 	}
 
 	async createCheckoutSession(input: Parameters<WebBillingService["createCheckoutSession"]>[0]) {
-		if (!input.idempotencyKey || input.successUrl || input.cancelUrl || input.expiresAt) {
+		if (
+			!input.idempotencyKey ||
+			input.successUrl ||
+			input.cancelUrl ||
+			input.expiresAt ||
+			input.uiMode === "embedded"
+		) {
 			throw new BillingError(
 				"Paddle checkout requires an idempotency key and the configured payment page",
 				"PADDLE_CHECKOUT_INVALID",

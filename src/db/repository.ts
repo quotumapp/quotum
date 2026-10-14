@@ -9,6 +9,7 @@ import type {
 	CommercialActionPreview,
 	CommercialPreviewCarryOver,
 	CommercialPreviewDraft,
+	StoredCommercialActionExecutionResult,
 	StoredCommercialActionPreview,
 } from "../billing/commercial";
 import { BillingError } from "../billing/errors";
@@ -759,9 +760,9 @@ export class BillingRepository {
 			billingAccountId: string;
 			previewToken: string;
 			idempotencyKey: string;
-			result: CommercialActionExecutionResult;
+			result: StoredCommercialActionExecutionResult;
 		},
-	): Promise<CommercialActionExecutionResult> {
+	): Promise<StoredCommercialActionExecutionResult> {
 		return await this.commercialActions.completeCommercialActionExecution(project, input);
 	}
 
@@ -779,7 +780,7 @@ export class BillingRepository {
 				"supersededChangeId"
 			>;
 		},
-	): Promise<CommercialActionExecutionResult> {
+	): Promise<StoredCommercialActionExecutionResult> {
 		return await this.commercialActions.completeSubscriptionCancellation(project, input);
 	}
 

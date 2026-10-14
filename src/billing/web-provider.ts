@@ -1,4 +1,6 @@
 import type {
+	CheckoutSessionHandle,
+	CheckoutUiMode,
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
@@ -12,6 +14,8 @@ export interface WebCheckoutSessionStatus {
 	paymentStatus: string | null;
 	customerEmail: string | null;
 	productKey: string | null;
+	/** An open embedded session's client secret; providers without embedded checkout omit it. */
+	clientSecret?: string | null;
 }
 
 /** Shared hosted-billing port; each provider translates its own API shapes. */
@@ -35,11 +39,8 @@ export interface WebBillingService {
 		successUrl?: string | null;
 		cancelUrl?: string | null;
 		expiresAt?: number;
-	}): Promise<{
-		sessionId: string;
-		url: string;
-		duplicate?: boolean;
-	}>;
+		uiMode?: CheckoutUiMode;
+	}): Promise<{ sessionId: string; duplicate?: boolean } & CheckoutSessionHandle>;
 	createRecurringCheckoutSession?(input: {
 		billingAccountId: string;
 		planKey: string;
@@ -49,7 +50,8 @@ export interface WebBillingService {
 		successUrl?: string | null;
 		cancelUrl?: string | null;
 		expiresAt?: number;
-	}): Promise<{ sessionId: string; url: string; duplicate?: boolean }>;
+		uiMode?: CheckoutUiMode;
+	}): Promise<{ sessionId: string; duplicate?: boolean } & CheckoutSessionHandle>;
 	requestSubscriptionChange?(input: {
 		billingAccountId: string;
 		externalSubscriptionId: string;
@@ -76,12 +78,9 @@ export interface WebBillingService {
 		billingAccountId: string;
 		returnUrl?: string | null;
 	}): Promise<{ url: string }>;
-	getCheckoutSessionStatus(input: { billingAccountId: string; sessionId: string }): Promise<{
+	getCheckoutSessionStatus(input: {
+		billingAccountId: string;
 		sessionId: string;
-		status: string | null;
-		paymentStatus: string | null;
-		customerEmail: string | null;
-		productKey: string | null;
-	}>;
+	}): Promise<WebCheckoutSessionStatus>;
 	handleWebhook(input: { rawBody: string; signatureHeader: string | null }): Promise<unknown>;
 }

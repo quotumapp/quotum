@@ -349,6 +349,61 @@ describe("merchant billing port", () => {
 		]);
 	});
 
+	it("refuses embedded Checkout, whose client secret the console and MCP changes would store", async () => {
+		const stored = storedCommercialPreview();
+		stored.intent = { kind: "checkout_product", productKey: "credits_100", uiMode: "embedded" };
+		const calls: unknown[] = [];
+		const stripe = {
+			...requiredOnlyStripeService(),
+			previewCommercialAction: async (input: unknown) => {
+				calls.push(input);
+				return stored.preview;
+			},
+			executeCommercialAction: async (input: unknown) => {
+				calls.push(input);
+				return {
+					kind: "checkout" as const,
+					sessionId: "cs_embedded",
+					clientSecret: "cs_embedded_secret",
+					duplicate: false,
+				};
+			},
+		};
+		const billing = port({
+			stripe,
+			repository: { getCommercialActionPreview: async () => stored },
+		});
+
+		for (const kind of ["checkout_plan", "checkout_product"] as const) {
+			const intent =
+				kind === "checkout_plan"
+					? { kind, planKey: "pro", uiMode: "embedded" }
+					: { kind, productKey: "credits_100", uiMode: "embedded" };
+			expect(
+				await billing.dispatch(command("commercial.preview", { body: { intent } })),
+			).toMatchObject({ status: 400, body: { error: { code: "INVALID_REQUEST" } } });
+		}
+		expect(
+			await billing.dispatch(
+				command("commercial.execute", {
+					body: { previewToken: stored.preview.previewToken },
+					idempotencyKey: "purchase",
+				}),
+			),
+		).toMatchObject({ status: 400, body: { error: { code: "INVALID_REQUEST" } } });
+		expect(calls).toEqual([]);
+		// A hosted intent still previews.
+		expect(
+			await billing.dispatch(
+				command("commercial.preview", {
+					body: {
+						intent: { kind: "checkout_product", productKey: "credits_100", uiMode: "hosted" },
+					},
+				}),
+			),
+		).toMatchObject({ status: 200 });
+	});
+
 	it("dispatches the capability reads for the environment and one billing account", async () => {
 		const calls: string[][] = [];
 		const billing = port({ capabilityReads: recordingCapabilityReads(calls) });

@@ -1,4 +1,10 @@
-import type { CommercialActionIntent, CommercialPreviewDraft } from "../../billing/commercial";
+import {
+	type CommercialActionExecutionResult,
+	type CommercialActionIntent,
+	type CommercialPreviewDraft,
+	type StoredCommercialActionExecutionResult,
+	storedExecutionAnswer,
+} from "../../billing/commercial";
 import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
 import type { ProjectScopedBillingRepository } from "../../db/repository";
@@ -37,7 +43,11 @@ export class PaddleCommercial {
 		);
 	}
 
-	async execute(input: { billingAccountId: string; previewToken: string; idempotencyKey: string }) {
+	async execute(input: {
+		billingAccountId: string;
+		previewToken: string;
+		idempotencyKey: string;
+	}): Promise<CommercialActionExecutionResult> {
 		let stored = await this.repository.getCommercialActionPreview(
 			input.billingAccountId,
 			input.previewToken,
@@ -53,7 +63,8 @@ export class PaddleCommercial {
 			stored.executionIdempotencyKey !== input.idempotencyKey
 		)
 			throw new BillingError("Execution is bound to another key", "IDEMPOTENCY_CONFLICT", 409);
-		if (stored.status === "executed" && stored.executionResult) return stored.executionResult;
+		if (stored.status === "executed" && stored.executionResult)
+			return paddleAnswer(stored.executionResult);
 		const context = parsePaddleCommercialContext(stored.providerContext);
 		if (
 			context.connectionVersionId !== this.config.versionId ||
@@ -78,7 +89,8 @@ export class PaddleCommercial {
 				intentHash: current.intentHash,
 				stateFingerprint: current.stateFingerprint,
 			});
-			if (stored.status === "executed" && stored.executionResult) return stored.executionResult;
+			if (stored.status === "executed" && stored.executionResult)
+				return paddleAnswer(stored.executionResult);
 		}
 		const intent = normalize(stored.intent);
 		const checkoutInput = {
@@ -98,10 +110,12 @@ export class PaddleCommercial {
 			await this.repository.rejectUnboundPaddleCheckout(checkoutInput);
 			throw error;
 		}
-		return this.repository.completeCommercialActionExecution({
-			...input,
-			result: { kind: "checkout", ...checkout },
-		});
+		return paddleAnswer(
+			await this.repository.completeCommercialActionExecution({
+				...input,
+				result: { kind: "checkout", ...checkout },
+			}),
+		);
 	}
 
 	private releaseNeverSent(billingAccountId: string, resumableKeys: readonly string[]) {
@@ -221,13 +235,22 @@ function normalize(raw: CommercialActionIntent): Checkout {
 		raw.cancelUrl ||
 		raw.expiresAt !== undefined ||
 		raw.promotionCode ||
-		raw.allowPromotionCodes
+		raw.allowPromotionCodes ||
+		raw.uiMode === "embedded"
 	)
 		unsupported();
 	const email = normalizePaddleEmail(raw.email);
 	return raw.kind === "checkout_plan"
 		? { kind: raw.kind, planKey: raw.planKey.trim(), quantities: { ...raw.quantities }, email }
 		: { kind: raw.kind, productKey: raw.productKey.trim(), email };
+}
+/** Paddle has no embedded checkout, so every stored checkout keeps its URL. */
+function paddleAnswer(
+	result: StoredCommercialActionExecutionResult,
+): CommercialActionExecutionResult {
+	const answer = storedExecutionAnswer(result);
+	if (answer === null) throw new Error("A stored Paddle checkout has no URL");
+	return answer;
 }
 function unsupported(): never {
 	throw new BillingError(

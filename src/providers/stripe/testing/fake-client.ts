@@ -13,6 +13,8 @@ interface FakeCheckoutSession {
 	currency: string | null;
 	status: "open" | "complete" | "expired";
 	setupIntentId: string | null;
+	/** Set only for `ui_mode: embedded_page`; such a session has no URL. */
+	clientSecret: string | null;
 }
 
 /** A hosted setup that the fake has taken through to a saved card. */
@@ -120,13 +122,13 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	async createCheckoutSession(
 		params: Stripe.Checkout.SessionCreateParams,
 		idempotencyKey?: string,
-	): Promise<{ id: string; url: string }> {
+	): Promise<{ id: string; url: string | null; client_secret: string | null }> {
 		this.throwIfFailed("createCheckoutSession");
 		this.idempotency.claim(idempotencyKey, "POST /v1/checkout/sessions", params);
 		const existing =
 			idempotencyKey === undefined ? undefined : this.sessionsByIdempotencyKey.get(idempotencyKey);
 		if (existing !== undefined) {
-			return checkoutRedirect(existing.id);
+			return checkoutHandle(existing);
 		}
 
 		const id = `cs_fake_${digest(idempotencyKey ?? randomUUID()).slice(0, 24)}`;
@@ -139,6 +141,10 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 			currency: params.currency ?? null,
 			status: "open",
 			setupIntentId: mode === "setup" ? `seti_fake_${digest(id).slice(0, 24)}` : null,
+			clientSecret:
+				params.ui_mode === "embedded_page"
+					? `${id}_secret_${digest(`${id}:secret`).slice(0, 24)}`
+					: null,
 		};
 		if (session.setupIntentId !== null) {
 			this.setupIntents.set(session.setupIntentId, {
@@ -152,7 +158,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		if (idempotencyKey !== undefined) {
 			this.sessionsByIdempotencyKey.set(idempotencyKey, session);
 		}
-		return checkoutRedirect(id);
+		return checkoutHandle(session);
 	}
 
 	async createPortalSession(
@@ -280,6 +286,8 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 			payment_status: session.mode === "setup" ? null : "paid",
 			client_reference_id: session.clientReferenceId,
 			metadata: session.metadata,
+			ui_mode: session.clientSecret === null ? "hosted_page" : "embedded_page",
+			client_secret: session.clientSecret,
 		};
 	}
 
@@ -528,8 +536,19 @@ function invoiceReceipt(invoice: FakeInvoice): Record<string, unknown> {
 	};
 }
 
-function checkoutRedirect(id: string): { id: string; url: string } {
-	return { id, url: `https://checkout.stripe.test/session/${id}` };
+/** As Stripe answers: a hosted session has a URL, an embedded one a client secret instead. */
+function checkoutHandle(session: FakeCheckoutSession): {
+	id: string;
+	url: string | null;
+	client_secret: string | null;
+} {
+	return session.clientSecret === null
+		? {
+				id: session.id,
+				url: `https://checkout.stripe.test/session/${session.id}`,
+				client_secret: null,
+			}
+		: { id: session.id, url: null, client_secret: session.clientSecret };
 }
 
 function digest(value: string): string {

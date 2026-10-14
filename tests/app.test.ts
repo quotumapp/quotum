@@ -2538,6 +2538,7 @@ describe("billing app", () => {
 
 		expect(response.status).toBe(200);
 		expect(calls).toEqual([{ billingAccountId: "user_1", sessionId: "cs_test_123" }]);
+		// A provider that omits the client secret still answers the field, as null.
 		expect(await response.json()).toEqual({
 			success: true,
 			data: {
@@ -2546,6 +2547,7 @@ describe("billing app", () => {
 				paymentStatus: "unpaid",
 				customerEmail: null,
 				productKey: null,
+				clientSecret: null,
 			},
 		});
 	});

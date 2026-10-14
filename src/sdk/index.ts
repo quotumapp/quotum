@@ -7,6 +7,8 @@ export type {
 	OperatorGrantStatus,
 } from "../billing/balance-adjustments";
 export type {
+	CheckoutSessionHandle,
+	CheckoutUiMode,
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
@@ -78,6 +80,10 @@ export type {
 	SubscriptionPendingChange,
 } from "../providers/capability-read-types";
 export type { CatalogProviderCompatibility } from "../providers/catalog-compatibility-types";
+export type {
+	StripeCheckoutSessionResult,
+	StripeCheckoutSessionStatus,
+} from "../providers/stripe/service";
 export type {
 	CapabilityReason,
 	ProviderOperation,

@@ -47,6 +47,7 @@ import {
 	requireStripeBillingService,
 } from "../app/provider-services";
 import type { ProjectProviderServiceResolver } from "../app/types";
+import { refuseEmbeddedCheckout } from "../billing/commercial";
 import {
 	BillingError,
 	classifyBillingError,
@@ -552,6 +553,8 @@ export function createMerchantBillingPort(input: {
 			}
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);
+				// The console and MCP changes store what they answer; a client secret must not be.
+				refuseEmbeddedCheckout(body.intent);
 				return ok(
 					await previewCommercial({
 						project,
@@ -571,6 +574,7 @@ export function createMerchantBillingPort(input: {
 					billingAccountId: account(),
 					previewToken: body.previewToken,
 					idempotencyKey: requireKey(command),
+					hostedCheckoutOnly: true,
 				});
 				// Mirrors the /v1 route: only a queued subscription change is accepted for later work.
 				return ok(result, result.kind === "subscription_change" ? 202 : 200);

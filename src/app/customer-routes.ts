@@ -39,6 +39,12 @@ export interface CustomerRoutesDependencies {
 	registerPostAuthGuard: (guard: PostAuthGuard) => void;
 }
 
+/**
+ * `hosted` (the default) answers the Stripe page's `url`; `embedded` answers the `clientSecret` an
+ * Embedded Checkout form mounts with, returns to `successUrl` and takes no `cancelUrl`.
+ */
+const checkoutUiModeSchema = z.enum(["hosted", "embedded"]);
+
 const stripeCheckoutSessionBodySchema = z
 	.object({
 		productKey: z.string().trim().min(1).optional(),
@@ -48,6 +54,7 @@ const stripeCheckoutSessionBodySchema = z
 		successUrl: z.string().trim().check(z.url()).nullable().optional(),
 		cancelUrl: z.string().trim().check(z.url()).nullable().optional(),
 		expiresAt: z.number().int().positive().optional(),
+		uiMode: checkoutUiModeSchema.optional(),
 	})
 	.strict()
 	.refine((value) => (value.productKey === undefined) !== (value.planKey === undefined));
@@ -106,6 +113,7 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 				.nullable()
 				.optional(),
 			allowPromotionCodes: z.boolean().optional(),
+			uiMode: checkoutUiModeSchema.optional(),
 		})
 		.strict(),
 	z
@@ -123,6 +131,7 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 				.nullable()
 				.optional(),
 			allowPromotionCodes: z.boolean().optional(),
+			uiMode: checkoutUiModeSchema.optional(),
 		})
 		.strict(),
 	z
@@ -506,6 +515,7 @@ export function registerCustomerRoutes({
 				billingAccountId: params.billingAccountId,
 				email: body.email,
 				expiresAt: body.expiresAt,
+				uiMode: body.uiMode,
 			};
 			const idempotencyKey = request.headers.get("idempotency-key") ?? undefined;
 			let session: Awaited<ReturnType<StripeBillingServiceLike["createCheckoutSession"]>>;
@@ -629,7 +639,7 @@ export function registerCustomerRoutes({
 				billingAccountId: params.billingAccountId,
 				sessionId: params.sessionId,
 			});
-			return { success: true, data: session };
+			return { success: true, data: { ...session, clientSecret: session.clientSecret ?? null } };
 		},
 		{
 			params: stripeCheckoutSessionRouteParamsSchema,
@@ -656,7 +666,9 @@ export function registerCustomerRoutes({
 				"checkout.expire",
 				"Checkout expiration is unavailable",
 			);
-			return { success: true, data: await expireCheckoutSession(params) };
+			const session = await expireCheckoutSession(params);
+			// Expiry answers a session that is no longer open, so its secret is always null.
+			return { success: true, data: { ...session, clientSecret: session.clientSecret ?? null } };
 		},
 		{
 			parse: "none",

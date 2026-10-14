@@ -376,16 +376,40 @@ Checkout flow:
    one `productKey` or `planKey`, licensed `quantities` for a plan (at most 2,147,483,647 each,
    see [licensed quantities](subscriptions.md#licensed-quantities)), optional `email`, redirect
    overrides, an optional `expiresAt` (Unix seconds, within Stripe's 30-minute to 24-hour window),
-   and an `Idempotency-Key`. The response is `{sessionId,url,duplicate}`.
+   an optional `uiMode` (below) and an `Idempotency-Key`. The response is
+   `{sessionId,url,duplicate}`.
 2. The frontend redirects the user to Stripe.
 3. Stripe posts signed events to the connection's webhook route (below); Quotum verifies
    `stripe-signature`, records paid subscription or credit-pack state, and enqueues projection sync.
 4. Success pages may poll `GET .../providers/stripe/checkout-sessions/:sessionId`, which returns
-   `{sessionId,status,paymentStatus,customerEmail,productKey}`; email and product key appear only
-   once paid, and the endpoint never grants access. `POST .../checkout-sessions/:sessionId/expire`
-   expires open sessions. A session id Stripe does not know answers `404 NOT_FOUND` on both, and a
+   `{sessionId,status,paymentStatus,customerEmail,productKey,clientSecret}`; email and product key
+   appear only once paid, `clientSecret` only while an embedded session is `open` (otherwise
+   `null`), and the endpoint never grants access. `POST .../checkout-sessions/:sessionId/expire`
+   expires open sessions and answers the same shape, with `clientSecret: null`. A session id Stripe does not know answers `404 NOT_FOUND` on both, and a
    session that belongs to another billing account answers
    `403 STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH`.
+
+Embedded Checkout keeps the customer on the merchant's page. `uiMode` is `hosted` by default;
+`uiMode: "embedded"` creates the session with Stripe's `ui_mode: embedded_page` and answers
+`{sessionId,clientSecret,duplicate}` with no `url`. The frontend mounts Stripe.js Embedded Checkout
+with that `clientSecret`. Stripe returns the customer to the success URL (`successUrl` or the
+connection's default, which must contain `{CHECKOUT_SESSION_ID}`) as the session's `return_url`, so
+the success-page polling and webhook steps above are unchanged. An embedded request takes no
+`cancelUrl` (`400 INVALID_REQUEST`). Customer, line items, metadata, discounts, automatic tax, trial
+settings and `expiresAt` are sent exactly as for a hosted session, and the completion webhook is the
+same.
+
+Quotum never stores or logs the client secret. The idempotency receipt records the session id with
+no URL, and a replay of the same `Idempotency-Key` reads the session from Stripe and answers its
+current `clientSecret` with `duplicate: true`, whatever the session's status, as a hosted replay
+answers its stored URL. A session Stripe answers without a client secret is
+`502 STRIPE_CHECKOUT_CLIENT_SECRET_MISSING`. A backend that kept only the session id, for example
+after previewing again, reads the secret from the status route above, which answers it from Stripe
+on each call while the session is still open. `uiMode` joins the idempotency hash only when it is
+`embedded`, so a hosted request keeps its hash, and reusing a key across the two modes is
+`409 IDEMPOTENCY_CONFLICT`. The `checkout_plan` and `checkout_product` commercial intents take the
+same `uiMode` ([subscriptions](subscriptions.md#embedded-checkout)). Paddle has no embedded mode and
+refuses it.
 
 A plan with no published Stripe price, such as a free plan or one sold only through an app store,
 cannot be bought or switched to through Stripe: `checkout-sessions`, the `checkout_plan`,

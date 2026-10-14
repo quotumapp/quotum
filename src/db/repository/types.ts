@@ -277,7 +277,8 @@ export interface CompleteStripeCheckoutRequestInput {
 	idempotencyKey: string;
 	requestHash: string;
 	externalSessionId: string;
-	sessionUrl: string;
+	/** Null for an embedded session, which has no URL; its client secret is never stored. */
+	sessionUrl: string | null;
 }
 
 export interface LinkStripeProviderCustomerInput {

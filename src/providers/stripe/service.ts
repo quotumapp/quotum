@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type Stripe from "stripe";
 import type { AutoTopupChargeResult, AutoTopupJob } from "../../billing/auto-topup";
 import type {
+	CheckoutSessionHandle,
+	CheckoutUiMode,
 	CommercialActionExecutionResult,
 	CommercialActionIntent,
 	CommercialActionPreview,
@@ -9,6 +11,7 @@ import type {
 	CommercialPreviewCancellation,
 	CommercialPreviewCarryOver,
 	CommercialPreviewDraft,
+	StoredCommercialActionExecutionResult,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
 import { priceCommercialLines, recurringCadenceOf } from "../../billing/commercial-pricing";
@@ -146,7 +149,7 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 	createCheckoutSession(
 		params: Stripe.Checkout.SessionCreateParams,
 		idempotencyKey?: string,
-	): Promise<{ id: string; url: string | null }>;
+	): Promise<{ id: string; url: string | null; client_secret?: string | null }>;
 	expireCheckoutSession?(sessionId: string): Promise<unknown>;
 	createPortalSession(params: Stripe.BillingPortal.SessionCreateParams): Promise<{ url: string }>;
 	retrievePaymentIntent(id: string): Promise<Pick<Stripe.PaymentIntent, "id" | "latest_charge">>;
@@ -160,6 +163,9 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 		metadata: Stripe.Metadata | null;
 		customer_email?: string | null;
 		customer_details?: { email?: string | null } | null;
+		ui_mode?: string | null;
+		/** Set only on an embedded session. */
+		client_secret?: string | null;
 	}>;
 	constructWebhookEvent(rawBody: string, signature: string): unknown | Promise<unknown>;
 	retrieveSubscription(subscriptionId: string): Promise<unknown>;
@@ -295,8 +301,8 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 		billingAccountId: string;
 		previewToken: string;
 		idempotencyKey: string;
-		result: CommercialActionExecutionResult;
-	}): Promise<CommercialActionExecutionResult>;
+		result: StoredCommercialActionExecutionResult;
+	}): Promise<StoredCommercialActionExecutionResult>;
 	completeSubscriptionCancellation?(input: {
 		billingAccountId: string;
 		previewToken: string;
@@ -305,7 +311,7 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 		supersedeReason: string;
 		supersedesPendingChange: boolean;
 		result: Omit<SubscriptionCancellationResult, "supersededChangeId">;
-	}): Promise<CommercialActionExecutionResult>;
+	}): Promise<StoredCommercialActionExecutionResult>;
 
 	getStripeProviderCustomer(input: GetStripeProviderCustomerInput): Promise<string | null>;
 
@@ -356,13 +362,14 @@ export interface CreateStripeCheckoutSessionInput {
 	discountCoupon?: string;
 	promotionRedemptionId?: string;
 	allowPromotionCodes?: boolean;
+	/** `hosted` when absent. */
+	uiMode?: CheckoutUiMode;
 }
 
-export interface StripeCheckoutSessionResult {
+export type StripeCheckoutSessionResult = {
 	readonly sessionId: string;
-	readonly url: string;
 	readonly duplicate: boolean;
-}
+} & CheckoutSessionHandle;
 
 export interface StripePortalSessionResult {
 	readonly url: string;
@@ -374,6 +381,8 @@ export interface StripeCheckoutSessionStatus {
 	readonly paymentStatus: "paid" | "unpaid" | "no_payment_required" | "unknown" | null;
 	readonly customerEmail: string | null;
 	readonly productKey: string | null;
+	/** The secret an open embedded session's form mounts with; null for any other session. */
+	readonly clientSecret: string | null;
 }
 
 export interface StripeWebhookResult {
@@ -485,6 +494,7 @@ export class StripeBillingService
 		) {
 			throw new BillingError("Invalid Checkout expiration", "INVALID_REQUEST", 400);
 		}
+		const uiMode = checkoutUiMode(input);
 		const idempotencyKey = parseOptionalIdempotencyKey(input.idempotencyKey);
 		const successUrl = this.returnUrl(
 			input.successUrl,
@@ -511,6 +521,8 @@ export class StripeBillingService
 			...(input.allowPromotionCodes === true ? { allowPromotionCodes: true } : {}),
 			// Last, and only when set, so every request whose trial still applies keeps its hash.
 			...(plan !== null && planTrialSkipped(plan) ? { trialSkipped: true } : {}),
+			// Likewise only when embedded, so every hosted request keeps its hash.
+			...(uiMode === "embedded" ? { uiMode } : {}),
 		});
 		if (idempotencyKey !== null) {
 			const receipt = await this.dependencies.repository.prepareStripeCheckoutRequest({
@@ -522,12 +534,18 @@ export class StripeBillingService
 				requestHash,
 				...this.providerAccount(),
 			});
-			if (
-				receipt.status === "created" &&
-				receipt.externalSessionId !== null &&
-				receipt.sessionUrl !== null
-			) {
-				return checkoutSessionResult(receipt.externalSessionId, receipt.sessionUrl, true);
+			if (receipt.status === "created" && receipt.externalSessionId !== null) {
+				// The receipt keeps a hosted session's URL but never an embedded session's secret.
+				if (uiMode === "embedded") {
+					return {
+						sessionId: receipt.externalSessionId,
+						clientSecret: await this.checkoutClientSecret(receipt.externalSessionId),
+						duplicate: true,
+					};
+				}
+				if (receipt.sessionUrl !== null) {
+					return checkoutSessionResult(receipt.externalSessionId, receipt.sessionUrl, true);
+				}
 			}
 		}
 		let metadata: Record<string, string>;
@@ -553,8 +571,10 @@ export class StripeBillingService
 			...(input.expiresAt === undefined ? {} : { expires_at: input.expiresAt }),
 			mode,
 			line_items: lineItems,
-			success_url: successUrl,
-			cancel_url: cancelUrl,
+			// Embedded Checkout returns to one URL, after payment or a redirect-based method alike.
+			...(uiMode === "embedded"
+				? { ui_mode: "embedded_page", return_url: successUrl }
+				: { success_url: successUrl, cancel_url: cancelUrl }),
 			client_reference_id: billingAccountId,
 			metadata,
 			integration_identifier: this.dependencies.config.integrationIdentifier ?? "qfmxzjpa",
@@ -595,6 +615,19 @@ export class StripeBillingService
 						idempotencyKey,
 					),
 		);
+		if (uiMode === "embedded") {
+			const clientSecret = requireCheckoutClientSecret(session.client_secret);
+			if (idempotencyKey !== null) {
+				await this.dependencies.repository.completeStripeCheckoutRequest({
+					billingAccountId,
+					idempotencyKey,
+					requestHash,
+					externalSessionId: session.id,
+					sessionUrl: null,
+				});
+			}
+			return { sessionId: session.id, clientSecret, duplicate: false };
+		}
 		if (typeof session.url !== "string" || session.url.trim() === "") {
 			throw new BillingError(
 				"Stripe Checkout session did not include a redirect URL",
@@ -616,6 +649,12 @@ export class StripeBillingService
 		return checkoutSessionResult(session.id, session.url, false);
 	}
 
+	/** An embedded session's client secret, read from Stripe because Quotum never stores it. */
+	private async checkoutClientSecret(sessionId: string): Promise<string> {
+		const session = await this.dependencies.client.retrieveCheckoutSession(sessionId);
+		return requireCheckoutClientSecret(session.client_secret);
+	}
+
 	async createRecurringCheckoutSession(input: {
 		billingAccountId: string;
 		planKey: string;
@@ -624,6 +663,7 @@ export class StripeBillingService
 		idempotencyKey?: string | null;
 		successUrl?: string | null;
 		cancelUrl?: string | null;
+		uiMode?: CheckoutUiMode;
 	}): Promise<StripeCheckoutSessionResult> {
 		return await this.createCheckoutSession(input);
 	}
@@ -762,7 +802,7 @@ export class StripeBillingService
 					409,
 				);
 			}
-			return stored.executionResult;
+			return await this.executionAnswer(stored.executionResult);
 		}
 		const current = await this.commercialPreviewDraft(billingAccountId, stored.intent, false);
 		const claimed = await repository.beginCommercialActionExecution({
@@ -773,7 +813,7 @@ export class StripeBillingService
 			idempotencyKey,
 		});
 		if (claimed.status === "executed" && claimed.executionResult !== null) {
-			return claimed.executionResult;
+			return await this.executionAnswer(claimed.executionResult);
 		}
 
 		if (current.intent.kind === "setup_payment") {
@@ -784,12 +824,14 @@ export class StripeBillingService
 				intent: current.intent,
 				expectedPlanVersionId: current.preview.toPlanVersionId,
 			});
-			return await repository.completeCommercialActionExecution({
-				billingAccountId,
-				previewToken,
-				idempotencyKey,
-				result: { kind: "payment_setup", ...creation },
-			});
+			return await this.executionAnswer(
+				await repository.completeCommercialActionExecution({
+					billingAccountId,
+					previewToken,
+					idempotencyKey,
+					result: { kind: "payment_setup", ...creation },
+				}),
+			);
 		}
 
 		if (current.intent.kind === "cancel" || current.intent.kind === "uncancel") {
@@ -804,7 +846,8 @@ export class StripeBillingService
 				cancellation,
 			});
 		}
-		let result: CommercialActionExecutionResult;
+		let result: StoredCommercialActionExecutionResult;
+		let created: StripeCheckoutSessionResult | undefined;
 		if (current.intent.kind === "subscription_change") {
 			const executionKey = commercialExecutionKey(previewToken, idempotencyKey);
 			const promotion = current.promotion ?? null;
@@ -871,6 +914,7 @@ export class StripeBillingService
 					? {}
 					: { discountCoupon, promotionRedemptionId: redemption.id }),
 				...(current.intent.allowPromotionCodes === true ? { allowPromotionCodes: true } : {}),
+				...(current.intent.uiMode === undefined ? {} : { uiMode: current.intent.uiMode }),
 				idempotencyKey: executionKey,
 				expectedTargetId: current.preview.targetId,
 			});
@@ -881,14 +925,43 @@ export class StripeBillingService
 					reservedUntil: checkoutReservationDeadline(current.intent.expiresAt),
 				});
 			}
-			result = { kind: "checkout", ...session, promotionRedemption: redemption };
+			created = session;
+			// The stored result keeps the hosted URL; an embedded session's secret is never stored.
+			result = {
+				kind: "checkout",
+				sessionId: session.sessionId,
+				...(session.url === undefined ? {} : { url: session.url }),
+				duplicate: session.duplicate,
+				promotionRedemption: redemption,
+			};
 		}
-		return await repository.completeCommercialActionExecution({
-			billingAccountId,
-			previewToken,
-			idempotencyKey,
-			result,
-		});
+		return await this.executionAnswer(
+			await repository.completeCommercialActionExecution({
+				billingAccountId,
+				previewToken,
+				idempotencyKey,
+				result,
+			}),
+			created,
+		);
+	}
+
+	/**
+	 * The stored execution as the caller receives it. An embedded Checkout stores no client secret:
+	 * the session this call created answers it, or else Stripe does for the stored session.
+	 */
+	private async executionAnswer(
+		result: StoredCommercialActionExecutionResult,
+		created?: StripeCheckoutSessionResult,
+	): Promise<CommercialActionExecutionResult> {
+		if (result.kind !== "checkout") return result;
+		const { url, ...checkout } = result;
+		if (url !== undefined) return { ...checkout, url };
+		const clientSecret =
+			created?.sessionId === checkout.sessionId && created.clientSecret !== undefined
+				? created.clientSecret
+				: await this.checkoutClientSecret(checkout.sessionId);
+		return { ...checkout, clientSecret };
 	}
 
 	/**
@@ -1607,23 +1680,25 @@ export class StripeBillingService
 		} else if (cancellation.action === "uncancel") {
 			await this.updateCancelAtPeriodEnd(intent.externalSubscriptionId, false, idempotencyKey);
 		}
-		return await complete.call(this.dependencies.repository, {
-			billingAccountId: input.billingAccountId,
-			previewToken: input.previewToken,
-			idempotencyKey: input.idempotencyKey,
-			externalSubscriptionId: intent.externalSubscriptionId,
-			supersedeReason: `Superseded by the cancellation of subscription ${intent.externalSubscriptionId}`,
-			supersedesPendingChange:
-				cancellation.action === "cancel" && cancellation.supersedesChangeId !== null,
-			result: {
-				kind: "subscription_cancellation",
-				action: cancellation.action,
+		return await this.executionAnswer(
+			await complete.call(this.dependencies.repository, {
+				billingAccountId: input.billingAccountId,
+				previewToken: input.previewToken,
+				idempotencyKey: input.idempotencyKey,
 				externalSubscriptionId: intent.externalSubscriptionId,
-				effectiveMode: intent.kind === "cancel" ? intent.effectiveMode : null,
-				effectiveAt: cancellation.accessEndsAt,
-				cancelAtPeriodEnd: cancellation.cancelAtPeriodEnd,
-			},
-		});
+				supersedeReason: `Superseded by the cancellation of subscription ${intent.externalSubscriptionId}`,
+				supersedesPendingChange:
+					cancellation.action === "cancel" && cancellation.supersedesChangeId !== null,
+				result: {
+					kind: "subscription_cancellation",
+					action: cancellation.action,
+					externalSubscriptionId: intent.externalSubscriptionId,
+					effectiveMode: intent.kind === "cancel" ? intent.effectiveMode : null,
+					effectiveAt: cancellation.accessEndsAt,
+					cancelAtPeriodEnd: cancellation.cancelAtPeriodEnd,
+				},
+			}),
+		);
 	}
 
 	private async updateCancelAtPeriodEnd(
@@ -1985,13 +2060,19 @@ export class StripeBillingService
 		}
 
 		const status = checkoutPaymentStatus(session.payment_status);
+		const sessionStatus = checkoutStatus(session.status);
 
 		return {
 			sessionId: session.id,
-			status: checkoutStatus(session.status),
+			status: sessionStatus,
 			paymentStatus: status,
 			customerEmail: paidCheckoutEmail(session, status),
 			productKey: paidCheckoutProductKey(session, status),
+			// Read from Stripe on every call and never stored: only a form that can still pay needs it.
+			clientSecret:
+				sessionStatus === "open" && session.ui_mode === "embedded_page"
+					? optionalNonBlankString(session.client_secret)
+					: null,
 		};
 	}
 
@@ -2959,6 +3040,7 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 	if (promotionCode !== null && intent.allowPromotionCodes === true) {
 		throw promotionError("PROMOTION_CODE_ENTRY_CONFLICT");
 	}
+	const uiMode = checkoutUiMode(intent);
 	const common = {
 		email: optionalNonBlankString(intent.email) ?? null,
 		successUrl: optionalNonBlankString(intent.successUrl) ?? null,
@@ -2966,6 +3048,8 @@ function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialAc
 		...(intent.expiresAt === undefined ? {} : { expiresAt: intent.expiresAt }),
 		...(promotionCode === null ? {} : { promotionCode }),
 		...(intent.allowPromotionCodes === true ? { allowPromotionCodes: true } : {}),
+		// Only when embedded, so every hosted intent keeps its hash.
+		...(uiMode === "embedded" ? { uiMode } : {}),
 	};
 	return intent.kind === "checkout_plan"
 		? {
@@ -3288,6 +3372,7 @@ function checkoutRequestHash(value: {
 	promotionRedemptionId?: string;
 	allowPromotionCodes?: boolean;
 	trialSkipped?: boolean;
+	uiMode?: "embedded";
 }): string {
 	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
@@ -3320,6 +3405,32 @@ function checkoutSessionResult(
 	duplicate: boolean,
 ): StripeCheckoutSessionResult {
 	return { sessionId: id, url, duplicate };
+}
+
+/** Embedded Checkout returns to the success URL only, so it takes no cancel URL. */
+function checkoutUiMode(input: {
+	uiMode?: CheckoutUiMode;
+	cancelUrl?: string | null;
+}): CheckoutUiMode {
+	const uiMode = input.uiMode ?? "hosted";
+	if (uiMode !== "hosted" && uiMode !== "embedded") {
+		throw new InvalidRequestError("uiMode must be hosted or embedded");
+	}
+	if (uiMode === "embedded" && optionalNonBlankString(input.cancelUrl) !== null) {
+		throw new InvalidRequestError("Embedded Checkout takes no cancelUrl");
+	}
+	return uiMode;
+}
+
+function requireCheckoutClientSecret(value: string | null | undefined): string {
+	if (typeof value !== "string" || value.trim() === "") {
+		throw new BillingError(
+			"Stripe Checkout session did not include a client secret",
+			"STRIPE_CHECKOUT_CLIENT_SECRET_MISSING",
+			502,
+		);
+	}
+	return value;
 }
 
 function defaultReturnOrigins(config: StripeBillingServiceConfig): string[] {

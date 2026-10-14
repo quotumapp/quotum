@@ -1664,6 +1664,12 @@
       ]
     },
     {
+      "code": "STRIPE_CHECKOUT_CLIENT_SECRET_MISSING",
+      "sources": [
+        "src/providers/stripe/service.ts"
+      ]
+    },
+    {
       "code": "STRIPE_CHECKOUT_SESSION_ACCOUNT_MISMATCH",
       "sources": [
         "src/providers/stripe/service.ts"
