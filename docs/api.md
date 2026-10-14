@@ -17,7 +17,7 @@ This guide covers what every `/v1` call shares, read-only credentials, the backe
 admin routes. Each billing topic has its own guide:
 
 - [Metering](metering.md): checks, consumes, reservations, pricing, meter limits, spend and usage
-  limits, alerts, usage reads and operation recovery.
+  limits, alerts, usage and invoice reads and operation recovery.
 - [Subscriptions and commercial actions](subscriptions.md): previews and execution, allowances
   across a plan change, Stripe plan-version updates, cancellation and saving a payment method.
 - [Catalog publication](catalog.md): preview and publish, validation, allowance windows, the
@@ -219,8 +219,10 @@ Operator routes:
 - `GET /v1/admin/catalog/products`, `GET /v1/admin/catalog/store-products`,
   `POST /v1/admin/catalog/preview`, `POST /v1/admin/catalog/publish`.
 - `GET /v1/admin/catalog/bindings` and `POST /v1/admin/catalog/bindings/adopt` list and adopt
-  Stripe product and price mappings; see
-  [catalog adoption](catalog.md#adopt-existing-stripe-products-from-a-headless-deployment).
+  product mappings: an existing Stripe product and price, or an App Store or Google Play product
+  you declare; see
+  [catalog adoption](catalog.md#adopt-existing-stripe-products-from-a-headless-deployment) and
+  [store products](catalog.md#register-an-app-store-or-google-play-product).
 - `POST /v1/admin/contracts/preview`, `POST /v1/admin/contracts/publish`,
   `GET /v1/admin/contracts/:billingAccountId`,
   `DELETE /v1/admin/contracts/:billingAccountId/:contractId`.

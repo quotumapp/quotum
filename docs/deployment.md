@@ -346,6 +346,7 @@ An inactive environment has no key and `/v1` refuses it, so `quotum catalog push
 over HTTP. Publish that catalog from the database with
 `quotum catalog push <file> --instance <instance> --actor <you>`, after
 `quotum catalog bindings adopt <file> --instance <instance> --actor <you>` for each Stripe product
+and each [App Store or Google Play product](catalog.md#register-an-app-store-or-google-play-product)
 (see [catalog without a project key](catalog.md#without-a-project-key---instance)). The merchant
 application publishes it too, and a [remote MCP
 connection](mcp.md#connect-to-production-before-it-is-activated) can propose that publication for
@@ -744,8 +745,9 @@ two legal versions); by default it runs headless. It refuses external provider t
 
 ### Integration operator diagnostics
 
-`quotum catalog bindings list` and `quotum catalog bindings adopt <file>` provide supported Stripe
-binding adoption before or after publication; see [catalog adoption](catalog.md#adopt-existing-stripe-products-from-a-headless-deployment).
+`quotum catalog bindings list` and `quotum catalog bindings adopt <file>` provide supported binding
+adoption before or after publication, for a Stripe product and price and for a declared App Store or
+Google Play product; see [catalog adoption](catalog.md#adopt-existing-stripe-products-from-a-headless-deployment).
 `quotum projections check-receiver <url> --project-key <key> --secret-file <path|->` tests receiver
 verification and authentication without committing a connection; see [projections](providers.md#projections).
 Connection validation errors retain structured check details in CLI output.
