@@ -14,6 +14,30 @@ valid for 15 minutes. Execution accepts only the `previewToken` with an `Idempot
 rejects expired previews, catalog or customer drift, or a changed target. A durable
 subscription-change result is HTTP 202; every other result, including a cancellation, is HTTP 200.
 
+## Embedded Checkout
+
+`checkout_plan` and `checkout_product` take an optional `uiMode`, `hosted` by default. With
+`uiMode: "embedded"` the execution creates a Stripe Embedded Checkout session (see the
+[Checkout flow](providers.md#stripe)) and answers its client secret instead of a URL, alongside a
+promotion code's discount and redemption like any checkout:
+
+```json
+{"success":true,"data":{"kind":"checkout","sessionId":"cs_<id>","clientSecret":"cs_<id>_secret_<value>","duplicate":false,"promotionRedemption":{"id":"<uuid>","status":"reserved"}}}
+```
+
+The intent hash includes `uiMode` only when it is `embedded`, so hosted previews keep theirs. An
+embedded intent takes no `cancelUrl`. The stored execution keeps the session id but never the client
+secret: executing the same token with the same `Idempotency-Key` again reads the session from Stripe
+and answers its current secret. A new preview is a new token and creates a new session; to show an
+earlier one again, read `GET .../providers/stripe/checkout-sessions/:sessionId`, which answers
+`{sessionId,status,paymentStatus,customerEmail,productKey,clientSecret}`. Its `clientSecret` is
+Stripe's current secret only while the session is `open` and embedded, and `null` for a hosted,
+complete or expired session; `POST .../expire` answers the same shape with `clientSecret: null`.
+Only a full project credential reaches these `/v1` routes: no read-only credential, MCP tool,
+merchant console operation or change proposal can read a client secret. The merchant console and MCP change proposals store what they answer,
+so they refuse an embedded intent with `400 INVALID_REQUEST`, at preview and at execution alike.
+Paddle answers `400 PADDLE_OPERATION_UNSUPPORTED`.
+
 ## Licensed quantities
 
 Licensed `quantities` (seats and the like) arrive on `checkout_plan`, `subscription_change` and

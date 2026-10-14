@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import { createHmac } from "node:crypto";
 import { createApp } from "../../src/app";
 import { executeCommercial, previewCommercial } from "../../src/app/commercial-actions";
-import type { CommercialActionIntent } from "../../src/billing/commercial";
+import { type CommercialActionIntent, storedExecutionAnswer } from "../../src/billing/commercial";
 import { sha256Hex, stableJson } from "../../src/billing/decimal";
 import type {
 	ProviderSubscriptionReconciliationRow,
@@ -531,7 +531,7 @@ localDescribe("Paddle fixed subscription persistence", () => {
 				duplicate: true,
 			},
 		});
-		expect(replay).toEqual(result);
+		expect(storedExecutionAnswer(replay)).toEqual(result);
 	});
 
 	it("refuses unsupported commercial options and plans without dropping components", async () => {
@@ -551,6 +551,7 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			{ successUrl: "https://example.com" },
 			{ cancelUrl: "https://example.com" },
 			{ expiresAt: 1800000000 },
+			{ uiMode: "embedded" },
 		];
 		for (const change of rejected) {
 			await expect(commercial(h, { ...intent, ...change }).preview()).rejects.toMatchObject({
@@ -991,6 +992,14 @@ localDescribe("Paddle fixed subscription persistence", () => {
 				productKey: "paddle_test",
 				idempotencyKey: "invalid",
 				successUrl: "https://foreign.example",
+			}),
+		).rejects.toMatchObject({ code: "PADDLE_CHECKOUT_INVALID" });
+		await expect(
+			h.service.createCheckoutSession({
+				billingAccountId: h.billingAccountId,
+				productKey: "paddle_test",
+				idempotencyKey: "embedded",
+				uiMode: "embedded",
 			}),
 		).rejects.toMatchObject({ code: "PADDLE_CHECKOUT_INVALID" });
 		expect(h.writes).toBe(0);

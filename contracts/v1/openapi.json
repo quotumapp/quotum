@@ -10123,6 +10123,12 @@
         "properties": {
           "data": {
             "properties": {
+              "clientSecret": {
+                "type": [
+                  "null",
+                  "string"
+                ]
+              },
               "customerEmail": {
                 "type": [
                   "null",
@@ -10156,7 +10162,8 @@
               "status",
               "paymentStatus",
               "customerEmail",
-              "productKey"
+              "productKey",
+              "clientSecret"
             ],
             "type": "object"
           },
@@ -16508,6 +16515,54 @@
               },
               {
                 "properties": {
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "duplicate": {
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "enum": [
+                      "checkout"
+                    ],
+                    "type": "string"
+                  },
+                  "promotionRedemption": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sessionId",
+                  "clientSecret",
+                  "duplicate"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
                   "changeId": {
                     "type": "string"
                   },
@@ -16779,6 +16834,54 @@
                   "kind",
                   "sessionId",
                   "url",
+                  "duplicate"
+                ],
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "duplicate": {
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "enum": [
+                      "checkout"
+                    ],
+                    "type": "string"
+                  },
+                  "promotionRedemption": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "enum": [
+                          "reserved",
+                          "applied"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "status"
+                    ],
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sessionId",
+                  "clientSecret",
                   "duplicate"
                 ],
                 "type": "object"
@@ -18260,22 +18363,44 @@
       "postV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsResponse200": {
         "properties": {
           "data": {
-            "properties": {
-              "duplicate": {
-                "type": "boolean"
+            "anyOf": [
+              {
+                "properties": {
+                  "duplicate": {
+                    "type": "boolean"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "url"
+                ],
+                "type": "object"
               },
-              "sessionId": {
-                "type": "string"
-              },
-              "url": {
-                "type": "string"
+              {
+                "properties": {
+                  "clientSecret": {
+                    "type": "string"
+                  },
+                  "duplicate": {
+                    "type": "boolean"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "clientSecret"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "sessionId",
-              "url"
-            ],
-            "type": "object"
+            ]
           },
           "success": {
             "enum": [
@@ -30136,6 +30261,13 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "uiMode": {
+                            "enum": [
+                              "hosted",
+                              "embedded"
+                            ],
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -30191,6 +30323,13 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "uiMode": {
+                            "enum": [
+                              "hosted",
+                              "embedded"
+                            ],
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -81452,6 +81591,13 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "uiMode": {
+                            "enum": [
+                              "hosted",
+                              "embedded"
+                            ],
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -81507,6 +81653,13 @@
                               "string",
                               "null"
                             ]
+                          },
+                          "uiMode": {
+                            "enum": [
+                              "hosted",
+                              "embedded"
+                            ],
+                            "type": "string"
                           }
                         },
                         "required": [
@@ -86426,6 +86579,13 @@
                       "string",
                       "null"
                     ]
+                  },
+                  "uiMode": {
+                    "enum": [
+                      "hosted",
+                      "embedded"
+                    ],
+                    "type": "string"
                   }
                 },
                 "type": "object"

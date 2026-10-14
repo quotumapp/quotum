@@ -3,6 +3,7 @@ import type {
 	CommercialActionPreview,
 	CommercialPreviewCarryOver,
 	CommercialPreviewDraft,
+	StoredCommercialActionExecutionResult,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
 import type { PaymentSetupCard, PaymentSetupSession } from "../../billing/payment-setup";
@@ -336,8 +337,8 @@ export class ProjectScopedBillingRepository {
 		billingAccountId: string;
 		previewToken: string;
 		idempotencyKey: string;
-		result: CommercialActionExecutionResult;
-	}): Promise<CommercialActionExecutionResult> {
+		result: StoredCommercialActionExecutionResult;
+	}): Promise<StoredCommercialActionExecutionResult> {
 		return await this.repository.completeCommercialActionExecution(this.project, input);
 	}
 
@@ -352,7 +353,7 @@ export class ProjectScopedBillingRepository {
 			Extract<CommercialActionExecutionResult, { kind: "subscription_cancellation" }>,
 			"supersededChangeId"
 		>;
-	}): Promise<CommercialActionExecutionResult> {
+	}): Promise<StoredCommercialActionExecutionResult> {
 		return await this.repository.completeSubscriptionCancellation(this.project, input);
 	}
 

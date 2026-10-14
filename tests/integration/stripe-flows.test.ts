@@ -1882,6 +1882,7 @@ localDescribe("Stripe route flows integration", () => {
 				paymentStatus: "paid",
 				customerEmail: null,
 				productKey: "echo_credits_10",
+				clientSecret: null,
 			},
 		});
 		expect(stripe.calls).toEqual(["retrieveCheckoutSession:cs_test_integration"]);

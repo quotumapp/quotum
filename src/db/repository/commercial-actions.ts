@@ -4,6 +4,7 @@ import type {
 	CommercialActionIntent,
 	CommercialActionPreview,
 	CommercialPreviewDraft,
+	StoredCommercialActionExecutionResult,
 	StoredCommercialActionPreview,
 } from "../../billing/commercial";
 import { InvalidRequestError, PersistenceConflictError } from "../../billing/errors";
@@ -28,7 +29,7 @@ interface PreviewRow {
 	state_fingerprint: string;
 	status: "previewed" | "executing" | "executed";
 	execution_idempotency_key: string | null;
-	execution_result: CommercialActionExecutionResult | null;
+	execution_result: StoredCommercialActionExecutionResult | null;
 	expires_at: Date | string;
 }
 
@@ -151,9 +152,9 @@ export class CommercialActionRepository extends RepositoryModule {
 			billingAccountId: string;
 			previewToken: string;
 			idempotencyKey: string;
-			result: CommercialActionExecutionResult;
+			result: StoredCommercialActionExecutionResult;
 		},
-	): Promise<CommercialActionExecutionResult> {
+	): Promise<StoredCommercialActionExecutionResult> {
 		return await this.transaction(
 			async (tx) => await completeExecutionInTx(tx, project.projectInstanceId, input),
 		);
@@ -175,7 +176,7 @@ export class CommercialActionRepository extends RepositoryModule {
 			supersedesPendingChange: boolean;
 			result: Omit<SubscriptionCancellationResult, "supersededChangeId">;
 		},
-	): Promise<CommercialActionExecutionResult> {
+	): Promise<StoredCommercialActionExecutionResult> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
 			const supersededChangeId = input.supersedesPendingChange
@@ -204,10 +205,10 @@ async function completeExecutionInTx(
 		billingAccountId: string;
 		previewToken: string;
 		idempotencyKey: string;
-		result: CommercialActionExecutionResult;
+		result: StoredCommercialActionExecutionResult;
 	},
-): Promise<CommercialActionExecutionResult> {
-	const row = await executeOne<{ execution_result: CommercialActionExecutionResult }>(
+): Promise<StoredCommercialActionExecutionResult> {
+	const row = await executeOne<{ execution_result: StoredCommercialActionExecutionResult }>(
 		executor,
 		drizzleSql`
 			UPDATE commercial_action_previews

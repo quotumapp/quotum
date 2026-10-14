@@ -1384,6 +1384,7 @@ describe("StripeBillingService", () => {
 			paymentStatus: "unpaid",
 			customerEmail: null,
 			productKey: null,
+			clientSecret: null,
 		});
 		expect(calls).toEqual([{ method: "retrieveCheckoutSession", sessionId: "cs_456" }]);
 	});
@@ -1410,6 +1411,7 @@ describe("StripeBillingService", () => {
 			paymentStatus: "paid",
 			customerEmail: null,
 			productKey: null,
+			clientSecret: null,
 		});
 		expect(calls).toEqual([{ method: "retrieveCheckoutSession", sessionId: "cs_client_ref" }]);
 	});
@@ -1438,6 +1440,7 @@ describe("StripeBillingService", () => {
 			paymentStatus: "paid",
 			customerEmail: "payer@example.com",
 			productKey: "kmp_source",
+			clientSecret: null,
 		});
 	});
 
@@ -1464,6 +1467,7 @@ describe("StripeBillingService", () => {
 			paymentStatus: "unpaid",
 			customerEmail: null,
 			productKey: null,
+			clientSecret: null,
 		});
 	});
 

@@ -1,4 +1,5 @@
 import type { BillingCadenceUnit } from "../shared/cadence";
+import { InvalidRequestError } from "./errors";
 import type { PaymentSetupPlanStatus, PaymentSetupStatus } from "./payment-setup";
 import type { StripeProrationBehavior } from "./pricing";
 import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
@@ -8,6 +9,24 @@ import type { BillingProvider } from "./types";
 export interface CommercialCarryOver {
 	balances?: string[];
 	usages?: string[];
+}
+
+/**
+ * How the customer pays: on the provider's hosted page (`url`), or in a form the caller embeds in
+ * its own page (`clientSecret`). Embedded Checkout returns to `successUrl` and has no cancel URL.
+ */
+export type CheckoutUiMode = "hosted" | "embedded";
+
+/** What the caller needs to show a Checkout session; the client secret is never stored. */
+export type CheckoutSessionHandle =
+	| { url: string; clientSecret?: never }
+	| { url?: never; clientSecret: string };
+
+interface CheckoutExecution {
+	kind: "checkout";
+	sessionId: string;
+	duplicate: boolean;
+	promotionRedemption?: { id: string; status: "reserved" | "applied" } | null;
 }
 
 export type CommercialActionIntent =
@@ -21,6 +40,7 @@ export type CommercialActionIntent =
 			expiresAt?: number;
 			promotionCode?: string | null;
 			allowPromotionCodes?: boolean;
+			uiMode?: CheckoutUiMode;
 	  }
 	| {
 			kind: "checkout_product";
@@ -31,6 +51,7 @@ export type CommercialActionIntent =
 			expiresAt?: number;
 			promotionCode?: string | null;
 			allowPromotionCodes?: boolean;
+			uiMode?: CheckoutUiMode;
 	  }
 	| {
 			kind: "subscription_change";
@@ -217,17 +238,40 @@ export interface StoredCommercialActionPreview {
 	preview: CommercialActionPreview;
 	status: "previewed" | "executing" | "executed";
 	executionIdempotencyKey: string | null;
-	executionResult: CommercialActionExecutionResult | null;
+	executionResult: StoredCommercialActionExecutionResult | null;
+}
+
+/** An execution as stored: an embedded Checkout keeps no handle, because its secret is not stored. */
+export type StoredCommercialActionExecutionResult =
+	| Exclude<CommercialActionExecutionResult, { kind: "checkout" }>
+	| (CheckoutExecution & { url?: string; clientSecret?: never });
+
+/**
+ * Refuses an embedded Checkout where its answer would be stored, such as a merchant console or MCP
+ * change: the client secret must reach only the trusted backend that asked for it.
+ */
+export function refuseEmbeddedCheckout(intent: CommercialActionIntent): void {
+	if (
+		(intent.kind === "checkout_plan" || intent.kind === "checkout_product") &&
+		intent.uiMode === "embedded"
+	) {
+		throw new InvalidRequestError("Embedded Checkout is available only to trusted backends");
+	}
+}
+
+/**
+ * The stored execution as the caller receives it, or null for an embedded Checkout, whose client
+ * secret only the provider can answer again.
+ */
+export function storedExecutionAnswer(
+	result: StoredCommercialActionExecutionResult,
+): CommercialActionExecutionResult | null {
+	if (result.kind !== "checkout") return result;
+	return result.url === undefined ? null : { ...result, url: result.url };
 }
 
 export type CommercialActionExecutionResult =
-	| {
-			kind: "checkout";
-			sessionId: string;
-			url: string;
-			duplicate: boolean;
-			promotionRedemption?: { id: string; status: "reserved" | "applied" } | null;
-	  }
+	| (CheckoutExecution & CheckoutSessionHandle)
 	| {
 			kind: "subscription_change";
 			changeId: string;

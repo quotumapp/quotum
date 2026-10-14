@@ -1,4 +1,10 @@
-import type { CommercialActionIntent, StoredCommercialActionPreview } from "../billing/commercial";
+import {
+	type CommercialActionExecutionResult,
+	type CommercialActionIntent,
+	refuseEmbeddedCheckout,
+	type StoredCommercialActionPreview,
+	storedExecutionAnswer,
+} from "../billing/commercial";
 import { BillingError, NotConfiguredError } from "../billing/errors";
 import type { WebBillingService } from "../billing/web-provider";
 import type { ProjectInstanceContext } from "../projects/context";
@@ -62,13 +68,16 @@ export async function executeCommercial(
 		reader: CommercialPreviewReader;
 		previewToken: string;
 		idempotencyKey: string;
+		/** Refuse an embedded Checkout, for callers that store what they answer. */
+		hostedCheckoutOnly?: boolean;
 	},
-) {
+): Promise<CommercialActionExecutionResult> {
 	const stored = await input.reader.getCommercialActionPreview(
 		input.project,
 		input.billingAccountId,
 		input.previewToken,
 	);
+	if (input.hostedCheckoutOnly === true) refuseEmbeddedCheckout(stored.intent);
 	if (
 		stored.executionIdempotencyKey !== null &&
 		stored.executionIdempotencyKey !== input.idempotencyKey
@@ -78,7 +87,11 @@ export async function executeCommercial(
 			"IDEMPOTENCY_CONFLICT",
 			409,
 		);
-	if (stored.status === "executed" && stored.executionResult) return stored.executionResult;
+	if (stored.status === "executed" && stored.executionResult) {
+		// An embedded Checkout stores no client secret, so its provider answers the replay.
+		const answer = storedExecutionAnswer(stored.executionResult);
+		if (answer !== null) return answer;
+	}
 	const provider = stored.preview.provider;
 	if (provider === "paddle") parsePaddleCommercialContext(stored.providerContext);
 	if (provider !== "stripe" && provider !== "paddle")

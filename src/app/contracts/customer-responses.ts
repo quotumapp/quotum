@@ -220,18 +220,32 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 		}),
 	});
 
+/** A hosted Checkout answers its page's `url`; an embedded one its form's `clientSecret`. */
+const checkoutExecutionResponseSchemas = [
+	z.object({
+		kind: z.literal("checkout"),
+		sessionId: z.string(),
+		url: z.string(),
+		duplicate: z.boolean(),
+		promotionRedemption: z
+			.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
+			.optional(),
+	}),
+	z.object({
+		kind: z.literal("checkout"),
+		sessionId: z.string(),
+		clientSecret: z.string(),
+		duplicate: z.boolean(),
+		promotionRedemption: z
+			.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
+			.optional(),
+	}),
+] as const;
+
 export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.union([
-		z.object({
-			kind: z.literal("checkout"),
-			sessionId: z.string(),
-			url: z.string(),
-			duplicate: z.boolean(),
-			promotionRedemption: z
-				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
-				.optional(),
-		}),
+		...checkoutExecutionResponseSchemas,
 		z.object({
 			kind: z.literal("subscription_change"),
 			changeId: z.string(),
@@ -281,15 +295,7 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200
 export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202Schema = z.object({
 	success: z.literal(true),
 	data: z.union([
-		z.object({
-			kind: z.literal("checkout"),
-			sessionId: z.string(),
-			url: z.string(),
-			duplicate: z.boolean(),
-			promotionRedemption: z
-				.union([z.null(), z.object({ id: z.string(), status: z.enum(["reserved", "applied"]) })])
-				.optional(),
-		}),
+		...checkoutExecutionResponseSchemas,
 		z.object({
 			kind: z.literal("subscription_change"),
 			changeId: z.string(),
@@ -345,7 +351,14 @@ export const getV1BillingAccountsByBillingAccountIdProvidersGoogleAccountLinkRes
 export const postV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessionsResponse200Schema =
 	z.object({
 		success: z.literal(true),
-		data: z.object({ sessionId: z.string(), url: z.string(), duplicate: z.boolean().optional() }),
+		data: z.union([
+			z.object({ sessionId: z.string(), url: z.string(), duplicate: z.boolean().optional() }),
+			z.object({
+				sessionId: z.string(),
+				clientSecret: z.string(),
+				duplicate: z.boolean().optional(),
+			}),
+		]),
 	});
 
 export const postV1BillingAccountsByBillingAccountIdProvidersStripePortalSessionsResponse200Schema =
@@ -363,6 +376,7 @@ export const getV1BillingAccountsByBillingAccountIdProvidersStripeCheckoutSessio
 			paymentStatus: z.union([z.null(), z.string()]),
 			customerEmail: z.union([z.null(), z.string()]),
 			productKey: z.union([z.null(), z.string()]),
+			clientSecret: z.union([z.null(), z.string()]),
 		}),
 	});
 
