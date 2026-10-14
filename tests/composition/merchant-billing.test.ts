@@ -421,6 +421,71 @@ describe("merchant billing port", () => {
 		expect(calls).toEqual([]);
 	});
 
+	it("serves invoice reads with a cursor and never hands out the bearer links", async () => {
+		const invoiceId = "0198f2a4-6b1c-7a3e-8d5f-123456789abc";
+		const listed: unknown[] = [];
+		const item = {
+			id: invoiceId,
+			externalInvoiceId: "in_1",
+			kind: "subscription" as const,
+			subscriptionId: null,
+			externalSubscriptionId: "sub_1",
+			status: "paid",
+			number: null,
+			currency: "usd",
+			amountPaidMinor: 999,
+			totalMinor: null,
+			amountDueMinor: null,
+			periodStart: null,
+			periodEnd: null,
+			paidAt: null,
+			createdAt: "2026-09-01T00:00:00.000Z",
+		};
+		const billing = port({
+			repository: {
+				async listInvoices(_project, input) {
+					listed.push(input);
+					return {
+						items: [item],
+						nextCursor: { createdAt: "2026-09-01T00:00:00.000000Z", id: invoiceId },
+					};
+				},
+				async getInvoice() {
+					return {
+						...item,
+						lines: [],
+						linesTruncated: false,
+						hostedInvoiceUrl: "https://invoice.stripe.com/i/acct/test",
+						invoicePdfUrl: "https://pay.stripe.com/invoice/test/pdf",
+					};
+				},
+			},
+		});
+
+		const list = await billing.dispatch(
+			command("account.invoices", { query: { status: "paid", limit: "5" } }),
+		);
+		expect(list.status).toBe(200);
+		expect(list.body).toMatchObject({ success: true, data: [item] });
+		expect(listed).toEqual([
+			{ billingAccountId: "user_1", status: "paid", limit: 5, cursor: null },
+		]);
+		const nextCursor = (list.body as { pagination: { nextCursor: string } }).pagination.nextCursor;
+		expect(typeof nextCursor).toBe("string");
+
+		const detail = await billing.dispatch(
+			command("account.invoice", { parameters: ["user_1", invoiceId] }),
+		);
+		expect(detail.status).toBe(200);
+		expect(detail.body).toMatchObject({
+			success: true,
+			data: { id: invoiceId, hostedInvoiceUrl: null, invoicePdfUrl: null },
+		});
+
+		const bad = await billing.dispatch(command("account.invoices", { query: { cursor: "nope" } }));
+		expect(bad.status).toBe(400);
+	});
+
 	it("keeps the envelope without details when an error carries none", async () => {
 		expect(await port({ stripe: null }).dispatch(command("account.billing"))).toEqual({
 			status: 503,

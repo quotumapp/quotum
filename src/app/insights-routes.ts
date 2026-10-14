@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { BillingError } from "../billing/errors";
-import { decodeUsageCursor, encodeUsageCursor } from "../billing/insights";
+import {
+	decodeInvoiceCursor,
+	decodeUsageCursor,
+	encodeInvoiceCursor,
+	encodeUsageCursor,
+	invoiceStatusValues,
+	withoutInvoiceLinks,
+} from "../billing/insights";
 import { operationDetail } from "../shared/http";
 import { decimalDigitsQuery, storableDateTimeSchema } from "../shared/input-bounds";
 import * as responses from "./contracts/insights-responses";
@@ -32,6 +39,16 @@ export const usageSeriesQuerySchema = z
 		interval: z.enum(["hour", "day"]).default("day"),
 	})
 	.strict();
+
+export const invoicesQuerySchema = z
+	.object({
+		status: z.enum(invoiceStatusValues).optional(),
+		limit: decimalDigitsQuery(z.coerce.number().int().min(1).max(100).default(25)),
+		cursor: z.string().trim().min(1).optional(),
+	})
+	.strict();
+export const invoiceIdSchema = z.uuid();
+const invoiceParamsSchema = accountParamsSchema.extend({ invoiceId: invoiceIdSchema });
 
 export function registerInsightsRoutes(input: {
 	app: BillingElysia;
@@ -172,6 +189,67 @@ export function registerInsightsRoutes(input: {
 			}),
 		},
 	);
+
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/invoices",
+		async ({ params, query, project }) => {
+			const page = await service.listInvoices(privateProject(project), {
+				billingAccountId: params.billingAccountId,
+				status: query.status,
+				limit: query.limit,
+				cursor: parseInvoiceCursor(query.cursor),
+			});
+			return {
+				success: true,
+				data: page.items,
+				pagination: {
+					nextCursor: page.nextCursor === null ? null : encodeInvoiceCursor(page.nextCursor),
+				},
+			};
+		},
+		{
+			params: accountParamsSchema,
+			query: invoicesQuerySchema,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdInvoices",
+				credentialAccess: "read_only",
+				tags: ["insights"],
+				path: "/v1/billing-accounts/:billingAccountId/invoices",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdInvoicesResponse200Schema,
+				},
+			}),
+		},
+	);
+
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/invoices/:invoiceId",
+		async ({ params, project, credentialAccess }) => {
+			const invoice = await service.getInvoice(
+				privateProject(project),
+				params.billingAccountId,
+				params.invoiceId,
+			);
+			// The links let anyone holding them view, and for an open invoice pay it, so a read-only
+			// key never gets them, as it never gets a raw provider payload.
+			return {
+				success: true,
+				data: credentialAccess === "full" ? invoice : withoutInvoiceLinks(invoice),
+			};
+		},
+		{
+			params: invoiceParamsSchema,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdInvoicesByInvoiceId",
+				credentialAccess: "read_only",
+				tags: ["insights"],
+				path: "/v1/billing-accounts/:billingAccountId/invoices/:invoiceId",
+				responses: {
+					200: responses.getV1BillingAccountsByBillingAccountIdInvoicesByInvoiceIdResponse200Schema,
+				},
+			}),
+		},
+	);
 }
 
 export function dateRange(
@@ -199,6 +277,13 @@ export function parseUsageEventsRangeAndCursor(query: {
 		throw invalidInsightsRequest("Invalid usage cursor");
 	}
 	return { from: range.from, to: range.to, cursor };
+}
+
+export function parseInvoiceCursor(value: string | undefined) {
+	if (value === undefined) return null;
+	const cursor = decodeInvoiceCursor(value);
+	if (cursor === null) throw invalidInsightsRequest("Invalid invoice cursor");
+	return cursor;
 }
 
 function invalidInsightsRequest(message: string): BillingError {

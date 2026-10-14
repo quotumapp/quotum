@@ -52,6 +52,7 @@ const COLLECTIONS = new Set([
 	"entities",
 	"events",
 	"invitations",
+	"invoices",
 	"license-assignments",
 	"licenses",
 	"members",

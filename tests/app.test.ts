@@ -1996,6 +1996,12 @@ describe("billing app", () => {
 				getUsageSeries() {
 					return Promise.resolve([]);
 				},
+				listInvoices() {
+					throw new Error("Unexpected invoice list read");
+				},
+				getInvoice() {
+					throw new Error("Unexpected invoice read");
+				},
 				getCustomerBillingSummary(_project, billingAccountId) {
 					calls.push(`summary:${billingAccountId}`);
 					return Promise.resolve({
@@ -2069,6 +2075,12 @@ describe("billing app", () => {
 				getUsageSeries() {
 					throw new Error("Unexpected usage series read");
 				},
+				listInvoices() {
+					throw new Error("Unexpected invoice list read");
+				},
+				getInvoice() {
+					throw new Error("Unexpected invoice read");
+				},
 				getCustomerBillingSummary(_project, billingAccountId) {
 					return Promise.resolve({
 						schemaVersion: 1 as const,
@@ -2121,6 +2133,12 @@ describe("billing app", () => {
 				getUsageSeries() {
 					calls += 1;
 					return Promise.resolve([]);
+				},
+				listInvoices() {
+					throw new Error("Unexpected invoice list read");
+				},
+				getInvoice() {
+					throw new Error("Unexpected invoice read");
 				},
 				getCustomerBillingSummary(_project, billingAccountId) {
 					return Promise.resolve({

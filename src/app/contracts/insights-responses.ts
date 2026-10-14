@@ -105,3 +105,56 @@ export const getV1BillingAccountsByBillingAccountIdUsageSeriesResponse200Schema 
 	),
 	meta: z.object({ from: z.string(), to: z.string(), interval: z.enum(["hour", "day"]) }),
 });
+
+const nullableString = z.union([z.null(), z.string()]);
+const nullableNumber = z.union([z.null(), z.number()]);
+
+const invoiceItemSchema = z.object({
+	id: z.string(),
+	externalInvoiceId: z.string(),
+	/** `auto_topup` rows are recorded at settlement and carry no provider payload fields. */
+	kind: z.enum(["subscription", "auto_topup"]),
+	subscriptionId: nullableString,
+	externalSubscriptionId: nullableString,
+	status: z.string(),
+	number: nullableString,
+	currency: z.string(),
+	amountPaidMinor: z.number(),
+	totalMinor: nullableNumber,
+	amountDueMinor: nullableNumber,
+	periodStart: nullableString,
+	periodEnd: nullableString,
+	paidAt: nullableString,
+	/** The invoice's creation time at the provider; the list is ordered by it. */
+	createdAt: z.string(),
+});
+
+const invoiceLineSchema = z.object({
+	id: nullableString,
+	description: nullableString,
+	amountMinor: nullableNumber,
+	quantity: nullableNumber,
+	periodStart: nullableString,
+	periodEnd: nullableString,
+	externalPriceId: nullableString,
+	externalProductId: nullableString,
+	proration: z.union([z.null(), z.boolean()]),
+});
+
+export const getV1BillingAccountsByBillingAccountIdInvoicesResponse200Schema = z.object({
+	success: z.literal(true),
+	data: z.array(invoiceItemSchema),
+	pagination: z.object({ nextCursor: nullableString }),
+});
+
+export const getV1BillingAccountsByBillingAccountIdInvoicesByInvoiceIdResponse200Schema = z.object({
+	success: z.literal(true),
+	data: invoiceItemSchema.extend({
+		/** The lines the stored provider event carried; the provider truncates long invoices. */
+		lines: z.array(invoiceLineSchema),
+		linesTruncated: z.boolean(),
+		/** Bearer links, null unless the request used a full project credential. */
+		hostedInvoiceUrl: nullableString,
+		invoicePdfUrl: nullableString,
+	}),
+});

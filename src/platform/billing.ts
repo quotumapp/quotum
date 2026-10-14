@@ -31,7 +31,7 @@ const readPatterns = [
 	"admin/usage-events",
 	"admin/catalog(?:/(?:products|store-products))?",
 	"admin/providers/capabilities",
-	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|available-actions|controls|usage/(?:events|series)|promotion-redemptions)`,
+	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|available-actions|controls|usage/(?:events|series)|promotion-redemptions|invoices(?:/${id})?)`,
 	`admin/promotions(?:/${account}(?:/(?:codes|redemptions))?)?`,
 ];
 export function merchantBillingRoute(

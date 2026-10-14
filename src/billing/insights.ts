@@ -130,6 +130,80 @@ export interface CustomerBillingSummary {
 	}>;
 }
 
+export const invoiceStatusValues = ["draft", "open", "paid", "uncollectible", "void"] as const;
+export type InvoiceStatus = (typeof invoiceStatusValues)[number];
+
+/** `createdAt` is the exact `provider_created_at` of the last invoice on the page, to the microsecond. */
+export interface InvoiceCursor {
+	createdAt: string;
+	id: string;
+}
+
+export interface InvoiceListInput {
+	billingAccountId: string;
+	status?: InvoiceStatus;
+	limit: number;
+	cursor: InvoiceCursor | null;
+}
+
+/**
+ * One mirrored provider invoice. The columns are always present; the payload-derived fields are
+ * null for a row whose payload was scrubbed by customer erasure or that lacks the field.
+ */
+export interface InvoiceItem {
+	id: string;
+	externalInvoiceId: string;
+	/**
+	 * `subscription` rows are recorded from the provider's invoice events and carry its payload;
+	 * `auto_topup` rows are recorded when an automatic top-up settles and carry only the columns.
+	 */
+	kind: "subscription" | "auto_topup";
+	subscriptionId: string | null;
+	externalSubscriptionId: string | null;
+	status: string;
+	number: string | null;
+	currency: string;
+	amountPaidMinor: number;
+	totalMinor: number | null;
+	amountDueMinor: number | null;
+	periodStart: string | null;
+	periodEnd: string | null;
+	paidAt: string | null;
+	/** The invoice's creation time at the provider; the list is ordered by it. */
+	createdAt: string;
+}
+
+export interface InvoiceLine {
+	id: string | null;
+	description: string | null;
+	amountMinor: number | null;
+	quantity: number | null;
+	periodStart: string | null;
+	periodEnd: string | null;
+	externalPriceId: string | null;
+	externalProductId: string | null;
+	proration: boolean | null;
+}
+
+export interface InvoiceDetail extends InvoiceItem {
+	/** The lines the stored provider event carried; the provider truncates long invoices. */
+	lines: InvoiceLine[];
+	linesTruncated: boolean;
+	/** Bearer links: present only for a full project credential. */
+	hostedInvoiceUrl: string | null;
+	invoicePdfUrl: string | null;
+}
+
+export interface InvoicePage {
+	items: InvoiceItem[];
+	nextCursor: InvoiceCursor | null;
+}
+
+/** The detail a caller without a full project credential may see: no bearer links. */
+export function withoutInvoiceLinks(invoice: InvoiceDetail): InvoiceDetail {
+	return { ...invoice, hostedInvoiceUrl: null, invoicePdfUrl: null };
+}
+
 /** The persisted facts the available-actions read evaluates; no provider is asked. */
 export interface AvailableActionFacts {
 	customerExists: boolean;
@@ -171,6 +245,34 @@ export function decodeUsageCursor(value: string): UsageEventCursor | null {
 			uuidPattern.test(parsed.id)
 		) {
 			return { recordedAt: parsed.recordedAt, id: parsed.id };
+		}
+	} catch {
+		return null;
+	}
+	return null;
+}
+
+export function encodeInvoiceCursor(cursor: InvoiceCursor): string {
+	return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+export function decodeInvoiceCursor(value: string): InvoiceCursor | null {
+	if (!base64UrlPattern.test(value)) return null;
+	try {
+		const decoded = Buffer.from(value, "base64url");
+		if (decoded.toString("base64url") !== value) return null;
+		const parsed = JSON.parse(decoded.toString("utf8")) as unknown;
+		if (
+			typeof parsed === "object" &&
+			parsed !== null &&
+			"createdAt" in parsed &&
+			typeof parsed.createdAt === "string" &&
+			canonicalCursorInstant(parsed.createdAt) &&
+			"id" in parsed &&
+			typeof parsed.id === "string" &&
+			uuidPattern.test(parsed.id)
+		) {
+			return { createdAt: parsed.createdAt, id: parsed.id };
 		}
 	} catch {
 		return null;

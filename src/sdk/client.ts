@@ -18,7 +18,13 @@ import type {
 	CommercialActionPreview,
 } from "../billing/commercial";
 import type { EffectiveControl } from "../billing/controls";
-import type { CustomerBillingSummary, UsageEventItem, UsageSeriesPoint } from "../billing/insights";
+import type {
+	CustomerBillingSummary,
+	InvoiceDetail,
+	InvoiceItem,
+	UsageEventItem,
+	UsageSeriesPoint,
+} from "../billing/insights";
 import type {
 	ConfirmReservationInput,
 	FinalizeReservationResult,
@@ -136,6 +142,7 @@ export class BillingClient {
 	readonly accounts;
 	readonly commercial;
 	readonly usage;
+	readonly invoices;
 	readonly purchases;
 	readonly promotions;
 	readonly trials;
@@ -323,6 +330,28 @@ export class BillingClient {
 			summary: (billingAccountId: string) =>
 				this.request<CustomerBillingSummary>(
 					`/v1/billing-accounts/${segment(billingAccountId)}/billing-summary`,
+				),
+		};
+		this.invoices = {
+			/** Mirrored subscription invoices, newest first; see docs/metering.md for what is covered. */
+			list: (
+				billingAccountId: string,
+				query: {
+					status?: "draft" | "open" | "paid" | "uncollectible" | "void";
+					limit?: number;
+					cursor?: string;
+				} = {},
+			) =>
+				this.requestPage<InvoiceItem>(
+					pathWithQuery(`/v1/billing-accounts/${segment(billingAccountId)}/invoices`, query),
+				),
+			/**
+			 * One invoice with its lines. The hosted and PDF links are returned only for a full project
+			 * credential; a read-only key gets null.
+			 */
+			get: (billingAccountId: string, invoiceId: string) =>
+				this.request<InvoiceDetail>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/invoices/${segment(invoiceId)}`,
 				),
 		};
 		this.purchases = {
