@@ -16,6 +16,7 @@ import { connectMcp, toolJson, toolText } from "../helpers/mcp";
 const baseUrl = "http://billing.internal";
 const projectInstanceId = "11111111-1111-4111-8111-111111111111";
 const principalId = "22222222-2222-4222-8222-222222222222";
+const invoiceId = "2f6a1c52-6b52-4f0e-8d5a-0c1c9a7d1e11";
 const reads: Array<["GET" | "POST", string, MerchantBillingOperation, string[]]> = [
 	["GET", "/v1/catalog", "stripe.catalog", []],
 	["GET", "/v1/admin/catalog", "catalog", []],
@@ -39,6 +40,13 @@ const reads: Array<["GET" | "POST", string, MerchantBillingOperation, string[]]>
 		["account/one", "token/credits"],
 	],
 	["GET", "/v1/billing-accounts/account%2Fone/billing-summary", "account.summary", ["account/one"]],
+	["GET", "/v1/billing-accounts/account%2Fone/invoices", "account.invoices", ["account/one"]],
+	[
+		"GET",
+		`/v1/billing-accounts/account%2Fone/invoices/${invoiceId}`,
+		"account.invoice",
+		["account/one", invoiceId],
+	],
 	[
 		"GET",
 		"/v1/billing-accounts/account%2Fone/available-actions",

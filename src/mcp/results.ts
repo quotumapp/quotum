@@ -22,6 +22,7 @@ const hints: Readonly<Record<string, string>> = {
 	OPERATION_RESULT_EXPIRED:
 		"The operation ran, but its outcome is past the retention window and can no longer be read.",
 	BILLING_ACCOUNT_NOT_FOUND: "Use find_customer to look the account up by another identifier.",
+	INVOICE_NOT_FOUND: "Use list_invoices to find an invoice id that belongs to this account.",
 };
 
 /**

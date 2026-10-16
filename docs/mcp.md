@@ -288,6 +288,7 @@ the server never follows a cursor on its own.
 | `check_usage` | Boolean entitlement or metered `featureId`/`value` check for an existing account, with compact denial/control context. Records nothing |
 | `get_usage_operation` | What an idempotency key resolved to; pass `entityId` for entity-scoped usage; tries every operation kind when none is given |
 | `list_usage_events` | Accepted consumes, confirmations and corrections; `metadata` only with `includeMetadata` |
+| `list_invoices`, `get_invoice` | The [invoices](metering.md#invoice-reads) Quotum mirrored for an account: a page newest first, then one with its lines; the hosted and PDF bearer links are never returned, whatever the key |
 | `list_projection_jobs` | Projection delivery state with `lastError` and `nextAttemptAt`; never the snapshot payload |
 | `list_store_events`, `get_store_event` | Provider events and their processing state; never the raw payload |
 | `get_catalog` | The published catalog with its revision: features, plans, meters, top-ups and rate cards; `sections` narrows a large one |
