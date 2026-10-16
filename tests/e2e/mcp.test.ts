@@ -38,6 +38,40 @@ function toolJson(result: unknown): unknown {
 	return JSON.parse(content.map((item) => item.text ?? "").join(""));
 }
 
+const invoiceLinks = {
+	hosted: "https://invoice.stripe.com/i/acct_mcp/in_mcp_1",
+	pdf: "https://pay.stripe.com/invoice/in_mcp_1/pdf",
+};
+
+/** A mirrored Stripe invoice as an `invoice.paid` event leaves it, with its bearer links. */
+async function seedInvoice(projectInstanceId: string): Promise<void> {
+	const payload = {
+		id: "in_mcp_1",
+		object: "invoice",
+		number: "ACME-0001",
+		status: "paid",
+		currency: "usd",
+		total: 999,
+		amount_paid: 999,
+		amount_due: 0,
+		hosted_invoice_url: invoiceLinks.hosted,
+		invoice_pdf: invoiceLinks.pdf,
+		lines: {
+			has_more: false,
+			data: [{ id: "il_mcp_1", description: "Premium monthly", amount: 999, quantity: 1 }],
+		},
+	};
+	await connection.sql`
+		INSERT INTO billing_invoices (
+			project_id, customer_id, external_invoice_id, external_subscription_id, status, amount_paid,
+			currency, paid_at, provider_created_at, raw_payload
+		)
+		SELECT ${projectInstanceId}, id, 'in_mcp_1', 'sub_mcp_1', 'paid', 999, 'usd', now(), now(),
+			${JSON.stringify(payload)}::text::jsonb
+		FROM customers
+		WHERE project_id = ${projectInstanceId} AND billing_account_id = 'mcp-account'`;
+}
+
 e2eDescribe("E2E MCP server", () => {
 	beforeEach(async () => {
 		const postgresUri = process.env.POSTGRES_URI ?? "";
@@ -66,6 +100,7 @@ e2eDescribe("E2E MCP server", () => {
 				sourceKind: "credit_grant",
 				sourceKey: "e2e-mcp",
 			});
+			await seedInvoice(instance.projectInstanceId);
 		}
 		service = await startBillingService(e2eServiceEnv({ postgresUri }));
 	});
@@ -139,6 +174,38 @@ e2eDescribe("E2E MCP server", () => {
 			arguments: { billingAccountId: "mcp-account", operationId: "never-sent" },
 		});
 		expect(toolJson(missing)).toMatchObject({ operations: [] });
+
+		// A full sandbox key gets the bearer links from the API; the tool must not pass them on.
+		const direct = await fetch(`${service.baseUrl}/v1/billing-accounts/mcp-account/invoices`, {
+			headers: { authorization: `Bearer ${e2eSandboxApiKey}` },
+		});
+		const [item] = (await direct.json()).data as Array<{ id: string }>;
+		const withLinks = await fetch(
+			`${service.baseUrl}/v1/billing-accounts/mcp-account/invoices/${item?.id}`,
+			{ headers: { authorization: `Bearer ${e2eSandboxApiKey}` } },
+		);
+		expect((await withLinks.json()).data.hostedInvoiceUrl).toBe(invoiceLinks.hosted);
+		const invoices = await client.callTool({
+			name: "list_invoices",
+			arguments: { billingAccountId: "mcp-account" },
+		});
+		expect(toolJson(invoices)).toMatchObject({
+			data: [{ id: item?.id, kind: "subscription", status: "paid", amountPaidMinor: 999 }],
+			nextCursor: null,
+		});
+		const invoice = await client.callTool({
+			name: "get_invoice",
+			arguments: { billingAccountId: "mcp-account", invoiceId: item?.id ?? "" },
+		});
+		expect(toolJson(invoice)).toMatchObject({
+			id: item?.id,
+			lines: [{ description: "Premium monthly", amountMinor: 999 }],
+		});
+		const text = JSON.stringify(invoice);
+		expect([text.includes(invoiceLinks.hosted), text.includes(invoiceLinks.pdf)]).toEqual([
+			false,
+			false,
+		]);
 	}, 60_000);
 
 	it("reads production with a read-only key that the API refuses to let write", async () => {
@@ -183,6 +250,10 @@ e2eDescribe("E2E MCP server", () => {
 			get_store_event: { eventId: "00000000-0000-4000-8000-000000000001" },
 			get_usage_operation: { billingAccountId: "mcp-account", operationId: "never-sent" },
 			get_api_operation: { operationId: "getV1Catalog" },
+			get_invoice: {
+				billingAccountId: "mcp-account",
+				invoiceId: "00000000-0000-4000-8000-000000000002",
+			},
 		};
 		for (const tool of tools) {
 			const result = await client.callTool({

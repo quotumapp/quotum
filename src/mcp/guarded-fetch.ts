@@ -31,6 +31,8 @@ export const allowedRequests: ReadonlyArray<readonly ["GET" | "POST", RegExp]> =
 	["GET", /^\/v1\/billing-accounts\/[^/]+\/controls$/u],
 	["GET", /^\/v1\/billing-accounts\/[^/]+\/balances\/[^/]+$/u],
 	["GET", /^\/v1\/billing-accounts\/[^/]+\/billing-summary$/u],
+	["GET", /^\/v1\/billing-accounts\/[^/]+\/invoices$/u],
+	["GET", /^\/v1\/billing-accounts\/[^/]+\/invoices\/[^/]+$/u],
 	["GET", /^\/v1\/billing-accounts\/[^/]+\/available-actions$/u],
 	["GET", /^\/v1\/billing-accounts\/[^/]+\/usage\/events$/u],
 	["GET", /^\/v1\/billing-accounts\/[^/]+\/usage\/operations\/[^/]+\/[^/]+$/u],

@@ -112,6 +112,75 @@ describe("MCP tools", () => {
 		expect(toolJson(balance)).toEqual({ featureKey: "tokens", available: "7" });
 	});
 
+	it("lists invoices newest first and reads one, never returning a bearer link", async () => {
+		const invoiceId = "2f6a1c52-6b52-4f0e-8d5a-0c1c9a7d1e11";
+		const item = { id: invoiceId, kind: "subscription", status: "paid", amountPaidMinor: 1900 };
+		const { client, calls } = await connect((request) => {
+			const path = new URL(request.url).pathname;
+			return path.endsWith("/invoices")
+				? okPage([item], "next-page")
+				: ok({
+						...item,
+						lines: [{ description: "Pro plan", amountMinor: 1900 }],
+						linesTruncated: false,
+						// A sandbox full key is accepted by the server, and the API answers it with the links.
+						hostedInvoiceUrl: "https://invoice.stripe.com/i/acct_1/live_secret",
+						invoicePdfUrl: "https://pay.stripe.com/invoice/acct_1/live_secret/pdf",
+					});
+		});
+
+		const listed = await client.callTool({
+			name: "list_invoices",
+			arguments: { billingAccountId: "account/one", status: "paid", limit: 5 },
+		});
+		expect(toolJson(listed)).toEqual({ data: [item], nextCursor: "next-page" });
+		expect(calls[0]?.url).toBe(
+			"https://billing.example.com/v1/billing-accounts/account%2Fone/invoices?status=paid&limit=5",
+		);
+
+		const detail = await client.callTool({
+			name: "get_invoice",
+			arguments: { billingAccountId: "account/one", invoiceId },
+		});
+		expect(toolJson(detail)).toEqual({
+			...item,
+			lines: [{ description: "Pro plan", amountMinor: 1900 }],
+			linesTruncated: false,
+		});
+		expect(toolText(detail).includes("live_secret")).toBe(false);
+		expect(calls[1]?.url).toBe(
+			`https://billing.example.com/v1/billing-accounts/account%2Fone/invoices/${invoiceId}`,
+		);
+	});
+
+	it("rejects an invoice id that is not a UUID before any request, and points a miss to the list", async () => {
+		const { client, calls } = await connect(() =>
+			failure(404, "INVOICE_NOT_FOUND", "Invoice was not found"),
+		);
+		const malformed = await client.callTool({
+			name: "get_invoice",
+			arguments: { billingAccountId: "account-1", invoiceId: "in_123" },
+		});
+		expect(malformed.isError).toBe(true);
+		expect(calls).toHaveLength(0);
+
+		const missing = await client.callTool({
+			name: "get_invoice",
+			arguments: {
+				billingAccountId: "account-1",
+				invoiceId: "2f6a1c52-6b52-4f0e-8d5a-0c1c9a7d1e11",
+			},
+		});
+		expect(missing.isError).toBe(true);
+		expect(toolJson(missing)).toMatchObject({
+			error: {
+				code: "INVOICE_NOT_FOUND",
+				status: 404,
+				hint: "Use list_invoices to find an invoice id that belongs to this account.",
+			},
+		});
+	});
+
 	it("keeps customer contact details out unless asked", async () => {
 		const { client } = await connect((request) =>
 			new URL(request.url).pathname.endsWith("/search")

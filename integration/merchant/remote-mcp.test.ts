@@ -381,7 +381,7 @@ describe("remote MCP browser authorization", () => {
 		const response = await rpc(tokens.access_token);
 		expect(response.status, await response.clone().text()).toBe(200);
 		const result = await response.json();
-		expect(result.result.tools).toHaveLength(17);
+		expect(result.result.tools).toHaveLength(19);
 		const read = await rpc(tokens.access_token, "tools/call", {
 			name: "get_project_stats",
 			arguments: {},
@@ -733,6 +733,51 @@ describe("remote MCP browser authorization", () => {
 			(await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token })).status,
 		).toBe(400);
 		expect(await revocationReasons()).toEqual(["password_reset"]);
+	});
+
+	it("reads a mirrored invoice through the merchant port without its bearer links", async () => {
+		const browser = await owner();
+		await createBillingAccount();
+		const payload = {
+			id: "in_remote_1",
+			object: "invoice",
+			status: "paid",
+			currency: "usd",
+			total: 999,
+			amount_paid: 999,
+			amount_due: 0,
+			hosted_invoice_url: "https://invoice.stripe.com/i/acct_remote/in_remote_1",
+			invoice_pdf: "https://pay.stripe.com/invoice/in_remote_1/pdf",
+			lines: {
+				has_more: false,
+				data: [{ id: "il_1", description: "Premium monthly", amount: 999 }],
+			},
+		};
+		await f.sql`INSERT INTO billing_invoices(project_id,customer_id,external_invoice_id,external_subscription_id,status,amount_paid,currency,paid_at,provider_created_at,raw_payload)
+			SELECT project_id,id,'in_remote_1','sub_remote_1','paid',999,'usd',now(),now(),${JSON.stringify(payload)}::text::jsonb FROM customers WHERE billing_account_id='customer-a'`;
+		const tokens = await redeem(browser);
+		const call = async (name: string, args: Record<string, unknown>) => {
+			const reply = await (
+				await rpc(tokens.access_token, "tools/call", { name, arguments: args })
+			).json();
+			return reply.result as { isError?: boolean; content: { text: string }[] };
+		};
+
+		const listed = await call("list_invoices", { billingAccountId: "customer-a" });
+		expect(listed.isError).not.toBe(true);
+		const page = JSON.parse(listed.content[0]?.text ?? "{}") as { data: { id: string }[] };
+		expect(page.data).toHaveLength(1);
+		const detail = await call("get_invoice", {
+			billingAccountId: "customer-a",
+			invoiceId: page.data[0]?.id ?? "",
+		});
+		expect(detail.isError).not.toBe(true);
+		const text = detail.content[0]?.text ?? "";
+		expect(JSON.parse(text)).toMatchObject({
+			kind: "subscription",
+			lines: [{ description: "Premium monthly", amountMinor: 999 }],
+		});
+		expect(text.includes("in_remote_1/pdf") || text.includes("acct_remote")).toBe(false);
 	});
 });
 

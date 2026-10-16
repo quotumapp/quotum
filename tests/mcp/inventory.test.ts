@@ -19,12 +19,14 @@ const toolCalls: Readonly<Record<string, Record<string, unknown>>> = {
 	get_balance: { billingAccountId: "account-1", featureKey: "tokens" },
 	get_catalog: {},
 	get_controls: { billingAccountId: "account-1" },
+	get_invoice: { billingAccountId: "account-1", invoiceId: "2f6a1c52-6b52-4f0e-8d5a-0c1c9a7d1e11" },
 	get_customer_overview: { billingAccountId: "account-1" },
 	get_project_stats: {},
 	get_provider_capabilities: {},
 	get_store_event: { eventId: "event-1" },
 	get_stripe_catalog: {},
 	get_usage_operation: { billingAccountId: "account-1", operationId: "key-1" },
+	list_invoices: { billingAccountId: "account-1" },
 	list_projection_jobs: {},
 	list_store_events: {},
 	list_usage_events: { billingAccountId: "account-1" },
@@ -48,7 +50,7 @@ describe("MCP tool inventory", () => {
 	it("sends only allowlisted requests, and every allowlisted request belongs to a tool", async () => {
 		connection = await connectMcp((request) =>
 			Response.json(
-				/\/(search|store-events|projection-jobs|usage\/events)$/u.test(
+				/\/(search|store-events|projection-jobs|usage\/events|invoices)$/u.test(
 					new URL(request.url).pathname,
 				)
 					? { success: true, data: [], pagination: { nextCursor: null } }
