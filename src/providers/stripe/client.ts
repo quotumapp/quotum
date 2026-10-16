@@ -103,6 +103,13 @@ interface StripeClientLike {
 			options?: Stripe.RequestOptions,
 		): Promise<Stripe.Invoice>;
 	};
+	refunds?: {
+		create(
+			params: Stripe.RefundCreateParams,
+			options?: Stripe.RequestOptions,
+		): Promise<Stripe.Refund>;
+		list(params: Stripe.RefundListParams): Promise<Stripe.ApiList<Stripe.Refund>>;
+	};
 	coupons?: {
 		create(
 			params: Stripe.CouponCreateParams,
@@ -256,6 +263,54 @@ export class StripeBillingClient {
 		});
 		const invoice = payments.data[0]?.invoice;
 		return typeof invoice === "string" ? invoice : (invoice?.id ?? null);
+	}
+
+	/**
+	 * The PaymentIntent that paid an invoice, or null when none did. This is the inverse of
+	 * {@link findInvoiceIdForPaymentIntent}: a refund draws on the PaymentIntent, and the pinned API no
+	 * longer names it on the invoice.
+	 */
+	async findPaymentIntentForInvoice(invoiceId: string): Promise<string | null> {
+		if (!this.stripe.invoicePayments) throw new Error("Invoice payments are unavailable");
+		const payments = await this.stripe.invoicePayments.list({
+			invoice: invoiceId,
+			status: "paid",
+			limit: 1,
+		});
+		const payment = payments.data[0]?.payment;
+		if (payment?.type !== "payment_intent") return null;
+		const intent = payment.payment_intent;
+		return typeof intent === "string" ? intent : (intent?.id ?? null);
+	}
+
+	/**
+	 * Returns money for a PaymentIntent. The idempotency key makes a repeated call within Stripe's
+	 * retention window answer with the refund the first call created.
+	 */
+	createRefund(
+		params: { paymentIntentId: string; amountMinor: number; metadata: Record<string, string> },
+		idempotencyKey: string,
+	) {
+		if (this.stripe.refunds === undefined) throw new Error("Stripe refunds are unavailable");
+		return this.stripe.refunds.create(
+			{
+				payment_intent: params.paymentIntentId,
+				amount: params.amountMinor,
+				reason: "requested_by_customer",
+				metadata: params.metadata,
+			},
+			{ idempotencyKey },
+		);
+	}
+
+	/** Every refund of a PaymentIntent, newest first; used to find one whose creation was not seen. */
+	async listPaymentIntentRefunds(paymentIntentId: string) {
+		if (this.stripe.refunds === undefined) throw new Error("Stripe refunds are unavailable");
+		const refunds = await this.stripe.refunds.list({
+			payment_intent: paymentIntentId,
+			limit: 100,
+		});
+		return refunds.data;
 	}
 
 	retrieveCheckoutSession(sessionId: string) {

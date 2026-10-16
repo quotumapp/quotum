@@ -60,6 +60,15 @@ interface FakeGooglePlayClientOptions {
 	refundableQuantity?: number;
 }
 
+interface FakeStripeRefund {
+	id: string;
+	status: string;
+	amount: number;
+	currency: string;
+	payment_intent: string;
+	metadata: Record<string, string>;
+}
+
 interface FakeStripeBillingClientOptions {
 	event?: JsonRecord;
 	constructWebhookError?: Error;
@@ -68,6 +77,8 @@ interface FakeStripeBillingClientOptions {
 	checkoutSession?: JsonRecord;
 	/** The invoice each PaymentIntent settled; a payment that is absent settled none. */
 	invoicePayments?: Record<string, string>;
+	/** The status Stripe reports for each refund it creates; `succeeded` when absent. */
+	refundStatus?: string;
 }
 
 export function createFakeAppleStoreKitClient(options: FakeAppleStoreKitClientOptions) {
@@ -311,6 +322,16 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		idempotencyKey: string;
 	}> = [];
 	const invoiceCreateParams: Stripe.InvoiceCreateParams[] = [];
+	const refundCreates: Array<{
+		paymentIntentId: string;
+		amountMinor: number;
+		metadata: Record<string, string>;
+		idempotencyKey: string;
+	}> = [];
+	const refundsByIdempotencyKey = new Map<string, FakeStripeRefund>();
+	const refundsByPaymentIntent = new Map<string, FakeStripeRefund[]>();
+	let refundStatus = options.refundStatus ?? "succeeded";
+	let loseNextRefundCreate = false;
 	const subscriptionDiscounts = new Map<string, Array<{ id: string; couponId: string | null }>>();
 	let event =
 		options.event ?? stripeEvent("customer.subscription.updated", stripeSubscriptionObject());
@@ -331,6 +352,20 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		},
 		defaultPaymentMethodWrites,
 		invoiceCreateParams,
+		/** Every refund the service asked for, in order. */
+		refundCreates,
+		/** The status Stripe reports for the refunds it creates from now on. */
+		setRefundStatus(status: string) {
+			refundStatus = status;
+		},
+		/** The next refund is created, then the call throws, as a response that never arrived. */
+		loseNextRefundCreate() {
+			loseNextRefundCreate = true;
+		},
+		/** Stripe's refunds of a payment, as a list call returns them. */
+		refundsOf(paymentIntentId: string) {
+			return refundsByPaymentIntent.get(paymentIntentId) ?? [];
+		},
 		/** Deletes a customer as the Stripe Dashboard does: every later use of its id is refused. */
 		deleteCustomer(customerId: string) {
 			deletedCustomers.add(customerId);
@@ -511,6 +546,54 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 			async findInvoiceIdForPaymentIntent(paymentIntentId: string) {
 				calls.push(`findInvoiceIdForPaymentIntent:${paymentIntentId}`);
 				return options.invoicePayments?.[paymentIntentId] ?? null;
+			},
+			async findPaymentIntentForInvoice(invoiceId: string) {
+				calls.push(`findPaymentIntentForInvoice:${invoiceId}`);
+				const entry = Object.entries(options.invoicePayments ?? {}).find(
+					([, invoice]) => invoice === invoiceId,
+				);
+				return entry?.[0] ?? null;
+			},
+			async createRefund(
+				params: {
+					paymentIntentId: string;
+					amountMinor: number;
+					metadata: Record<string, string>;
+				},
+				idempotencyKey: string,
+			) {
+				calls.push(`createRefund:${idempotencyKey}`);
+				idempotency.claim(idempotencyKey, "POST /v1/refunds", {
+					payment_intent: params.paymentIntentId,
+					amount: params.amountMinor,
+					metadata: params.metadata,
+				});
+				// Stripe replays the original refund for a repeated idempotency key.
+				const replay = refundsByIdempotencyKey.get(idempotencyKey);
+				if (replay !== undefined) return replay;
+				refundCreates.push({ ...params, idempotencyKey });
+				const refund: FakeStripeRefund = {
+					id: `re_fake_${refundCreates.length}`,
+					status: refundStatus,
+					amount: params.amountMinor,
+					currency: "usd",
+					payment_intent: params.paymentIntentId,
+					metadata: params.metadata,
+				};
+				refundsByIdempotencyKey.set(idempotencyKey, refund);
+				refundsByPaymentIntent.set(params.paymentIntentId, [
+					refund,
+					...(refundsByPaymentIntent.get(params.paymentIntentId) ?? []),
+				]);
+				if (loseNextRefundCreate) {
+					loseNextRefundCreate = false;
+					throw new Error("Fake Stripe lost the refund response");
+				}
+				return refund;
+			},
+			async listPaymentIntentRefunds(paymentIntentId: string) {
+				calls.push(`listPaymentIntentRefunds:${paymentIntentId}`);
+				return refundsByPaymentIntent.get(paymentIntentId) ?? [];
 			},
 			async retrieveCheckoutSession(sessionId: string) {
 				calls.push(`retrieveCheckoutSession:${sessionId}`);

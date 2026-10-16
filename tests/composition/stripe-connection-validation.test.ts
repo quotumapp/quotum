@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type Stripe from "stripe";
 import { requiresEventRead } from "../../src/composition/connection-validation";
 import {
+	stripeOptionalWritePermissions,
 	stripeWritePermissions,
 	validateStripeAccess,
 } from "../../src/composition/stripe-connection-validation";
@@ -15,6 +16,7 @@ const refusals: Record<string, unknown> = {
 	"portal.create": { statusCode: 400, code: "resource_missing" },
 	"coupons.create": { statusCode: 400, code: "parameter_invalid_enum" },
 	"promotionCodes.create": { statusCode: 400, code: "parameter_missing" },
+	"refunds.create": { statusCode: 404, code: "resource_missing" },
 };
 
 function client(failures: Record<string, unknown> = {}) {
@@ -47,6 +49,7 @@ function client(failures: Record<string, unknown> = {}) {
 			billingPortal: { sessions: { create: probe("portal.create") } },
 			coupons: { list: probe("coupons"), create: probe("coupons.create") },
 			promotionCodes: { list: probe("promotionCodes"), create: probe("promotionCodes.create") },
+			refunds: { create: probe("refunds.create") },
 		} as unknown as Stripe,
 	};
 }
@@ -84,7 +87,7 @@ describe("Stripe permission validation", () => {
 			},
 		});
 		expect(JSON.stringify(error)).not.toContain("SECRET");
-		expect(calls).toHaveLength(19);
+		expect(calls).toHaveLength(20);
 	});
 	it("verifies each write permission with a request that cannot succeed", async () => {
 		const { stripe, calls } = client();
@@ -93,9 +96,11 @@ describe("Stripe permission validation", () => {
 
 		expect(result.identity).toBe("acct_test");
 		expect(result.unverifiedPermissions).toEqual([]);
-		expect(result.checks).toHaveLength(19);
+		expect(result.checks).toHaveLength(20);
 		expect(result.checks.filter((check) => check.code.endsWith("_write"))).toEqual(
-			[...stripeWritePermissions].sort().map((code) => ({ code, passed: true })),
+			[...stripeWritePermissions, ...stripeOptionalWritePermissions]
+				.sort()
+				.map((code) => ({ code, passed: true })),
 		);
 		const writes = Object.fromEntries(
 			calls.filter((call) => call.name in refusals).map((call) => [call.name, call.args]),
@@ -108,6 +113,7 @@ describe("Stripe permission validation", () => {
 			"portal.create": [{ customer: "cus_quotum_permission_probe" }],
 			"coupons.create": [{ duration: "quotum_permission_probe" }],
 			"promotionCodes.create": [{}],
+			"refunds.create": [{ payment_intent: "pi_quotum_permission_probe", amount: 1 }],
 		});
 	});
 	it("fails validation for a write permission the key lacks and names it", async () => {
@@ -161,16 +167,37 @@ describe("Stripe permission validation", () => {
 		expect(result.checks.map((check) => check.code)).not.toContain("customer_write");
 		expect(result.checks.map((check) => check.code)).toContain("subscription_write");
 	});
+	it("validates a key that cannot refund and reports the refund permission as unverified", async () => {
+		const { stripe } = client({
+			"refunds.create": {
+				statusCode: 403,
+				message:
+					"The provided key 'rk_live_SECRET' does not have the required permissions. Having the 'rak_charge_write' permission would allow this request to continue.",
+			},
+		});
+
+		const result = await validateStripeAccess(stripe);
+
+		expect(result.unverifiedPermissions).toEqual(["refund_write"]);
+		expect(result.checks.map((check) => check.code)).not.toContain("refund_write");
+		expect(JSON.stringify(result)).not.toContain("SECRET");
+	});
 	it("sends no write when the probes are turned off or the key is not accepted", async () => {
 		const disabled = client();
 		const result = await validateStripeAccess(disabled.stripe, { writeProbes: false });
 		expect(result.checks).toHaveLength(12);
-		expect(result.unverifiedPermissions).toEqual([...stripeWritePermissions]);
+		expect(result.unverifiedPermissions).toEqual([
+			...stripeWritePermissions,
+			...stripeOptionalWritePermissions,
+		]);
 		expect(disabled.names().filter((name) => name in refusals)).toEqual([]);
 
 		const unauthenticated = client({ account: { statusCode: 401 } });
 		const error = await rejection(unauthenticated.stripe);
-		expect(error.details.unverifiedPermissions).toEqual([...stripeWritePermissions]);
+		expect(error.details.unverifiedPermissions).toEqual([
+			...stripeWritePermissions,
+			...stripeOptionalWritePermissions,
+		]);
 		expect(unauthenticated.names().filter((name) => name in refusals)).toEqual([]);
 	});
 	it("reads a permission Stripe names with its rak_ prefix and never echoes other text", async () => {
@@ -202,7 +229,7 @@ describe("Stripe permission validation", () => {
 		expect(withEvents.calls.filter((call) => call.name === "events")).toEqual([
 			{ name: "events", args: [{ limit: 1 }] },
 		]);
-		expect(result.checks).toHaveLength(20);
+		expect(result.checks).toHaveLength(21);
 		expect(result.checks).toContainEqual({ code: "event_read", passed: true });
 		expect(result.unverifiedPermissions).toEqual([]);
 	});

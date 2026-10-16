@@ -21,6 +21,7 @@ const providerTables = [
 	"store_events",
 	"checkout_requests",
 	"payment_setup_sessions",
+	"refund_requests",
 	"credit_grant_provider_objects",
 	"catalog_provider_operations",
 	"provider_plan_bindings",
@@ -39,6 +40,7 @@ const providerTables = [
 const drizzleMirroredTables = [
 	"checkout_requests",
 	"payment_setup_sessions",
+	"refund_requests",
 	"credit_grant_provider_objects",
 	"provider_customers",
 	"provider_customer_unlinks",
@@ -57,6 +59,7 @@ const drizzleProviderColumn = `\${table.provider}`;
 
 const checkoutOperations: ProviderOperation[] = ["checkout.hosted", "checkout.plan"];
 const paymentSetupOperations: ProviderOperation[] = ["payment_method.setup"];
+const refundOperations: ProviderOperation[] = ["refund.issue"];
 
 const registry = createProviderRegistry({
 	getRepository: () => {
@@ -127,6 +130,7 @@ describe("provider CHECK constraints", () => {
 		const expected = new Map(providerTables.map((table) => [table, admitted]));
 		expected.set("checkout_requests", checkoutProviders());
 		expected.set("payment_setup_sessions", providersImplementing(paymentSetupOperations));
+		expected.set("refund_requests", providersImplementing(refundOperations));
 		expected.set("promotion_provider_objects", sqlShapeProviders());
 		expected.set("promotion_redemptions", [...sqlShapeProviders(), "quotum"].sort());
 		expect(Object.fromEntries(providerChecks)).toEqual(Object.fromEntries(expected));

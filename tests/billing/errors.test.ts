@@ -283,6 +283,7 @@ describe("error inventory", () => {
 		const codes = await inventory();
 		expect(codes.get("STRIPE_NOT_CONFIGURED")).toEqual([
 			"src/providers/stripe/payment-setup.ts",
+			"src/providers/stripe/refunds.ts",
 			"src/providers/stripe/service.ts",
 		]);
 		expect(codes.get("BILLING_PROVIDER_NOT_CONFIGURED")).toEqual([

@@ -208,7 +208,8 @@ connections cannot serve. See
 | Postpaid usage collection<br>`settlement.collect_finalized_charge` | Unsupported | Unsupported | Supported · Quotum-composed via Stripe invoices with a one-off usage line<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [workers/recurring-billing](../tests/workers/recurring-billing.test.ts), [integration/catalog-control-plane](../tests/integration/catalog-control-plane.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Unsupported |
 | Usage adjustment<br>`adjustment.issue` | Unsupported | Unsupported | Supported · Quotum-composed via Stripe invoices with a signed correction line<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Unsupported |
 | **Refunds** | | | | |
-| Refund and reversal sync<br>`refund.sync` | Managed by provider, mirrored by Quotum<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts) | Managed by provider, mirrored by Quotum<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts), [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Planned · Native |
+| Refund and reversal sync<br>`refund.sync` | Managed by provider, mirrored by Quotum<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts), [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts) | Managed by provider, mirrored by Quotum<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts), [providers/google/service](../tests/providers/google/service.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts), [integration/stripe-subscription-refund](../tests/integration/stripe-subscription-refund.test.ts), [providers/stripe/service](../tests/providers/stripe/service.test.ts), [providers/stripe/normalizer](../tests/providers/stripe/normalizer.test.ts) | Planned · Native |
+| Quotum-issued refund<br>`refund.issue` | Managed by provider, mirrored by Quotum | Managed by provider, mirrored by Quotum | Supported · Native<br>Tests: [integration/stripe-refund-requests](../tests/integration/stripe-refund-requests.test.ts), [providers/stripe/commercial-refund](../tests/providers/stripe/commercial-refund.test.ts) | Unsupported |
 | **Top-ups** | | | | |
 | Customer-initiated top-up<br>`topup.customer_initiated` | Supported · Native<br>Tests: [integration/apple-flows](../tests/integration/apple-flows.test.ts) | Supported · Native<br>Tests: [integration/google-flows](../tests/integration/google-flows.test.ts) | Supported · Native<br>Tests: [integration/stripe-flows](../tests/integration/stripe-flows.test.ts) | Requires policy decision (DEC-14) · Native |
 | Automatic top-up<br>`topup.automatic` | Unsupported | Unsupported | Conditional · Quotum-composed via Stripe invoices with a top-up price line<br>The customer must have a saved payment method; without one, use payment_method.setup.<br>Tests: [providers/stripe/service](../tests/providers/stripe/service.test.ts), [workers/auto-topup](../tests/workers/auto-topup.test.ts), [integration/phase3-release-journeys](../tests/integration/phase3-release-journeys.test.ts) | Unsupported |
@@ -487,8 +488,9 @@ trials get no ending notice.
 
 ### Refunds of subscription payments
 
-A refund of a subscription's payment returns the money and takes back the refunded share of the
-credits that payment funded. Stripe leaves the subscription running, and so does Quotum: the
+A refund of a subscription's payment, made in Stripe or
+[through Quotum](subscriptions.md#refunding-a-payment), returns the money and takes back the
+refunded share of the credits that payment funded. Stripe leaves the subscription running, and so does Quotum: the
 subscription's own state and its access entitlements stay until it ends. To end access with the
 refund, cancel the subscription as well, in Stripe or with an immediate
 [cancellation](subscriptions.md#cancelling-and-uncancelling-a-subscription).
@@ -946,6 +948,7 @@ Write includes the reads used for those resources. OAuth installs are a separate
 | Payment Methods | Read | Expand the saved method on Setup Intents and Customers |
 | Coupons | Write | Create and read promotion coupons |
 | Promotion Codes | Write | Create, read and deactivate codes |
+| Charges and Refunds | Write (`refund_write`, optional) | Refund a payment when a caller asks Quotum to; a key without it still validates |
 | Events | Read (`event_read`) | Retrieve the signed setup event with the connection's own key before production activation |
 
 Validation runs bounded probes and reports all detected failures in `error.details.checks`
@@ -974,7 +977,13 @@ A 403 fails validation like a missing read permission. A verified permission app
 as passed. A probe that proves nothing, for a rate limit or an outage, leaves its permission in
 `unverifiedPermissions`: check those in the Dashboard. Stripe does not document the order of its
 permission and request checks, so `BILLING_STRIPE_WRITE_PERMISSION_PROBES=false` turns the write
-probes off; `unverifiedPermissions` then lists all seven, as it did before the probes existed.
+probes off; `unverifiedPermissions` then lists every write permission, as it did before the probes
+existed.
+
+`refund_write` is probed the same way (a refund of a payment that cannot exist) but is optional: a
+merchant that never refunds through Quotum is not asked for it. A key that lacks it validates, and
+`unverifiedPermissions` lists `refund_write` until the permission is added. The exact Dashboard
+name of the permission is the one Stripe reports for Refunds.
 
 Projection verification reports the receiver's HTTP status, including 401, 404 and 503, or an
 invalid acknowledgment/challenge reason for an HTTP 200. A status is a diagnostic clue, not proof

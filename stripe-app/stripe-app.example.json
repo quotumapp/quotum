@@ -48,6 +48,10 @@
 			"purpose": "Process refund and charge events."
 		},
 		{
+			"permission": "charge_write",
+			"purpose": "Refund payments when a merchant asks Quotum to."
+		},
+		{
 			"permission": "payment_intent_read",
 			"purpose": "Resolve invoice payment state."
 		},

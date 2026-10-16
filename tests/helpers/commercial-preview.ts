@@ -45,6 +45,7 @@ export function storedCommercialPreview(
 			promotion: null,
 			nextCycle: null,
 			cancellation: null,
+			refund: null,
 			paymentSetup: null,
 			carryOver: null,
 			effectiveMode: null,

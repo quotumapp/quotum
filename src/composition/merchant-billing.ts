@@ -58,6 +58,7 @@ import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { encodeInvoiceCursor, encodeUsageCursor, withoutInvoiceLinks } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
 import { providerOperationReceipt } from "../billing/provider-operations";
+import { publicRefundRequest } from "../billing/refunds";
 import { publicOperationLookup } from "../billing/usage-api";
 import type { BillingRepository } from "../db/repository";
 import type { BillingAdminOperations } from "../operations/admin";
@@ -284,6 +285,15 @@ export function createMerchantBillingPort(input: {
 			}
 			case "account.actions":
 				return ok(await capabilityReads.availableActions(project, account()));
+			case "account.refunds":
+				return ok(
+					(
+						await repo.refundRequests.listRefundRequests(project, {
+							billingAccountId: account(),
+							limit: 25,
+						})
+					).map(publicRefundRequest),
+				);
 			case "controls": {
 				const q = parse(
 					z.object({ entityId: z.string().trim().min(1).max(200).optional() }).strict(),

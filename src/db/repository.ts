@@ -107,6 +107,7 @@ import {
 	type SubscriptionChangeClaimOptions,
 	type UsageInvoiceClaimOptions,
 } from "./repository/recurring-pricing";
+import { RefundRequestRepository } from "./repository/refund-requests";
 import { StoreEventReplayBillingRepository } from "./repository/store-event-replay";
 import {
 	enqueueStoreEventForReplay,
@@ -216,6 +217,7 @@ export class BillingRepository {
 	readonly applePromotions: ApplePromotionRepository;
 	readonly planGrants: PlanGrantRepository;
 	readonly balanceAdjustments: BalanceAdjustmentRepository;
+	readonly refundRequests: RefundRequestRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
 	readonly providerCustomerUnlinks: ProviderCustomerUnlinkRepository;
 	readonly customerErasures: CustomerErasureRepository;
@@ -249,6 +251,7 @@ export class BillingRepository {
 		this.applePromotions = new ApplePromotionRepository(database);
 		this.planGrants = new PlanGrantRepository(database);
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
+		this.refundRequests = new RefundRequestRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 		this.providerCustomerUnlinks = new ProviderCustomerUnlinkRepository(database);
 		this.customerErasures = new CustomerErasureRepository(database);
@@ -779,6 +782,12 @@ export class BillingRepository {
 				Extract<CommercialActionExecutionResult, { kind: "subscription_cancellation" }>,
 				"supersededChangeId"
 			>;
+			finalize?: (
+				cancellation: Extract<
+					CommercialActionExecutionResult,
+					{ kind: "subscription_cancellation" }
+				>,
+			) => StoredCommercialActionExecutionResult;
 		},
 	): Promise<StoredCommercialActionExecutionResult> {
 		return await this.commercialActions.completeSubscriptionCancellation(project, input);

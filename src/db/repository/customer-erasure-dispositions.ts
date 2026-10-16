@@ -29,6 +29,7 @@ export const customerErasureDispositions = {
 	provider_operations: { kind: "rewrite" },
 	paddle_checkout_reservations: { kind: "delete" },
 	commercial_action_previews: { kind: "rewrite" },
+	refund_requests: { kind: "rewrite" },
 	promotion_codes: { kind: "rewrite" },
 	payment_setup_sessions: { kind: "delete" },
 	checkout_requests: { kind: "delete" },
@@ -199,6 +200,17 @@ export const rewriteBatches: CustomerErasureBatch[] = [
 			intent = '{}'::jsonb, preview = '{}'::jsonb, provider_context = '{}'::jsonb,
 			intent_hash = ${digestOfId}, state_fingerprint = ${digestOfId},
 			execution_result = CASE WHEN target.execution_result IS NULL THEN NULL ELSE '{}'::jsonb END,
+			updated_at = now()`,
+		ofAccount,
+	),
+	// The amount, currency, provider payment and refund ids stay as the financial fact; the account
+	// id, the caller's reason and its idempotency keys, which can carry a user id, do not.
+	updateBatch(
+		"refund_requests",
+		(context) => drizzleSql`
+			billing_account_id = ${erasedMarker(context)}, reason = 'erased',
+			execution_idempotency_key = 'erased:' || target.id::text,
+			provider_idempotency_key = 'erased:' || target.id::text,
 			updated_at = now()`,
 		ofAccount,
 	),
@@ -402,6 +414,8 @@ export async function residualRows(
 			UNION ALL SELECT 'paddle_checkout_reservations', count(*) FROM paddle_checkout_reservations
 				WHERE project_id = ${context.projectId} AND billing_account_id = ${context.subjectId}
 			UNION ALL SELECT 'commercial_action_previews', count(*) FROM commercial_action_previews
+				WHERE project_id = ${context.projectId} AND billing_account_id = ${context.subjectId}
+			UNION ALL SELECT 'refund_requests', count(*) FROM refund_requests
 				WHERE project_id = ${context.projectId} AND billing_account_id = ${context.subjectId}
 			UNION ALL SELECT 'promotion_codes', count(*) FROM promotion_codes
 				WHERE project_id = ${context.projectId} AND billing_account_id = ${context.subjectId}

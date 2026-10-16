@@ -3,6 +3,7 @@ import { InvalidRequestError } from "./errors";
 import type { PaymentSetupPlanStatus, PaymentSetupStatus } from "./payment-setup";
 import type { StripeProrationBehavior } from "./pricing";
 import type { CommercialPromotion, PromotionDiscountDuration } from "./promotions";
+import type { RefundBasis, RefundMode, RefundRequestStatus, RefundTargetKind } from "./refunds";
 import type { BillingProvider } from "./types";
 
 /** Feature keys whose allowance or usage an immediate plan change carries over. */
@@ -92,6 +93,20 @@ export type CommercialActionIntent =
 				planKey: string;
 				quantities: Record<string, number>;
 			};
+	  }
+	/**
+	 * Asks the provider to return money for one payment: the latest paid invoice of a subscription,
+	 * or one purchase. The ledger follows the provider's refund event, not this request.
+	 * `cancelImmediately` also ends a subscription target once the provider accepts the refund.
+	 */
+	| {
+			kind: "refund";
+			target:
+				| { type: "subscription_payment"; externalSubscriptionId: string }
+				| { type: "purchase"; purchaseId: string };
+			mode: RefundMode;
+			cancelImmediately?: boolean;
+			reason: string;
 	  };
 
 /** What a preview says a cancellation would do; `none` when the state already holds. */
@@ -173,6 +188,26 @@ export interface CommercialPreviewCancellation {
 	activeAddOnSubscriptionIds: string[];
 }
 
+/** What a refund preview says the provider would be asked to return. */
+export interface CommercialPreviewRefund {
+	targetKind: RefundTargetKind;
+	/** The provider invoice of a subscription payment. */
+	externalInvoiceId: string | null;
+	purchaseId: string | null;
+	/** The provider payment the refund draws on. */
+	providerPaymentId: string;
+	currency: string;
+	amountPaidMinor: number;
+	/** Returned by earlier refunds, whoever issued them. */
+	refundedMinor: number;
+	refundableMinor: number;
+	/** What this refund would return; never more than `refundableMinor`. */
+	refundAmountMinor: number;
+	basis: RefundBasis;
+	/** The subscription the refund would also end, or null. */
+	cancelsSubscriptionId: string | null;
+}
+
 /** The plan a setup preview will start once the customer saves a card. */
 export interface CommercialPreviewPaymentSetupPlan {
 	planKey: string;
@@ -219,6 +254,7 @@ export interface CommercialActionPreview {
 	promotion: CommercialPreviewPromotion | null;
 	nextCycle: CommercialPreviewNextCycle | null;
 	cancellation: CommercialPreviewCancellation | null;
+	refund: CommercialPreviewRefund | null;
 	paymentSetup: CommercialPreviewPaymentSetup | null;
 	carryOver: CommercialPreviewCarryOver | null;
 	effectiveMode: "immediate" | "period_end" | null;
@@ -270,6 +306,19 @@ export function storedExecutionAnswer(
 	return result.url === undefined ? null : { ...result, url: result.url };
 }
 
+/** A subscription cancellation as an execution reports it. */
+export interface SubscriptionCancellationExecution {
+	kind: "subscription_cancellation";
+	action: CommercialCancellationAction;
+	externalSubscriptionId: string;
+	effectiveMode: "immediate" | "period_end" | null;
+	/** When access ends, or null once a cancellation is cleared or nothing changed. */
+	effectiveAt: string | null;
+	cancelAtPeriodEnd: boolean;
+	/** The queued change this cancellation marked `cancelled`. */
+	supersededChangeId: string | null;
+}
+
 export type CommercialActionExecutionResult =
 	| (CheckoutExecution & CheckoutSessionHandle)
 	| {
@@ -306,16 +355,21 @@ export type CommercialActionExecutionResult =
 				status: PaymentSetupPlanStatus;
 			} | null;
 	  }
+	| SubscriptionCancellationExecution
+	/**
+	 * A refund the provider was asked for. Its status can still move from `pending` to `succeeded`
+	 * or `failed`, and balances change only when the provider's refund event arrives; the refund
+	 * read route carries the later state.
+	 */
 	| {
-			kind: "subscription_cancellation";
-			action: CommercialCancellationAction;
-			externalSubscriptionId: string;
-			effectiveMode: "immediate" | "period_end" | null;
-			/** When access ends, or null once a cancellation is cleared or nothing changed. */
-			effectiveAt: string | null;
-			cancelAtPeriodEnd: boolean;
-			/** The queued change this cancellation marked `cancelled`. */
-			supersededChangeId: string | null;
+			kind: "refund_request";
+			refundRequestId: string;
+			status: RefundRequestStatus;
+			amountMinor: number;
+			currency: string;
+			providerRefundId: string | null;
+			/** Set when the refund also ended the subscription. */
+			cancellation: SubscriptionCancellationExecution | null;
 	  };
 
 export interface CommercialPreviewDraft {

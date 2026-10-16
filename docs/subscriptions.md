@@ -306,6 +306,79 @@ reports them, not when execution returns.
 Limitation: a Stripe subscription schedule attached outside Quotum is invisible here. Quotum
 cancels the subscription; it does not release or amend a schedule that may recreate it.
 
+## Refunding a payment
+
+`refund` asks the payment provider to return money for one payment and records who asked, how much
+and why. It goes through the same preview and execute pair as every commercial action, so a
+read-only credential is refused and the amount a caller approves is the amount that is sent.
+Stripe is the only provider that issues refunds through Quotum. Apple decides refunds of its own
+purchases and exposes no API to issue one, so a refund aimed at an Apple purchase is
+`409 REFUND_PROVIDER_MANAGED`; Google Play and Paddle refunds are made in their own consoles, and
+Quotum mirrors them through [refund sync](providers.md#refunds-of-subscription-payments).
+
+```json
+{ "intent": { "kind": "refund",
+              "target": { "type": "subscription_payment", "externalSubscriptionId": "sub_123" },
+              "mode": "prorated", "cancelImmediately": true, "reason": "Customer asked to leave" } }
+{ "intent": { "kind": "refund",
+              "target": { "type": "purchase", "purchaseId": "7b0c2f4e-5b1e-4f0a-9f0e-1d2c3b4a5e6f" },
+              "mode": "full", "reason": "Duplicate purchase" } }
+```
+
+- A **subscription payment** is the subscription's latest paid invoice. A **purchase** is a
+  completed one-time purchase, such as a credit pack, named by the `purchaseId` the purchase reads
+  return.
+- `full` returns everything the payment paid, net of earlier refunds. `prorated` returns the unused
+  share: for a subscription payment the share of the paid period still ahead, measured from the
+  moment of the preview to the end of the period the invoice's advance-billed lines cover; for a
+  top-up the share of the credit pack not yet spent. Amounts are whole minor units, rounded down,
+  and never more than what is still refundable.
+- `cancelImmediately` ends the subscription once the provider has accepted the refund, exactly as an
+  immediate [cancellation](#cancelling-and-uncancelling-a-subscription) does, and applies to a
+  subscription payment only. A refund that fails leaves the subscription running.
+- `reason` is required, up to 500 characters, and is stored with the request.
+
+The preview answers `refund`: the payment (`providerPaymentId`, `externalInvoiceId` or
+`purchaseId`), `amountPaidMinor`, `refundedMinor`, `refundableMinor`, the `refundAmountMinor` this
+request would return, its `basis` (`full`, `remaining_time` or `unconsumed_credit`) and the
+subscription it would also cancel. The preview is stale (`COMMERCIAL_PREVIEW_STALE`) as soon as
+anyone refunds the payment, including in the Stripe Dashboard.
+
+Execution records the request, then asks Stripe under a key derived from the execution, and answers
+`{ "kind": "refund_request", "refundRequestId", "status", "amountMinor", "currency",
+"providerRefundId", "cancellation" }`. `status` is `succeeded` when Stripe paid it out and `pending`
+when it accepted the refund but has not; a `pending` refund settles later, and
+`GET /v1/billing-accounts/:billingAccountId/refunds` (a read a read-only credential may make) lists
+the requests newest first with their current `status` (`succeeded`, `failed` or still `pending`)
+and, for a failure, its `failureCode`.
+
+**The credits follow the money, not the request.** Nothing in the ledger changes when execution
+returns. When Stripe's refund event arrives, the refund reverses the credits the payment funded
+through the same path as a refund made in the Dashboard: a one-time purchase in proportion to the
+amount returned, and a subscription payment's period allocations in proportion to the amount
+returned, never below what is already spent or held. A refund that fails or is canceled reverses
+nothing.
+
+One refund may be open per payment (`REFUND_ALREADY_OPEN`, 409, with the request in `details`), and
+a refund never exceeds what was paid net of earlier refunds (`REFUND_NOTHING_REFUNDABLE`, 409).
+Repeating an execution with the same `Idempotency-Key` answers the same result and never refunds
+twice, even when the first attempt's answer was lost; another key is `IDEMPOTENCY_CONFLICT`. A
+request that Stripe's own idempotency window could no longer vouch for is looked up in Stripe
+instead of sent again, and one whose outcome still cannot be established is held as
+`REFUND_RECONCILIATION_REQUIRED` (409) for an operator to check in Stripe, keeping the payment's
+slot until then.
+
+Typed refusals: `PAYMENT_NOT_REFUNDABLE` (409) for an invoice or purchase Stripe did not collect
+with a refundable payment, a purchase that is not completed, or a one-time purchase that is a
+subscription's own payment; `REFUND_NOT_PRORATABLE` (409) when the invoice names no service period
+or the purchase funded no credit, where `full` still works; `REFUND_REJECTED_BY_PROVIDER` (409)
+when Stripe refused the refund, with Stripe's error code in `details.providerCode`.
+
+The Stripe key needs write access to Refunds ("Charges and Refunds: Write" in the Dashboard's
+restricted-key editor). A connection validated before this feature may lack it; refunding then
+fails with `REFUND_REJECTED_BY_PROVIDER` and `details.providerCode` `permission_error`, and the
+connection's validation lists `refund_write` among its unverified permissions.
+
 ## Saving a payment method
 
 `setup_payment` sends the customer to a provider-hosted page where they save a payment method for

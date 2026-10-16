@@ -159,6 +159,9 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 			"Refunds and revocations happen in Google Play; Quotum mirrors voided purchase notifications, including partial consumable refunds.",
 			[googleFlows, googleService],
 		),
+		"refund.issue": providerManaged(
+			"Google Play can refund an order through its API, but Quotum has not built the call; refund in Play Console and Quotum mirrors the voided purchase.",
+		),
 		"topup.customer_initiated": verified(
 			[googleFlows],
 			"The customer buys a consumable top-up through Google Play Billing.",

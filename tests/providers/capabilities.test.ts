@@ -620,6 +620,7 @@ describe("declaration helpers the runtime gates read", () => {
 			cancel: "subscription.cancel",
 			uncancel: "subscription.uncancel",
 			setup_payment: "payment_method.setup",
+			refund: "refund.issue",
 		} as const satisfies typeof commercialActionOperations;
 		expect(commercialActionOperations).toEqual(expected);
 		expect(

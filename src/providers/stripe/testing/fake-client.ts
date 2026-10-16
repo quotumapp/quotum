@@ -40,6 +40,16 @@ export interface FakeStripeBillingClientOptions {
 }
 
 /** A network-free Stripe boundary for local cross-service tests. */
+/** The part of a Stripe refund the service reads. */
+interface FakeRefund {
+	id: string;
+	status: string;
+	amount: number;
+	currency: string;
+	payment_intent: string;
+	metadata: Record<string, string>;
+}
+
 export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly stripe: Stripe;
 	private readonly sessions = new Map<string, FakeCheckoutSession>();
@@ -57,6 +67,8 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	private readonly invoicesByIdempotencyKey = new Map<string, FakeInvoice>();
 	private readonly invoiceLineKeys = new Set<string>();
 	private readonly invoicePayments = new Map<string, string>();
+	private readonly refundsByIdempotencyKey = new Map<string, FakeRefund>();
+	private readonly refundsByPaymentIntent = new Map<string, FakeRefund[]>();
 	private readonly setupIntents = new Map<string, FakeSetupIntent>();
 	/** Every default-payment-method write, so a test can assert exactly what was promoted. */
 	readonly defaultPaymentMethodWrites: Array<{
@@ -268,6 +280,49 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 	/** Declares that a PaymentIntent settled an invoice, as a subscription's payment does. */
 	attachInvoicePayment(paymentIntentId: string, invoiceId: string): void {
 		this.invoicePayments.set(paymentIntentId, invoiceId);
+	}
+
+	async findPaymentIntentForInvoice(invoiceId: string): Promise<string | null> {
+		this.throwIfFailed("findPaymentIntentForInvoice");
+		for (const invoice of this.invoices.values()) {
+			if (invoice.id === invoiceId) return invoice.paymentIntentId;
+		}
+		for (const [paymentIntentId, invoice] of this.invoicePayments) {
+			if (invoice === invoiceId) return paymentIntentId;
+		}
+		return null;
+	}
+
+	/** Stripe replays the original refund for a repeated idempotency key. */
+	async createRefund(
+		params: { paymentIntentId: string; amountMinor: number; metadata: Record<string, string> },
+		idempotencyKey: string,
+	): Promise<FakeRefund> {
+		this.throwIfFailed("createRefund");
+		this.idempotency.claim(idempotencyKey, "POST /v1/refunds", {
+			payment_intent: params.paymentIntentId,
+			amount: params.amountMinor,
+			metadata: params.metadata,
+		});
+		const existing = this.refundsByIdempotencyKey.get(idempotencyKey);
+		if (existing !== undefined) return existing;
+		const refunds = this.refundsByPaymentIntent.get(params.paymentIntentId) ?? [];
+		const refund: FakeRefund = {
+			id: `re_fake_${digest(`${params.paymentIntentId}:${refunds.length}`).slice(0, 16)}`,
+			status: "succeeded",
+			amount: params.amountMinor,
+			currency: "usd",
+			payment_intent: params.paymentIntentId,
+			metadata: params.metadata,
+		};
+		this.refundsByIdempotencyKey.set(idempotencyKey, refund);
+		this.refundsByPaymentIntent.set(params.paymentIntentId, [refund, ...refunds]);
+		return refund;
+	}
+
+	async listPaymentIntentRefunds(paymentIntentId: string): Promise<FakeRefund[]> {
+		this.throwIfFailed("listPaymentIntentRefunds");
+		return this.refundsByPaymentIntent.get(paymentIntentId) ?? [];
 	}
 
 	async findInvoiceIdForPaymentIntent(paymentIntentId: string): Promise<string | null> {

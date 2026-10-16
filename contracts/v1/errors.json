@@ -1090,6 +1090,13 @@
       ]
     },
     {
+      "code": "PAYMENT_NOT_REFUNDABLE",
+      "sources": [
+        "src/db/repository/refund-requests.ts",
+        "src/providers/stripe/refunds.ts"
+      ]
+    },
+    {
       "code": "PAYMENT_SETUP_ALREADY_ACTIVE",
       "sources": [
         "src/billing/payment-setup.ts"
@@ -1447,6 +1454,12 @@
       ]
     },
     {
+      "code": "PURCHASE_NOT_FOUND",
+      "sources": [
+        "src/db/repository/refund-requests.ts"
+      ]
+    },
+    {
       "code": "QUANTITY_REQUIRED",
       "sources": [
         "src/providers/stripe/service.ts"
@@ -1482,6 +1495,43 @@
       "code": "RECURRING_JOB_NOT_FOUND",
       "sources": [
         "src/db/repository/recurring-pricing.ts"
+      ]
+    },
+    {
+      "code": "REFUND_ALREADY_OPEN",
+      "sources": [
+        "src/db/repository/refund-requests.ts",
+        "src/providers/stripe/refunds.ts"
+      ]
+    },
+    {
+      "code": "REFUND_NOT_PRORATABLE",
+      "sources": [
+        "src/providers/stripe/refunds.ts"
+      ]
+    },
+    {
+      "code": "REFUND_NOTHING_REFUNDABLE",
+      "sources": [
+        "src/providers/stripe/refunds.ts"
+      ]
+    },
+    {
+      "code": "REFUND_PROVIDER_MANAGED",
+      "sources": [
+        "src/providers/stripe/refunds.ts"
+      ]
+    },
+    {
+      "code": "REFUND_RECONCILIATION_REQUIRED",
+      "sources": [
+        "src/providers/stripe/refunds.ts"
+      ]
+    },
+    {
+      "code": "REFUND_REJECTED_BY_PROVIDER",
+      "sources": [
+        "src/providers/stripe/refunds.ts"
       ]
     },
     {
@@ -1692,6 +1742,7 @@
       "code": "STRIPE_NOT_CONFIGURED",
       "sources": [
         "src/providers/stripe/payment-setup.ts",
+        "src/providers/stripe/refunds.ts",
         "src/providers/stripe/service.ts"
       ]
     },
@@ -1745,7 +1796,8 @@
     {
       "code": "SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND",
       "sources": [
-        "src/db/repository/recurring-pricing.ts"
+        "src/db/repository/recurring-pricing.ts",
+        "src/db/repository/refund-requests.ts"
       ]
     },
     {

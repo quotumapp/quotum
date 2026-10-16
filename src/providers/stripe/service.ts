@@ -13,6 +13,7 @@ import type {
 	CommercialPreviewDraft,
 	StoredCommercialActionExecutionResult,
 	StoredCommercialActionPreview,
+	SubscriptionCancellationExecution,
 } from "../../billing/commercial";
 import { priceCommercialLines, recurringCadenceOf } from "../../billing/commercial-pricing";
 import { sha256Hex, stableJson } from "../../billing/decimal";
@@ -109,6 +110,14 @@ import {
 } from "./payment-setup";
 import { type StripePromotionClient, syncPromotionStripeObject } from "./promotions";
 import {
+	issueRefund,
+	type RefundClientDependency,
+	type RefundIntent,
+	type RefundRepositoryDependency,
+	refundEventState,
+	resolveRefundPreview,
+} from "./refunds";
+import {
 	assertSetupPlanEligible,
 	type SavedCardPlanContext,
 	setupPlanCurrency,
@@ -139,7 +148,9 @@ export interface StripeBillingServiceConfig {
 	projectionContract?: ProjectionContract;
 }
 
-export interface StripeBillingClientDependency extends PaymentSetupClientDependency {
+export interface StripeBillingClientDependency
+	extends PaymentSetupClientDependency,
+		RefundClientDependency {
 	createCustomer(input: {
 		billingAccountId: string;
 		email: string | null;
@@ -203,7 +214,9 @@ export interface StripeBillingClientDependency extends PaymentSetupClientDepende
 	findPromotionCodes?: StripePromotionClient["findPromotionCodes"];
 }
 
-interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDependency {
+interface StripeBillingRepositoryDependency
+	extends PaymentSetupRepositoryDependency,
+		RefundRepositoryDependency {
 	listStripeCatalog(): Promise<StripeCatalog>;
 
 	getStripeBillingAccountSummary(billingAccountId: string): Promise<StripeBillingAccountSummary>;
@@ -311,6 +324,10 @@ interface StripeBillingRepositoryDependency extends PaymentSetupRepositoryDepend
 		supersedeReason: string;
 		supersedesPendingChange: boolean;
 		result: Omit<SubscriptionCancellationResult, "supersededChangeId">;
+		/** Records a larger execution that the cancellation is part of, such as a refund with a cancel. */
+		finalize?: (
+			cancellation: SubscriptionCancellationResult,
+		) => StoredCommercialActionExecutionResult;
 	}): Promise<StoredCommercialActionExecutionResult>;
 
 	getStripeProviderCustomer(input: GetStripeProviderCustomerInput): Promise<string | null>;
@@ -404,6 +421,9 @@ type SubscriptionCancellationResult = Extract<
 >;
 
 type CancellationIntent = Extract<CommercialActionIntent, { kind: "cancel" | "uncancel" }>;
+
+/** Refund events that move a refund request Quotum made; `refund.failed` follows a failed payout. */
+const refundEventTypes = new Set(["refund.created", "refund.updated", "refund.failed"]);
 
 interface ParsedStripeEvent {
 	id: string;
@@ -804,6 +824,22 @@ export class StripeBillingService
 			}
 			return await this.executionAnswer(stored.executionResult);
 		}
+		if (
+			stored.intent.kind === "refund" &&
+			stored.status === "executing" &&
+			stored.executionIdempotencyKey === idempotencyKey
+		) {
+			// A repeat of an execution that already began resumes from the preview as approved. The
+			// refund it made may already have changed the figures a fresh preview would show, so
+			// re-deriving and comparing them would call a half-finished execution stale.
+			return await this.executeRefund({
+				billingAccountId,
+				previewToken,
+				idempotencyKey,
+				intent: stored.intent,
+				preview: stored.preview,
+			});
+		}
 		const current = await this.commercialPreviewDraft(billingAccountId, stored.intent, false);
 		const claimed = await repository.beginCommercialActionExecution({
 			billingAccountId,
@@ -814,6 +850,16 @@ export class StripeBillingService
 		});
 		if (claimed.status === "executed" && claimed.executionResult !== null) {
 			return await this.executionAnswer(claimed.executionResult);
+		}
+
+		if (current.intent.kind === "refund") {
+			return await this.executeRefund({
+				billingAccountId,
+				previewToken,
+				idempotencyKey,
+				intent: current.intent,
+				preview: claimed.preview,
+			});
 		}
 
 		if (current.intent.kind === "setup_payment") {
@@ -1014,6 +1060,9 @@ export class StripeBillingService
 		if (normalized.kind === "cancel" || normalized.kind === "uncancel") {
 			return await this.cancellationPreviewDraft(billingAccountId, normalized, intentHash);
 		}
+		if (normalized.kind === "refund") {
+			return await this.refundPreviewDraft(billingAccountId, normalized, intentHash);
+		}
 		if (normalized.kind === "setup_payment") {
 			return this.paymentSetupPreviewDraft(
 				billingAccountId,
@@ -1100,6 +1149,7 @@ export class StripeBillingService
 								}
 							: renewal.nextCycle,
 					cancellation: null,
+					refund: null,
 					paymentSetup: null,
 					carryOver,
 					effectiveMode: change.effectiveMode,
@@ -1162,6 +1212,7 @@ export class StripeBillingService
 					currency: product.currency,
 					cancellation: null,
 					carryOver: null,
+					refund: null,
 					paymentSetup: null,
 					effectiveMode: null,
 					effectiveAt: null,
@@ -1245,6 +1296,7 @@ export class StripeBillingService
 				currency,
 				cancellation: null,
 				carryOver: null,
+				refund: null,
 				paymentSetup: null,
 				effectiveMode: "immediate",
 				effectiveAt: new Date().toISOString(),
@@ -1341,6 +1393,7 @@ export class StripeBillingService
 				nextCycle: priced?.nextCycle ?? null,
 				cancellation: null,
 				carryOver: null,
+				refund: null,
 				paymentSetup: {
 					currency: intent.currency,
 					appliesTo: "account_default",
@@ -1635,6 +1688,7 @@ export class StripeBillingService
 				nextCycle: null,
 				cancellation,
 				carryOver: null,
+				refund: null,
 				paymentSetup: null,
 				effectiveMode: intent.kind === "cancel" ? intent.effectiveMode : null,
 				effectiveAt: cancellation.accessEndsAt,
@@ -1659,6 +1713,10 @@ export class StripeBillingService
 		idempotencyKey: string;
 		intent: CancellationIntent;
 		cancellation: CommercialPreviewCancellation;
+		/** Records a larger execution the cancellation is part of, such as a refund with a cancel. */
+		finalize?: (
+			cancellation: SubscriptionCancellationExecution,
+		) => StoredCommercialActionExecutionResult;
 	}): Promise<CommercialActionExecutionResult> {
 		const complete = this.dependencies.repository.completeSubscriptionCancellation;
 		if (complete === undefined) {
@@ -1697,8 +1755,160 @@ export class StripeBillingService
 					effectiveAt: cancellation.accessEndsAt,
 					cancelAtPeriodEnd: cancellation.cancelAtPeriodEnd,
 				},
+				...(input.finalize === undefined ? {} : { finalize: input.finalize }),
 			}),
 		);
+	}
+
+	/**
+	 * Builds the preview for a refund from the payment facts alone. The state fingerprint binds the
+	 * payment, what it paid and what earlier refunds returned, so a refund made in the meantime
+	 * stales the preview instead of letting it return money the payment no longer holds.
+	 */
+	private async refundPreviewDraft(
+		billingAccountId: string,
+		intent: RefundIntent,
+		intentHash: string,
+	): Promise<CommercialPreviewDraft> {
+		const resolved = await resolveRefundPreview(
+			this.dependencies,
+			billingAccountId,
+			intent,
+			new Date(),
+		);
+		const { refund } = resolved;
+		let cancellation: CommercialPreviewCancellation | null = null;
+		let cancellationFingerprint: string | null = null;
+		if (intent.cancelImmediately === true && intent.target.type === "subscription_payment") {
+			const cancel = await this.cancellationPreviewDraft(
+				billingAccountId,
+				{
+					kind: "cancel",
+					externalSubscriptionId: intent.target.externalSubscriptionId,
+					effectiveMode: "immediate",
+				},
+				intentHash,
+			);
+			cancellation = cancel.preview.cancellation;
+			cancellationFingerprint = cancel.stateFingerprint;
+		}
+		const stateFingerprint = sha256Hex(
+			stableJson({ refund: resolved.fingerprintFacts, cancellation: cancellationFingerprint }),
+		);
+		return {
+			billingAccountId,
+			intent,
+			intentHash,
+			stateFingerprint,
+			providerStateFingerprint: stateFingerprint,
+			promotion: null,
+			preview: {
+				schemaVersion: 1,
+				intentHash,
+				stateFingerprint,
+				billingAccountId,
+				action: "refund",
+				provider: commercialPreviewProvider(stripeCapabilities, intent),
+				lineItems: [],
+				estimatedTotalMinor: null,
+				subtotalMinor: null,
+				discountTotalMinor: null,
+				currency: refund.currency,
+				amountStatus: "exact",
+				promotionCodeEntry: "none",
+				promotion: null,
+				nextCycle: null,
+				cancellation,
+				refund,
+				carryOver: null,
+				paymentSetup: null,
+				effectiveMode: cancellation === null ? null : "immediate",
+				effectiveAt: cancellation?.accessEndsAt ?? null,
+				prorationBehavior: null,
+				changeKind: null,
+				fromPlanVersionId: null,
+				toPlanVersionId: null,
+				targetId: refund.externalInvoiceId ?? refund.purchaseId ?? refund.providerPaymentId,
+				warnings: [
+					"Stripe returns the money; the credits this payment funded are taken back when Stripe confirms the refund.",
+					...(cancellation === null ? [] : cancellationWarnings(cancellation)),
+				],
+			},
+		};
+	}
+
+	/**
+	 * Asks Stripe for the previewed refund and records the execution. The request is recorded before
+	 * Stripe is called, so a repeat finds it; a cancellation that goes with the refund runs once
+	 * Stripe accepted the money back and records the whole execution in its own transaction.
+	 */
+	private async executeRefund(input: {
+		billingAccountId: string;
+		previewToken: string;
+		idempotencyKey: string;
+		intent: RefundIntent;
+		preview: CommercialActionPreview;
+	}): Promise<CommercialActionExecutionResult> {
+		const repository = requireCommercialRepository(this.dependencies.repository);
+		const { refund, cancellation } = input.preview;
+		if (refund === null) throw new Error("Refund preview is missing its figures");
+		const executionKey = commercialExecutionKey(input.previewToken, input.idempotencyKey);
+		const request = await issueRefund(this.dependencies, {
+			billingAccountId: input.billingAccountId,
+			previewToken: input.previewToken,
+			idempotencyKey: input.idempotencyKey,
+			providerIdempotencyKey: `billing:refund:${executionKey}`,
+			intent: input.intent,
+			refund,
+		});
+		const requested = {
+			kind: "refund_request" as const,
+			refundRequestId: request.id,
+			status: request.status,
+			amountMinor: request.amountMinor,
+			currency: request.currency,
+			providerRefundId: request.providerRefundId,
+		};
+		if (
+			input.intent.cancelImmediately === true &&
+			input.intent.target.type === "subscription_payment" &&
+			cancellation !== null &&
+			cancellation.action === "cancel"
+		) {
+			return await this.executeSubscriptionCancellation({
+				billingAccountId: input.billingAccountId,
+				previewToken: input.previewToken,
+				idempotencyKey: input.idempotencyKey,
+				intent: {
+					kind: "cancel",
+					externalSubscriptionId: input.intent.target.externalSubscriptionId,
+					effectiveMode: "immediate",
+				},
+				cancellation,
+				finalize: (cancelled) => ({ ...requested, cancellation: cancelled }),
+			});
+		}
+		return await this.executionAnswer(
+			await repository.completeCommercialActionExecution({
+				billingAccountId: input.billingAccountId,
+				previewToken: input.previewToken,
+				idempotencyKey: input.idempotencyKey,
+				result: { ...requested, cancellation: null },
+			}),
+		);
+	}
+
+	/**
+	 * Moves the request a refund event belongs to. Stripe's refund events carry the request id Quotum
+	 * put on the refund; a refund made in the Stripe dashboard carries none and is left to the ledger.
+	 */
+	private async syncRefundRequest(event: ParsedStripeEvent): Promise<void> {
+		if (!refundEventTypes.has(event.type)) return;
+		const repository = this.dependencies.repository;
+		if (repository.applyProviderRefundState === undefined) return;
+		const state = refundEventState(event.object);
+		if (state === null) return;
+		await repository.applyProviderRefundState(state);
 	}
 
 	private async updateCancelAtPeriodEnd(
@@ -2290,6 +2500,7 @@ export class StripeBillingService
 		replayStoreEventId?: string,
 	): Promise<StripeEventOutcome> {
 		const parsedEvent = parseStripeEvent(event);
+		await this.syncRefundRequest(parsedEvent);
 		const paymentSetup = normalizePaymentSetupEvent(parsedEvent);
 		if (paymentSetup !== null) {
 			// The ingress only puts the event on disk; a lease-holding worker does the provider work.
@@ -2977,6 +3188,35 @@ function carryOverField(carryOver: CommercialCarryOver | undefined): {
 }
 
 function normalizeCommercialIntent(intent: CommercialActionIntent): CommercialActionIntent {
+	if (intent.kind === "refund") {
+		if (intent.cancelImmediately === true && intent.target.type !== "subscription_payment") {
+			throw new BillingError(
+				"cancelImmediately applies to the refund of a subscription payment",
+				"INVALID_REQUEST",
+				400,
+			);
+		}
+		return {
+			kind: intent.kind,
+			target:
+				intent.target.type === "subscription_payment"
+					? {
+							type: "subscription_payment",
+							externalSubscriptionId: requireNonBlank(
+								intent.target.externalSubscriptionId,
+								"externalSubscriptionId",
+							),
+						}
+					: {
+							type: "purchase",
+							purchaseId: requireNonBlank(intent.target.purchaseId, "purchaseId"),
+						},
+			mode: intent.mode,
+			// Only when set, so the hash of a plain refund does not change if the field is added later.
+			...(intent.cancelImmediately === true ? { cancelImmediately: true } : {}),
+			reason: requireNonBlank(intent.reason, "reason"),
+		};
+	}
 	if (intent.kind === "cancel") {
 		return {
 			kind: intent.kind,
