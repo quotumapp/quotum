@@ -102,6 +102,26 @@ describeLocalPostgres(describe, describe.skip)("a refunded subscription payment"
 	});
 
 	// capability: refund.sync
+	it("adds up refunds that wait on the same customer, instead of overwriting one with the other", async () => {
+		await insertInvoice("in_race", 1000, "advance");
+		await spend(30, "spend-before-race");
+
+		// Both events read the invoice before the customer lock, so both see nothing refunded yet.
+		const { both } = await context.sql.begin(async (tx) => {
+			await tx`SELECT id FROM customers WHERE billing_account_id = 'migration-stripe' FOR NO KEY UPDATE`;
+			const started = [refund("re_race_a", 250), refund("re_race_b", 250)];
+			await waitForCustomerLockWaiters(2);
+			// An object, not the array: a transaction callback that returns promises awaits them.
+			return { both: started };
+		});
+		await Promise.all(both);
+
+		expect(await invoiceReversed("in_race")).toBe("500");
+		expect(await allocation()).toMatchObject({ reversed: "50.000000000", closed: false });
+		expect(await available()).toBe("20");
+	});
+
+	// capability: refund.sync
 	it("records but does not apply a refund in another currency", async () => {
 		await insertInvoice("in_currency", 1000, "advance");
 
@@ -287,4 +307,17 @@ async function reversalJobs(): Promise<number> {
 		WHERE idempotency_key LIKE 'stripe:refund:%:reversal'
 	`;
 	return row?.count ?? 0;
+}
+
+/** Waits until `count` sessions are blocked on a customer row lock. */
+async function waitForCustomerLockWaiters(count: number): Promise<void> {
+	for (let attempt = 0; attempt < 200; attempt++) {
+		const [row] = await context.sql<Array<{ waiting: number }>>`
+			SELECT count(*)::int AS waiting FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock' AND query LIKE '%FOR NO KEY UPDATE%'
+		`;
+		if ((row?.waiting ?? 0) >= count) return;
+		await Bun.sleep(25);
+	}
+	throw new Error(`Expected ${count} sessions waiting on the customer lock`);
 }

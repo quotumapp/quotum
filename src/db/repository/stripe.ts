@@ -1774,9 +1774,7 @@ export class StripeBillingRepository extends RepositoryModule {
 						s.id AS subscription_id,
 						s.store_product_id,
 						p.key AS product_key,
-						invoices.amount_paid::text AS amount_paid,
 						invoices.currency,
-						invoices.reversed_amount::text AS reversed_amount,
 						invoices.provider_created_at,
 						invoices.raw_payload
 					FROM billing_invoices invoices
@@ -1904,9 +1902,7 @@ interface InvoiceReversalTarget {
 	subscription_id: string;
 	store_product_id: string;
 	product_key: string;
-	amount_paid: string;
 	currency: string;
-	reversed_amount: string;
 	provider_created_at: Date | string;
 	raw_payload: unknown;
 }
@@ -1925,22 +1921,25 @@ async function applyInvoiceRefund(
 	target: InvoiceReversalTarget,
 	input: RecordStripeInvoiceReversalProjectionInput,
 ): Promise<boolean> {
-	const paid = parseStripeAmountForComparison(target.amount_paid);
-	const previous = parseStripeAmountForComparison(target.reversed_amount);
 	const refunded = parseStripeAmountForComparison(input.reversalAmount);
-	if (paid === null || paid <= 0n || previous === null || refunded === null || refunded <= 0n) {
-		return false;
-	}
+	if (refunded === null || refunded <= 0n) return false;
 	if (target.currency.toLowerCase() !== input.reversalCurrency.toLowerCase()) return false;
-	const reversed = minBigInt(paid, previous + refunded);
-	await executeRows(
+	// The invoice was read before the customer lock, so a refund processed in between would leave a
+	// remembered total stale: add in the statement and read the totals it leaves.
+	const totals = await executeOne<{ amount_paid: string; reversed_amount: string }>(
 		executor,
 		drizzleSql`
 			UPDATE billing_invoices
-			SET reversed_amount = ${reversed.toString()}::bigint, updated_at = now()
-			WHERE project_id = ${projectId} AND id = ${target.invoice_id}
+			SET reversed_amount = LEAST(amount_paid, reversed_amount + ${refunded.toString()}::bigint),
+				updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${target.invoice_id} AND amount_paid > 0
+			RETURNING amount_paid::text AS amount_paid, reversed_amount::text AS reversed_amount
 		`,
 	);
+	if (totals === null) return false;
+	const paid = parseStripeAmountForComparison(totals.amount_paid);
+	const reversed = parseStripeAmountForComparison(totals.reversed_amount);
+	if (paid === null || reversed === null) return false;
 	const period = advanceServicePeriod(target);
 	if (period === null) return false;
 	const changed = await reverseSubscriptionPeriodAllocations(executor, {
