@@ -39,7 +39,7 @@ export const projectionDeliverySchema = projectionPayloadFields
 			"A purchase to record once by transactionId. Never sent with reversal, trial or planGrant.",
 		),
 		reversal: fields.reversal.describe(
-			"A refund or dispute to record once by transactionId. With a subscription fact it reports a returned subscription payment and reverses nothing. Never sent with purchase, trial or planGrant.",
+			"A refund or dispute to record once by transactionId. With a subscription fact it reports a returned subscription payment: the refunded share of the credits that payment funded is already taken back, and creditAmount is 0 because a subscription funds several features. Never sent with purchase, trial or planGrant.",
 		),
 		trial: fields.trial.describe(
 			"A trial that is ending or has ended. Never sent with purchase, reversal or planGrant.",

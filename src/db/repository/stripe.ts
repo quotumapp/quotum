@@ -2,17 +2,20 @@ import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { PurchaseStatus, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { stripeInvoiceView } from "../../providers/stripe/invoice-view";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingCadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
 import {
 	materializeSubscriptionAllocations,
 	materializeTopupAllocation,
+	reverseSubscriptionPeriodAllocations,
 	setPurchaseAllocationReversal,
 	syncSubscriptionPriceItems,
 } from "./catalog-allocations";
 import {
 	enqueueProjectionSyncJob,
+	enqueueUsageProjection,
 	getEntitlementSnapshot,
 	recomputeCustomerEntitlements,
 } from "./entitlements";
@@ -1732,8 +1735,10 @@ export class StripeBillingRepository extends RepositoryModule {
 
 	/**
 	 * Records a refund or dispute of a payment that settled a subscription invoice. Stripe keeps the
-	 * subscription running after money goes back, so nothing is revoked here: the event is recorded
-	 * against the subscription and the receiver gets a reversal fact with the subscription's state.
+	 * subscription running after money goes back, so the subscription is untouched: the event is
+	 * recorded against it and the receiver gets a reversal fact with the subscription's state. A
+	 * refund also takes back the refunded share of the credits that payment funded; a dispute
+	 * reverses nothing, because a won dispute has no event that would restore it.
 	 */
 	async recordStripeInvoiceReversalAndEnqueueProjection(
 		project: ProjectInstanceContext,
@@ -1759,21 +1764,21 @@ export class StripeBillingRepository extends RepositoryModule {
 	): Promise<StripeRecordingResult> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
-			const target = await executeOne<{
-				customer_id: string;
-				billing_account_id: string;
-				subscription_id: string;
-				store_product_id: string;
-				product_key: string;
-			}>(
+			const target = await executeOne<InvoiceReversalTarget>(
 				tx,
 				drizzleSql`
 					SELECT
+						invoices.id AS invoice_id,
 						invoices.customer_id,
 						c.billing_account_id,
 						s.id AS subscription_id,
 						s.store_product_id,
-						p.key AS product_key
+						p.key AS product_key,
+						invoices.amount_paid::text AS amount_paid,
+						invoices.currency,
+						invoices.reversed_amount::text AS reversed_amount,
+						invoices.provider_created_at,
+						invoices.raw_payload
 					FROM billing_invoices invoices
 					JOIN customers c ON c.id = invoices.customer_id AND c.project_id = invoices.project_id
 					JOIN subscriptions s ON s.id = invoices.subscription_id AND s.project_id = invoices.project_id
@@ -1814,9 +1819,16 @@ export class StripeBillingRepository extends RepositoryModule {
 				raiseIdentityMismatch: true,
 				replayStoreEventId: input.replayStoreEventId ?? null,
 			});
-			const snapshot = await getEntitlementSnapshot(tx, projectId, target.billing_account_id);
+			let snapshot = await getEntitlementSnapshot(tx, projectId, target.billing_account_id);
 			if (!storeEvent.applied || duplicateReversal !== null) {
 				return processedStripeRecordingResult(target.billing_account_id, snapshot);
+			}
+			if (input.reversalReason === "refund") {
+				const changed = await applyInvoiceRefund(tx, projectId, target, input);
+				if (changed) {
+					snapshot = await recomputeCustomerEntitlements(tx, projectId, target.billing_account_id);
+					await enqueueUsageProjection(tx, { projectId, customerId: target.customer_id });
+				}
 			}
 			await enqueueProjectionSyncJob(tx, {
 				customerId: target.customer_id,
@@ -1883,6 +1895,81 @@ export class StripeBillingRepository extends RepositoryModule {
 			return skippedStripeRecordingResult(reason);
 		}
 	}
+}
+
+interface InvoiceReversalTarget {
+	invoice_id: string;
+	customer_id: string;
+	billing_account_id: string;
+	subscription_id: string;
+	store_product_id: string;
+	product_key: string;
+	amount_paid: string;
+	currency: string;
+	reversed_amount: string;
+	provider_created_at: Date | string;
+	raw_payload: unknown;
+}
+
+/**
+ * Adds a refund to the invoice's cumulative reversed amount and takes back the refunded share of
+ * the credits the payment funded. The payment funded the allocations of the service period its
+ * advance-billed lines cover: lines of earlier, finished periods (usage billed in arrears) and
+ * proration lines name periods other invoices paid for. A refund that cannot be attributed exactly
+ * (another currency, an unreadable amount, a payload that no longer names the period) is recorded
+ * as a fact and changes no balance. Returns whether any balance changed.
+ */
+async function applyInvoiceRefund(
+	executor: QueryExecutor,
+	projectId: string,
+	target: InvoiceReversalTarget,
+	input: RecordStripeInvoiceReversalProjectionInput,
+): Promise<boolean> {
+	const paid = parseStripeAmountForComparison(target.amount_paid);
+	const previous = parseStripeAmountForComparison(target.reversed_amount);
+	const refunded = parseStripeAmountForComparison(input.reversalAmount);
+	if (paid === null || paid <= 0n || previous === null || refunded === null || refunded <= 0n) {
+		return false;
+	}
+	if (target.currency.toLowerCase() !== input.reversalCurrency.toLowerCase()) return false;
+	const reversed = minBigInt(paid, previous + refunded);
+	await executeRows(
+		executor,
+		drizzleSql`
+			UPDATE billing_invoices
+			SET reversed_amount = ${reversed.toString()}::bigint, updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${target.invoice_id}
+		`,
+	);
+	const period = advanceServicePeriod(target);
+	if (period === null) return false;
+	const changed = await reverseSubscriptionPeriodAllocations(executor, {
+		projectId,
+		subscriptionId: target.subscription_id,
+		periodStartAt: period.start,
+		periodEndAt: period.end,
+		reversedAmount: reversed,
+		paidAmount: paid,
+		reversedAt: input.reversedAt,
+	});
+	return changed > 0;
+}
+
+/** The period the invoice's advance-billed subscription lines cover, or null when none is readable. */
+function advanceServicePeriod(
+	target: Pick<InvoiceReversalTarget, "provider_created_at" | "raw_payload">,
+): { start: Date; end: Date } | null {
+	const invoiceCreatedAt = new Date(target.provider_created_at).getTime();
+	const periods = stripeInvoiceView(target.raw_payload).lines.flatMap((line) => {
+		if (line.proration === true || line.periodStart === null || line.periodEnd === null) return [];
+		const start = Date.parse(line.periodStart);
+		const end = Date.parse(line.periodEnd);
+		return start < end && end > invoiceCreatedAt ? [{ start, end }] : [];
+	});
+	if (periods.length === 0) return null;
+	const start = Math.max(...periods.map((period) => period.start));
+	const end = Math.max(...periods.filter((period) => period.start === start).map((p) => p.end));
+	return { start: new Date(start), end: new Date(end) };
 }
 
 /** Refund events repeat for one refund; only the first one processed applies it. */

@@ -955,6 +955,7 @@ export const billingInvoices = pgTable(
 		externalSubscriptionId: text("external_subscription_id"),
 		status: text("status").notNull(),
 		amountPaid: bigint("amount_paid", { mode: "number" }).notNull().default(0),
+		reversedAmount: bigint("reversed_amount", { mode: "number" }).notNull().default(0),
 		currency: text("currency").notNull(),
 		paidAt: timestamp("paid_at", { withTimezone: true }),
 		providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }).notNull(),
@@ -985,6 +986,7 @@ export const billingInvoices = pgTable(
 			.on(table.subscriptionId)
 			.where(sql`${table.subscriptionId} IS NOT NULL`),
 		check("billing_invoices_amount_paid_check", sql`${table.amountPaid} >= 0`),
+		check("billing_invoices_reversed_amount_check", sql`${table.reversedAmount} >= 0`),
 	],
 );
 

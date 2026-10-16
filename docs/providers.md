@@ -487,20 +487,31 @@ trials get no ending notice.
 
 ### Refunds of subscription payments
 
-A refund or dispute of a subscription's payment changes nothing in Quotum, because it changes
-nothing in Stripe: Stripe returns the money and leaves the subscription running, and Quotum mirrors
-the subscription's own state. Access entitlements and the plan allocations granted for the paid
-period stay until the subscription ends. To end access with the refund, cancel the subscription as
-well, in Stripe or with an immediate [cancellation](subscriptions.md#cancelling-and-uncancelling-a-subscription).
+A refund of a subscription's payment returns the money and takes back the refunded share of the
+credits that payment funded. Stripe leaves the subscription running, and so does Quotum: the
+subscription's own state and its access entitlements stay until it ends. To end access with the
+refund, cancel the subscription as well, in Stripe or with an immediate
+[cancellation](subscriptions.md#cancelling-and-uncancelling-a-subscription).
+
+Quotum adds the refund to the invoice's cumulative reversed amount, capped at what was paid, and
+scales the plan allocations of the service period the invoice's advance-billed lines cover to that
+share of the payment. Usage billed in arrears and proration lines name periods other invoices paid
+for, so they never select the allocations. A reversal never goes below what an allocation already
+reversed and never into quantity that is consumed or held, so spent credit stays spent and open
+reservations still settle. A refund of the whole payment closes the allocation. A dispute reverses
+nothing: a won dispute has no event that would restore the credits. A refund in another currency
+than the invoice's, or of an invoice whose stored payload no longer names its period, is recorded
+and reported without changing a balance.
 
 Quotum still records the event and tells your backend. Neither the refund nor its payment names an
 invoice, so Quotum asks Stripe which invoice the payment settled, through Stripe's invoice payments
 list filtered by the payment intent, and matches it to a subscription invoice recorded from
 `invoice.paid`. The store event is then
 `processed` against that subscription, and one projection per refund or dispute carries a
-`reversal` fact with `creditAmount: 0`, the refund or dispute id as `transactionId`, the payment
-intent as `originalTransactionId` and the subscription's `productKey`, next to the
-[`subscription` fact](#projections). A `reversal` that arrives with a `subscription` fact is a
+`reversal` fact with `creditAmount: 0`, because a subscription funds several features, the refund or
+dispute id as `transactionId`, the payment intent as `originalTransactionId` and the subscription's
+`productKey`, next to the [`subscription` fact](#projections). The balances after a refund arrive in
+the usage delivery that follows it. A `reversal` that arrives with a `subscription` fact is a
 returned subscription payment; one without it reverses a one-time purchase.
 
 A refund or dispute Quotum cannot attribute is retried with backoff, because the purchase or
