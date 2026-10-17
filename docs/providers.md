@@ -982,8 +982,9 @@ existed.
 
 `refund_write` is probed the same way (a refund of a payment that cannot exist) but is optional: a
 merchant that never refunds through Quotum is not asked for it. A key that lacks it validates, and
-`unverifiedPermissions` lists `refund_write` until the permission is added. The exact Dashboard
-name of the permission is the one Stripe reports for Refunds.
+`unverifiedPermissions` lists `refund_write` until the permission is added. It is the Charges and
+Refunds resource set to Write, the name Stripe's own restricted-key and Stripe App permission lists
+use for the resource (`charge_write` in an app manifest).
 
 Projection verification reports the receiver's HTTP status, including 401, 404 and 503, or an
 invalid acknowledgment/challenge reason for an HTTP 200. A status is a diagnostic clue, not proof
