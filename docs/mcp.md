@@ -171,7 +171,7 @@ The tool schema lists supported actions and their existing domain body schemas. 
 publication (including default-plan configuration), migrations, commercial actions, entities,
 shared/entity grants and debits, controls, trials, alerts, auto-top-ups, licenses, contracts,
 promotions, usage corrections, event replay and projection retry. Credential, connection, team,
-environment administration, global reconciliation and usage consumption are excluded.
+environment administration, global reconciliation, usage consumption and refunds are excluded.
 
 Every effective change requires the same connected merchant to open the returned URL, review it,
 and choose **Approve and apply**, including in sandbox. Production and sensitive recovery/correction

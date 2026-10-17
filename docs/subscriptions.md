@@ -310,7 +310,10 @@ cancels the subscription; it does not release or amend a schedule that may recre
 
 `refund` asks the payment provider to return money for one payment and records who asked, how much
 and why. It goes through the same preview and execute pair as every commercial action, so a
-read-only credential is refused and the amount a caller approves is the amount that is sent.
+read-only credential is refused and the amount a caller approves is the amount that is sent. Only a
+trusted backend with a full project credential asks for a refund: the console and MCP change
+proposals refuse the intent with `400 INVALID_REQUEST`, because the summary a person reviews there
+describes what a preview charges and has no words for money going back.
 Stripe is the only provider that issues refunds through Quotum. Apple decides refunds of its own
 purchases and exposes no API to issue one, so a refund aimed at an Apple purchase is
 `409 REFUND_PROVIDER_MANAGED`; Google Play and Paddle refunds are made in their own consoles, and

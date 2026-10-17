@@ -2,6 +2,7 @@ import {
 	type CommercialActionExecutionResult,
 	type CommercialActionIntent,
 	refuseEmbeddedCheckout,
+	refuseRefund,
 	type StoredCommercialActionPreview,
 	storedExecutionAnswer,
 } from "../billing/commercial";
@@ -68,8 +69,11 @@ export async function executeCommercial(
 		reader: CommercialPreviewReader;
 		previewToken: string;
 		idempotencyKey: string;
-		/** Refuse an embedded Checkout, for callers that store what they answer. */
-		hostedCheckoutOnly?: boolean;
+		/**
+		 * The console and MCP change proposals, which store what they answer and show a person a
+		 * summary of the preview: they refuse an embedded Checkout (a client secret) and a refund.
+		 */
+		merchantCaller?: boolean;
 	},
 ): Promise<CommercialActionExecutionResult> {
 	const stored = await input.reader.getCommercialActionPreview(
@@ -77,7 +81,10 @@ export async function executeCommercial(
 		input.billingAccountId,
 		input.previewToken,
 	);
-	if (input.hostedCheckoutOnly === true) refuseEmbeddedCheckout(stored.intent);
+	if (input.merchantCaller === true) {
+		refuseEmbeddedCheckout(stored.intent);
+		refuseRefund(stored.intent);
+	}
 	if (
 		stored.executionIdempotencyKey !== null &&
 		stored.executionIdempotencyKey !== input.idempotencyKey

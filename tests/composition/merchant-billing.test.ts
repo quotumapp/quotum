@@ -404,6 +404,54 @@ describe("merchant billing port", () => {
 		).toMatchObject({ status: 200 });
 	});
 
+	it("refuses a refund, which the console and MCP review would describe as charging nothing", async () => {
+		const stored = storedCommercialPreview();
+		stored.intent = {
+			kind: "refund",
+			target: { type: "subscription_payment", externalSubscriptionId: "sub_1" },
+			mode: "full",
+			reason: "Customer asked for the money back",
+		};
+		const calls: unknown[] = [];
+		const stripe = {
+			...requiredOnlyStripeService(),
+			previewCommercialAction: async (input: unknown) => {
+				calls.push(input);
+				return stored.preview;
+			},
+			executeCommercialAction: async (input: unknown) => {
+				calls.push(input);
+				return {
+					kind: "refund_request" as const,
+					refundRequestId: "00000000-0000-4000-8000-000000000001",
+					status: "succeeded" as const,
+					amountMinor: 1000,
+					currency: "usd",
+					providerRefundId: "re_1",
+					cancellation: null,
+				};
+			},
+		};
+		const billing = port({
+			stripe,
+			repository: { getCommercialActionPreview: async () => stored },
+		});
+
+		expect(
+			await billing.dispatch(command("commercial.preview", { body: { intent: stored.intent } })),
+		).toMatchObject({ status: 400, body: { error: { code: "INVALID_REQUEST" } } });
+		// A refund previewed by a trusted backend cannot be executed through the console either.
+		expect(
+			await billing.dispatch(
+				command("commercial.execute", {
+					body: { previewToken: stored.preview.previewToken },
+					idempotencyKey: "refund",
+				}),
+			),
+		).toMatchObject({ status: 400, body: { error: { code: "INVALID_REQUEST" } } });
+		expect(calls).toEqual([]);
+	});
+
 	it("dispatches the capability reads for the environment and one billing account", async () => {
 		const calls: string[][] = [];
 		const billing = port({ capabilityReads: recordingCapabilityReads(calls) });

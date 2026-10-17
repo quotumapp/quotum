@@ -296,6 +296,19 @@ export function refuseEmbeddedCheckout(intent: CommercialActionIntent): void {
 }
 
 /**
+ * The console and MCP change proposals show a person a summary of what a preview charges, and a
+ * refund charges nothing, so that summary would not say that money goes back. Until they render a
+ * refund, only a trusted backend with a full project credential asks for one.
+ */
+export function refuseRefund(intent: CommercialActionIntent): void {
+	if (intent.kind === "refund") {
+		throw new InvalidRequestError(
+			"A refund is requested by a trusted backend, not through the console or a change proposal",
+		);
+	}
+}
+
+/**
  * The stored execution as the caller receives it, or null for an embedded Checkout, whose client
  * secret only the provider can answer again.
  */
