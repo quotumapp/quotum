@@ -975,6 +975,69 @@ export async function reversePurchaseAllocations(
 	);
 }
 
+/**
+ * Takes back the share of a paid subscription period that a refund returned. The allocations whose
+ * period starts inside the invoice's service period are scaled to the refunded share of the payment,
+ * but never below what was already reversed and never into quantity that is consumed or held, so
+ * usage that happened stays consumed and open reservations still settle. A refund of the whole
+ * payment closes the allocation, as a provider revocation does.
+ */
+export async function reverseSubscriptionPeriodAllocations(
+	executor: QueryExecutor,
+	input: {
+		projectId: string;
+		subscriptionId: string;
+		periodStartAt: Date;
+		periodEndAt: Date;
+		reversedAmount: bigint;
+		paidAmount: bigint;
+		reversedAt: Date;
+	},
+): Promise<number> {
+	if (
+		input.paidAmount < 1n ||
+		input.reversedAmount < 0n ||
+		input.reversedAmount > input.paidAmount ||
+		input.periodStartAt >= input.periodEndAt
+	) {
+		throw new Error("Subscription allocation reversal ratio is invalid");
+	}
+	const rows = await executeRows<{ id: string | number }>(
+		executor,
+		drizzleSql`
+			UPDATE balance_allocations allocations
+			SET
+				reversed_quantity = GREATEST(
+					allocations.reversed_quantity,
+					LEAST(
+						round(
+							allocations.quantity * ${input.reversedAmount.toString()}::numeric
+								/ ${input.paidAmount.toString()}::numeric,
+							features.credit_scale
+						),
+						allocations.quantity - allocations.consumed_quantity - allocations.held_quantity
+					)
+				),
+				reversed_at = CASE
+					WHEN ${input.reversedAmount === input.paidAmount}
+						THEN COALESCE(allocations.reversed_at, ${input.reversedAt.toISOString()})
+					ELSE allocations.reversed_at
+				END,
+				updated_at = now()
+			FROM features
+			WHERE allocations.project_id = ${input.projectId}
+				AND allocations.subscription_id = ${input.subscriptionId}
+				AND allocations.source_kind = 'subscription'
+				AND allocations.period_start_at >= ${input.periodStartAt.toISOString()}::timestamptz
+				AND allocations.period_start_at < ${input.periodEndAt.toISOString()}::timestamptz
+				AND features.project_id = allocations.project_id
+				AND features.id = allocations.feature_id
+			RETURNING allocations.id
+		`,
+	);
+	return rows.length;
+}
+
 export async function setPurchaseAllocationReversal(
 	executor: QueryExecutor,
 	input: {

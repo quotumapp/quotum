@@ -234,6 +234,16 @@ and nothing is backfilled, so a dump from the previous release restores as it is
 read the new baseline, so a rollback restores the pre-upgrade backup, which loses the term changes
 made since along with their audit events.
 
+## Subscription payment refund reversal
+
+The billing core baseline adds `billing_invoices.reversed_amount`, the refunds
+[refund sync](providers.md#refunds-of-subscription-payments) has recorded against an invoice, in
+minor units. Every existing invoice starts at 0 and nothing is backfilled, so a dump from the
+previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). A refund recorded before the upgrade
+reversed no credits and keeps them; only refund events that arrive after it take credits back. An
+older image cannot read the new baseline, so a rollback restores the pre-upgrade backup.
+
 ## Upgrading a populated deployment to v0.22.0
 
 v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:

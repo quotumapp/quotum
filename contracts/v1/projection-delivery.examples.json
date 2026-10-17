@@ -465,7 +465,7 @@
         "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
       }
     },
-    "description": "A payment of the subscription was refunded. Stripe keeps the subscription running, so nothing is revoked: the reversal carries creditAmount 0, names the refund and the payment intent, and arrives with the subscription fact. Cancel the subscription to end access."
+    "description": "A payment of the subscription was refunded. Stripe keeps the subscription running and the refunded share of the credits that payment funded is taken back from the balances, which a usage_changed delivery reports. The reversal carries creditAmount 0, because a subscription funds several features, names the refund and the payment intent, and arrives with the subscription fact. Cancel the subscription to end access."
   },
   "stripe_subscription_renewal": {
     "delivery": {

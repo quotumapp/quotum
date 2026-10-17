@@ -739,6 +739,8 @@ CREATE TABLE IF NOT EXISTS billing_invoices (
 	external_subscription_id TEXT,
 	status TEXT NOT NULL,
 	amount_paid BIGINT NOT NULL DEFAULT 0 CHECK (amount_paid >= 0),
+	-- Cumulative refunds recorded against the payment, in minor units; the writer caps it at amount_paid.
+	reversed_amount BIGINT NOT NULL DEFAULT 0 CHECK (reversed_amount >= 0),
 	currency TEXT NOT NULL,
 	paid_at TIMESTAMPTZ,
 	provider_created_at TIMESTAMPTZ NOT NULL,

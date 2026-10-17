@@ -149,7 +149,7 @@ export const projectionDeliveryExamples: Record<string, ProjectionDeliveryExampl
 	},
 	stripe_subscription_refund: {
 		description:
-			"A payment of the subscription was refunded. Stripe keeps the subscription running, so nothing is revoked: the reversal carries creditAmount 0, names the refund and the payment intent, and arrives with the subscription fact. Cancel the subscription to end access.",
+			"A payment of the subscription was refunded. Stripe keeps the subscription running and the refunded share of the credits that payment funded is taken back from the balances, which a usage_changed delivery reports. The reversal carries creditAmount 0, because a subscription funds several features, names the refund and the payment intent, and arrives with the subscription fact. Cancel the subscription to end access.",
 		delivery: {
 			schemaVersion: 1,
 			projectKey,
