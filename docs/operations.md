@@ -764,7 +764,9 @@ batches under a lease and resumes after a stop:
 - deletes the account's provider links, checkout requests, payment setup sessions, idempotency
   claims, entitlements, projection jobs and closed Paddle reservations;
 - rewrites ids, actors and free text on entities, provider operations, commercial action previews,
-  promotion codes, plan grants, redemptions, operator grants, debits and balance allocation keys;
+  promotion codes, plan grants, redemptions, operator grants, debits, balance allocation keys and
+  refund requests (the account id, the caller's reason and both idempotency keys; the amounts,
+  currency and provider ids stay);
 - blanks provider payloads and error text on store events, purchases, subscriptions and invoices,
   and the receipt, window keys and caller metadata of usage events;
 - verifies that nothing still carries the original id, then completes and drops the id from the

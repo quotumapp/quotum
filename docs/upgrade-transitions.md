@@ -255,8 +255,8 @@ a request until a caller executes a `refund`. An older image cannot read the new
 rollback restores the pre-upgrade backup, which loses the refund requests made since, although the
 refunds themselves stay in Stripe; check them against the Stripe Dashboard.
 
-A restricted key created before this release may lack Refunds: Write. Validation still passes and
-lists `refund_write` among the unverified permissions, and a refund then fails with
+A restricted key created before this release may lack Write on Charges and Refunds. Validation
+still passes and lists `refund_write` among the unverified permissions, and a refund then fails with
 `REFUND_REJECTED_BY_PROVIDER`; add the permission to the key before the first refund, as the
 [restricted-key recipe](providers.md#manual-stripe-restricted-key-recipe) lists.
 
