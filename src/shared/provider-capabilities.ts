@@ -67,6 +67,7 @@ export const providerOperations = [
 	"settlement.collect_finalized_charge",
 	"adjustment.issue",
 	"refund.sync",
+	"refund.issue",
 	"topup.customer_initiated",
 	"topup.automatic",
 	"promotion.code_entry",
@@ -289,7 +290,13 @@ export const providerOperationDefinitions: Record<ProviderOperation, ProviderOpe
 			domain: "refunds",
 			title: "Refund and reversal sync",
 			description:
-				"Quotum mirrors refunds, disputes, revocations and voided purchases made in the provider, reversing the grants they funded, and never initiates a refund itself.",
+				"Quotum mirrors refunds, disputes, revocations and voided purchases made in the provider, whoever issued them, reversing the grants they funded.",
+		},
+		"refund.issue": {
+			domain: "refunds",
+			title: "Quotum-issued refund",
+			description:
+				"Quotum asks the provider to return money for one payment on a caller's request, recording the amount and reason; the credits the payment funded are reversed when the provider's refund event arrives through refund sync.",
 		},
 		"topup.customer_initiated": {
 			domain: "topups",

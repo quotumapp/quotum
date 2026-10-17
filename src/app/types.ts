@@ -21,6 +21,7 @@ import type { TrialServiceLike } from "../billing/plan-grants";
 import type { PromotionServiceLike } from "../billing/promotions";
 import type { ProviderCustomerUnlinkServiceLike } from "../billing/provider-customer-unlinks";
 import type { ProviderOperationStore } from "../billing/provider-operations";
+import type { RefundRequestStore } from "../billing/refunds";
 import type { UsageApiServiceLike } from "../billing/usage-api";
 import type { WebBillingService } from "../billing/web-provider";
 import type { CatalogBindingsLike } from "../catalog/bindings";
@@ -180,6 +181,7 @@ export interface AppDependencies {
 	providerCapabilityReads?: ProviderCapabilityReads;
 	commercialPreviewReader?: import("./commercial-actions").CommercialPreviewReader;
 	providerOperationStore?: Pick<ProviderOperationStore, "get">;
+	refundStore?: RefundRequestStore;
 	providerOperationReconciler?: Parameters<
 		typeof import("./provider-operation-routes").registerProviderOperationRoutes
 	>[0]["reconcile"];

@@ -175,6 +175,10 @@ export class CommercialActionRepository extends RepositoryModule {
 			supersedeReason: string;
 			supersedesPendingChange: boolean;
 			result: Omit<SubscriptionCancellationResult, "supersededChangeId">;
+			/** Stores a larger execution the cancellation is part of instead of the cancellation. */
+			finalize?: (
+				cancellation: SubscriptionCancellationResult,
+			) => StoredCommercialActionExecutionResult;
 		},
 	): Promise<StoredCommercialActionExecutionResult> {
 		return await this.transaction(async (tx) => {
@@ -190,9 +194,10 @@ export class CommercialActionRepository extends RepositoryModule {
 						input.supersedeReason,
 					)
 				: null;
+			const cancellation: SubscriptionCancellationResult = { ...input.result, supersededChangeId };
 			return await completeExecutionInTx(tx, projectId, {
 				...input,
-				result: { ...input.result, supersededChangeId },
+				result: input.finalize === undefined ? cancellation : input.finalize(cancellation),
 			});
 		});
 	}

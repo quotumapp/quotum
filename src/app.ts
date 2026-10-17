@@ -17,6 +17,7 @@ import {
 	projectProviderServiceResolver,
 	requireApplePromotionSigner,
 } from "./app/provider-services";
+import { registerRefundRoutes } from "./app/refund-routes";
 import {
 	projectSelectorRejectedError,
 	queryHasCallerProjectSelector,
@@ -130,6 +131,7 @@ export function createApp({
 	providerCapabilityReads,
 	commercialPreviewReader,
 	providerOperationStore,
+	refundStore,
 	providerOperationReconciler,
 	adminBillingReader,
 	adminOperations,
@@ -571,6 +573,12 @@ export function createApp({
 		reconcile: providerOperationReconciler,
 		store: providerOperationStore ?? {
 			get: (...args) => getRepository().providerOperations.get(...args),
+		},
+	});
+	registerRefundRoutes({
+		app,
+		store: refundStore ?? {
+			listRefundRequests: (...args) => getRepository().refundRequests.listRefundRequests(...args),
 		},
 	});
 	const usageApi = usageApiService ?? getRepository().usageApi;

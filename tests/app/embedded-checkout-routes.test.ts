@@ -400,7 +400,7 @@ describe("commercial execution replay", () => {
 
 		const refused = replay({ kind: "checkout", sessionId: "cs_embedded", duplicate: false });
 		await expect(
-			executeCommercial({ ...refused.input, hostedCheckoutOnly: true }),
+			executeCommercial({ ...refused.input, merchantCaller: true }),
 		).rejects.toMatchObject({ code: "INVALID_REQUEST", status: 400 });
 		expect(refused.calls).toEqual([]);
 	});

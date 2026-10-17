@@ -61,6 +61,7 @@ export const merchantBillingOperations = [
 	["GET", "/billing-accounts/:billingAccountId/invoices", "account.invoices"],
 	["GET", "/billing-accounts/:billingAccountId/invoices/:invoiceId", "account.invoice"],
 	["GET", "/billing-accounts/:billingAccountId/billing-account", "account.billing"],
+	["GET", "/billing-accounts/:billingAccountId/refunds", "account.refunds"],
 	["GET", "/billing-accounts/:billingAccountId/available-actions", "account.actions"],
 	[
 		"GET",

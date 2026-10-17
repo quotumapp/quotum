@@ -1814,7 +1814,7 @@ CREATE TABLE IF NOT EXISTS commercial_action_previews (
 	billing_account_id TEXT COLLATE "C" NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
 	preview_token UUID NOT NULL,
 	intent_kind TEXT NOT NULL CHECK (
-		intent_kind IN ('checkout_plan', 'checkout_product', 'subscription_change', 'cancel', 'uncancel', 'setup_payment')
+		intent_kind IN ('checkout_plan', 'checkout_product', 'subscription_change', 'cancel', 'uncancel', 'setup_payment', 'refund')
 	),
 	intent_hash TEXT NOT NULL CHECK (char_length(intent_hash) = 64),
 	state_fingerprint TEXT NOT NULL CHECK (char_length(state_fingerprint) = 64),
@@ -1850,6 +1850,67 @@ CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_expiry
 
 CREATE INDEX IF NOT EXISTS idx_billing_commercial_previews_account_created
 	ON commercial_action_previews (project_id, billing_account_id, created_at DESC);
+
+-- A refund Quotum asked a provider for. The row is written before the provider is called and keeps
+-- the exact idempotency key the call used, so a crashed execution resumes the same request instead
+-- of issuing a second refund. It records the amount, reason and provider outcome only: the credits
+-- a refund reverses follow the provider's refund event (refund.sync), never this request. One
+-- request may be open per provider payment, and an open request whose outcome could not be
+-- established (requires_review) keeps holding that slot.
+CREATE TABLE IF NOT EXISTS refund_requests (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+	customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+	billing_account_id TEXT COLLATE "C" NOT NULL CHECK (char_length(billing_account_id) BETWEEN 1 AND 200),
+	provider TEXT NOT NULL CHECK (provider = 'stripe'),
+	preview_token UUID NOT NULL,
+	target_kind TEXT NOT NULL CHECK (target_kind IN ('subscription_payment', 'purchase')),
+	external_invoice_id TEXT CHECK (external_invoice_id IS NULL OR char_length(external_invoice_id) BETWEEN 1 AND 200),
+	purchase_id UUID,
+	provider_payment_id TEXT NOT NULL CHECK (char_length(provider_payment_id) BETWEEN 1 AND 200),
+	amount_minor BIGINT NOT NULL CHECK (amount_minor > 0),
+	currency TEXT NOT NULL CHECK (currency ~ '^[a-z]{3}$'),
+	mode TEXT NOT NULL CHECK (mode IN ('full', 'prorated')),
+	basis TEXT NOT NULL CHECK (basis IN ('full', 'remaining_time', 'unconsumed_credit')),
+	cancel_immediately BOOLEAN NOT NULL DEFAULT false,
+	reason TEXT NOT NULL CHECK (char_length(reason) BETWEEN 1 AND 500),
+	execution_idempotency_key TEXT NOT NULL CHECK (char_length(execution_idempotency_key) BETWEEN 1 AND 200),
+	provider_idempotency_key TEXT NOT NULL CHECK (char_length(provider_idempotency_key) BETWEEN 1 AND 255),
+	status TEXT NOT NULL DEFAULT 'requested' CHECK (
+		status IN ('requested', 'pending', 'succeeded', 'failed', 'requires_review')
+	),
+	provider_refund_id TEXT CHECK (provider_refund_id IS NULL OR char_length(provider_refund_id) BETWEEN 1 AND 200),
+	failure_code TEXT CHECK (failure_code IS NULL OR char_length(failure_code) BETWEEN 1 AND 80),
+	completed_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT refund_requests_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT refund_requests_project_preview_unique UNIQUE (project_id, preview_token),
+	CONSTRAINT refund_requests_project_customer_fk
+		FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id)
+		ON DELETE CASCADE,
+	CONSTRAINT refund_requests_target_check CHECK (
+		(target_kind = 'subscription_payment' AND external_invoice_id IS NOT NULL AND purchase_id IS NULL)
+		OR (target_kind = 'purchase' AND purchase_id IS NOT NULL AND external_invoice_id IS NULL)
+	),
+	CONSTRAINT refund_requests_state_check CHECK (
+		(status IN ('requested', 'pending', 'requires_review') AND completed_at IS NULL)
+		OR (status = 'succeeded' AND provider_refund_id IS NOT NULL AND completed_at IS NOT NULL)
+		OR (status = 'failed' AND completed_at IS NOT NULL)
+	)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_refund_requests_open_payment
+	ON refund_requests (project_id, provider, provider_payment_id)
+	WHERE status IN ('requested', 'pending', 'requires_review');
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_refund_requests_provider_refund
+	ON refund_requests (project_id, provider, provider_refund_id)
+	WHERE provider_refund_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_refund_requests_customer_created
+	ON refund_requests (project_id, customer_id, created_at DESC);
 
 -- Hosted payment-method setup. A setup saves a method for later off-session charges. Without a plan
 -- it records no purchase, allocation, entitlement or invoice, and the only provider state it changes

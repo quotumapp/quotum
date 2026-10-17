@@ -47,7 +47,7 @@ import {
 	requireStripeBillingService,
 } from "../app/provider-services";
 import type { ProjectProviderServiceResolver } from "../app/types";
-import { refuseEmbeddedCheckout } from "../billing/commercial";
+import { refuseEmbeddedCheckout, refuseRefund } from "../billing/commercial";
 import {
 	BillingError,
 	classifyBillingError,
@@ -58,6 +58,7 @@ import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { encodeInvoiceCursor, encodeUsageCursor, withoutInvoiceLinks } from "../billing/insights";
 import { MeteringService } from "../billing/metering";
 import { providerOperationReceipt } from "../billing/provider-operations";
+import { publicRefundRequest } from "../billing/refunds";
 import { publicOperationLookup } from "../billing/usage-api";
 import type { BillingRepository } from "../db/repository";
 import type { BillingAdminOperations } from "../operations/admin";
@@ -284,6 +285,15 @@ export function createMerchantBillingPort(input: {
 			}
 			case "account.actions":
 				return ok(await capabilityReads.availableActions(project, account()));
+			case "account.refunds":
+				return ok(
+					(
+						await repo.refundRequests.listRefundRequests(project, {
+							billingAccountId: account(),
+							limit: 25,
+						})
+					).map(publicRefundRequest),
+				);
 			case "controls": {
 				const q = parse(
 					z.object({ entityId: z.string().trim().min(1).max(200).optional() }).strict(),
@@ -553,8 +563,10 @@ export function createMerchantBillingPort(input: {
 			}
 			case "commercial.preview": {
 				const body = parse(commercialActionPreviewBodySchema, command.body);
-				// The console and MCP changes store what they answer; a client secret must not be.
+				// The console and MCP changes store what they answer, so a client secret must not be
+				// stored, and a person reviewing one sees a summary that has no words for a refund yet.
 				refuseEmbeddedCheckout(body.intent);
+				refuseRefund(body.intent);
 				return ok(
 					await previewCommercial({
 						project,
@@ -574,7 +586,7 @@ export function createMerchantBillingPort(input: {
 					billingAccountId: account(),
 					previewToken: body.previewToken,
 					idempotencyKey: requireKey(command),
-					hostedCheckoutOnly: true,
+					merchantCaller: true,
 				});
 				// Mirrors the /v1 route: only a queued subscription change is accepted for later work.
 				return ok(result, result.kind === "subscription_change" ? 202 : 200);

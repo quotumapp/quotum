@@ -35,6 +35,9 @@ export interface CreateIntegrationAppOptions {
 	stripeConstructWebhookError?: Error;
 	stripeCheckoutSessionFailures?: number;
 	stripeCheckoutSession?: Record<string, unknown>;
+	/** The invoice each PaymentIntent settled, for refunds that start from an invoice. */
+	stripeInvoicePayments?: Record<string, string>;
+	stripeRefundStatus?: string;
 	googleRtdn?: "subscription" | "one_time" | "voided";
 	googleRtdnVerification?: "stub" | "real";
 	googleVoidedPurchaseToken?: string;
@@ -54,6 +57,8 @@ export function createIntegrationApp({
 	stripeConstructWebhookError,
 	stripeCheckoutSessionFailures,
 	stripeCheckoutSession,
+	stripeInvoicePayments,
+	stripeRefundStatus,
 	googleRtdn = "subscription",
 	googleRtdnVerification = "stub",
 	googleVoidedPurchaseToken = "purchase_token_1",
@@ -83,6 +88,8 @@ export function createIntegrationApp({
 		constructWebhookError: stripeConstructWebhookError,
 		createCheckoutSessionFailures: stripeCheckoutSessionFailures,
 		checkoutSession: stripeCheckoutSession,
+		...(stripeInvoicePayments === undefined ? {} : { invoicePayments: stripeInvoicePayments }),
+		...(stripeRefundStatus === undefined ? {} : { refundStatus: stripeRefundStatus }),
 	});
 	const projectProviderServices: ProjectProviderServiceOverrides<
 		AppleStoreKitService,
@@ -204,6 +211,7 @@ export function createIntegrationApp({
 			controlsEnterpriseService: repository.controlsEnterprise,
 			promotionService: repository.promotions,
 			balanceAdjustmentService: repository.balanceAdjustments,
+			refundStore: repository.refundRequests,
 			billingInsightsService: {
 				listUsageEvents: (...args) => repository.listUsageEvents(...args),
 				listProjectUsageEvents: (...args) => repository.listProjectUsageEvents(...args),

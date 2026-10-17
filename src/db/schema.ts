@@ -1436,6 +1436,7 @@ export const commercialActionPreviews = pgTable(
 				| "cancel"
 				| "uncancel"
 				| "setup_payment"
+				| "refund"
 			>()
 			.notNull(),
 		intentHash: text("intent_hash").notNull(),
@@ -1463,7 +1464,7 @@ export const commercialActionPreviews = pgTable(
 		),
 		check(
 			"commercial_action_previews_intent_kind_check",
-			sql`((intent_kind = ANY (ARRAY['checkout_plan'::text, 'checkout_product'::text, 'subscription_change'::text, 'cancel'::text, 'uncancel'::text, 'setup_payment'::text])))`,
+			sql`((intent_kind = ANY (ARRAY['checkout_plan'::text, 'checkout_product'::text, 'subscription_change'::text, 'cancel'::text, 'uncancel'::text, 'setup_payment'::text, 'refund'::text])))`,
 		),
 		check("commercial_action_previews_intent_hash_check", sql`((char_length(intent_hash) = 64))`),
 		check(
@@ -1509,6 +1510,119 @@ export const commercialActionPreviews = pgTable(
 		index("idx_billing_commercial_previews_account_created").on(
 			table.projectId,
 			table.billingAccountId,
+			table.createdAt.desc(),
+		),
+	],
+);
+
+/** A refund Quotum asked a provider for. The SQL baseline is authoritative; this mirrors it. */
+export const refundRequests = pgTable(
+	"refund_requests",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "cascade" }),
+		customerId: uuid("customer_id")
+			.notNull()
+			.references(() => customers.id, { onDelete: "cascade" }),
+		billingAccountId: text("billing_account_id").notNull(),
+		provider: text("provider").$type<"stripe">().notNull(),
+		previewToken: uuid("preview_token").notNull(),
+		targetKind: text("target_kind").$type<"subscription_payment" | "purchase">().notNull(),
+		externalInvoiceId: text("external_invoice_id"),
+		purchaseId: uuid("purchase_id"),
+		providerPaymentId: text("provider_payment_id").notNull(),
+		amountMinor: bigint("amount_minor", { mode: "number" }).notNull(),
+		currency: text("currency").notNull(),
+		mode: text("mode").$type<"full" | "prorated">().notNull(),
+		basis: text("basis").$type<"full" | "remaining_time" | "unconsumed_credit">().notNull(),
+		cancelImmediately: boolean("cancel_immediately").notNull().default(false),
+		reason: text("reason").notNull(),
+		executionIdempotencyKey: text("execution_idempotency_key").notNull(),
+		providerIdempotencyKey: text("provider_idempotency_key").notNull(),
+		status: text("status")
+			.$type<"requested" | "pending" | "succeeded" | "failed" | "requires_review">()
+			.notNull()
+			.default("requested"),
+		providerRefundId: text("provider_refund_id"),
+		failureCode: text("failure_code"),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"refund_requests_billing_account_id_check",
+			sql`char_length(${table.billingAccountId}) BETWEEN 1 AND 200`,
+		),
+		check("refund_requests_provider_check", sql`${table.provider} = 'stripe'`),
+		check(
+			"refund_requests_target_kind_check",
+			sql`${table.targetKind} IN ('subscription_payment', 'purchase')`,
+		),
+		check(
+			"refund_requests_external_invoice_id_check",
+			sql`${table.externalInvoiceId} IS NULL OR char_length(${table.externalInvoiceId}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"refund_requests_provider_payment_id_check",
+			sql`char_length(${table.providerPaymentId}) BETWEEN 1 AND 200`,
+		),
+		check("refund_requests_amount_minor_check", sql`${table.amountMinor} > 0`),
+		check("refund_requests_currency_check", sql`${table.currency} ~ '^[a-z]{3}$'`),
+		check("refund_requests_mode_check", sql`${table.mode} IN ('full', 'prorated')`),
+		check(
+			"refund_requests_basis_check",
+			sql`${table.basis} IN ('full', 'remaining_time', 'unconsumed_credit')`,
+		),
+		check("refund_requests_reason_check", sql`char_length(${table.reason}) BETWEEN 1 AND 500`),
+		check(
+			"refund_requests_execution_idempotency_key_check",
+			sql`char_length(${table.executionIdempotencyKey}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"refund_requests_provider_idempotency_key_check",
+			sql`char_length(${table.providerIdempotencyKey}) BETWEEN 1 AND 255`,
+		),
+		check(
+			"refund_requests_status_check",
+			sql`${table.status} IN ('requested', 'pending', 'succeeded', 'failed', 'requires_review')`,
+		),
+		check(
+			"refund_requests_provider_refund_id_check",
+			sql`${table.providerRefundId} IS NULL OR char_length(${table.providerRefundId}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"refund_requests_failure_code_check",
+			sql`${table.failureCode} IS NULL OR char_length(${table.failureCode}) BETWEEN 1 AND 80`,
+		),
+		check(
+			"refund_requests_target_check",
+			sql`(${table.targetKind} = 'subscription_payment' AND ${table.externalInvoiceId} IS NOT NULL AND ${table.purchaseId} IS NULL)
+				OR (${table.targetKind} = 'purchase' AND ${table.purchaseId} IS NOT NULL AND ${table.externalInvoiceId} IS NULL)`,
+		),
+		check(
+			"refund_requests_state_check",
+			sql`(${table.status} IN ('requested', 'pending', 'requires_review') AND ${table.completedAt} IS NULL)
+				OR (${table.status} = 'succeeded' AND ${table.providerRefundId} IS NOT NULL AND ${table.completedAt} IS NOT NULL)
+				OR (${table.status} = 'failed' AND ${table.completedAt} IS NOT NULL)`,
+		),
+		unique("refund_requests_project_id_id_unique").on(table.projectId, table.id),
+		unique("refund_requests_project_preview_unique").on(table.projectId, table.previewToken),
+		foreignKey({
+			name: "refund_requests_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		uniqueIndex("idx_billing_refund_requests_open_payment")
+			.on(table.projectId, table.provider, table.providerPaymentId)
+			.where(sql`${table.status} IN ('requested', 'pending', 'requires_review')`),
+		uniqueIndex("idx_billing_refund_requests_provider_refund")
+			.on(table.projectId, table.provider, table.providerRefundId)
+			.where(sql`${table.providerRefundId} IS NOT NULL`),
+		index("idx_billing_refund_requests_customer_created").on(
+			table.projectId,
+			table.customerId,
 			table.createdAt.desc(),
 		),
 	],

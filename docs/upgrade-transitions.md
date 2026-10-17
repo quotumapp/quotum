@@ -244,6 +244,22 @@ previous release restores as it is: follow steps 1, 2, 4 and 6 of
 reversed no credits and keeps them; only refund events that arrive after it take credits back. An
 older image cannot read the new baseline, so a rollback restores the pre-upgrade backup.
 
+## Refund requests
+
+The metering baseline adds `refund_requests`, one row per refund a caller asked Quotum to issue
+(see [refunding a payment](subscriptions.md#refunding-a-payment)), with its indexes, and widens the
+`commercial_action_previews.intent_kind` check with `refund`. The table starts empty and the widened
+check admits every stored value, so a dump from the previous release restores as it is: follow
+steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). Nothing writes
+a request until a caller executes a `refund`. An older image cannot read the new baseline, so a
+rollback restores the pre-upgrade backup, which loses the refund requests made since, although the
+refunds themselves stay in Stripe; check them against the Stripe Dashboard.
+
+A restricted key created before this release may lack Refunds: Write. Validation still passes and
+lists `refund_write` among the unverified permissions, and a refund then fails with
+`REFUND_REJECTED_BY_PROVIDER`; add the permission to the key before the first refund, as the
+[restricted-key recipe](providers.md#manual-stripe-restricted-key-recipe) lists.
+
 ## Upgrading a populated deployment to v0.22.0
 
 v0.22.0 adds the common Paddle checkout and changes two baselines relative to v0.21.0:

@@ -16,6 +16,9 @@ const normalizerTest = "tests/providers/stripe/normalizer.test.ts";
 const promotionProvisioningTest = "tests/providers/stripe/promotions.test.ts";
 const serviceTest = "tests/providers/stripe/service.test.ts";
 const cancellationTest = "tests/providers/stripe/commercial-cancellation.test.ts";
+const refundTest = "tests/providers/stripe/commercial-refund.test.ts";
+const refundRequestsTest = "tests/integration/stripe-refund-requests.test.ts";
+const subscriptionRefundTest = "tests/integration/stripe-subscription-refund.test.ts";
 const paymentSetupTest = "tests/providers/stripe/payment-setup.test.ts";
 const autoTopupWorkerTest = "tests/workers/auto-topup.test.ts";
 const recurringBillingWorkerTest = "tests/workers/recurring-billing.test.ts";
@@ -180,9 +183,13 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 			[serviceTest, phase3JourneysTest],
 			"Late usage corrections invoice the rated difference for the closed period: a negative difference finalizes without payment and a positive one is paid like a period charge.",
 		),
-		"refund.sync": native([stripeFlowsTest, serviceTest, normalizerTest], {
+		"refund.sync": native([stripeFlowsTest, subscriptionRefundTest, serviceTest, normalizerTest], {
 			notes:
-				"Refunds and disputes reverse the purchase they paid for in proportion to the cumulative amount reversed, deduplicated by refund id.",
+				"Refunds reverse the credits the payment funded in proportion to the cumulative amount reversed, never below what is spent or held, deduplicated by refund id. Disputes reverse a one-time purchase only.",
+		}),
+		"refund.issue": native([refundRequestsTest, refundTest], {
+			notes:
+				"Quotum creates the Stripe refund under the execution idempotency key and records the request; one refund may be open per payment and the amount never exceeds what was paid net of earlier refunds. The connection needs write access to Refunds.",
 		}),
 		"topup.customer_initiated": native([stripeFlowsTest]),
 		"topup.automatic": composed(

@@ -2,7 +2,6 @@ import { sql as drizzleSql } from "drizzle-orm";
 import { NotFoundBillingError, PersistenceConflictError } from "../../billing/errors";
 import type { PurchaseStatus, SubscriptionStatus } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
-import { stripeInvoiceView } from "../../providers/stripe/invoice-view";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingCadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
@@ -46,6 +45,7 @@ import {
 	reversePromotionRedemptionsForPurchaseInTx,
 } from "./promotions";
 import { executeOne, executeRows, jsonb } from "./query";
+import { advanceServicePeriod } from "./refund-requests";
 import { processedStripeRecordingResult, skippedStripeRecordingResult } from "./results";
 import {
 	recordStoreEventProcessingResult,
@@ -1940,7 +1940,7 @@ async function applyInvoiceRefund(
 	const paid = parseStripeAmountForComparison(totals.amount_paid);
 	const reversed = parseStripeAmountForComparison(totals.reversed_amount);
 	if (paid === null || reversed === null) return false;
-	const period = advanceServicePeriod(target);
+	const period = advanceServicePeriod(target.provider_created_at, target.raw_payload);
 	if (period === null) return false;
 	const changed = await reverseSubscriptionPeriodAllocations(executor, {
 		projectId,
@@ -1952,23 +1952,6 @@ async function applyInvoiceRefund(
 		reversedAt: input.reversedAt,
 	});
 	return changed > 0;
-}
-
-/** The period the invoice's advance-billed subscription lines cover, or null when none is readable. */
-function advanceServicePeriod(
-	target: Pick<InvoiceReversalTarget, "provider_created_at" | "raw_payload">,
-): { start: Date; end: Date } | null {
-	const invoiceCreatedAt = new Date(target.provider_created_at).getTime();
-	const periods = stripeInvoiceView(target.raw_payload).lines.flatMap((line) => {
-		if (line.proration === true || line.periodStart === null || line.periodEnd === null) return [];
-		const start = Date.parse(line.periodStart);
-		const end = Date.parse(line.periodEnd);
-		return start < end && end > invoiceCreatedAt ? [{ start, end }] : [];
-	});
-	if (periods.length === 0) return null;
-	const start = Math.max(...periods.map((period) => period.start));
-	const end = Math.max(...periods.filter((period) => period.start === start).map((p) => p.end));
-	return { start: new Date(start), end: new Date(end) };
 }
 
 /** Refund events repeat for one refund; only the first one processed applies it. */

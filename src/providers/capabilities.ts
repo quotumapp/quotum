@@ -222,6 +222,7 @@ export const commercialActionOperations: Record<CommercialActionIntent["kind"], 
 		cancel: "subscription.cancel",
 		uncancel: "subscription.uncancel",
 		setup_payment: "payment_method.setup",
+		refund: "refund.issue",
 	};
 
 /**

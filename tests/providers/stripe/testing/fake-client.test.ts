@@ -120,3 +120,42 @@ describe("fake Stripe Checkout sessions", () => {
 		}
 	});
 });
+
+describe("fake Stripe refunds", () => {
+	const params = {
+		paymentIntentId: "pi_1",
+		amountMinor: 500,
+		metadata: { quotumRefundRequestId: "request-1" },
+	};
+
+	it("replays the refund of a repeated key and lists the refunds of a payment", async () => {
+		const client = fakeClient();
+
+		const first = await client.createRefund(params, "key_1");
+		const replay = await client.createRefund(params, "key_1");
+		const second = await client.createRefund({ ...params, amountMinor: 200 }, "key_2");
+
+		expect(first).toMatchObject({ status: "succeeded", amount: 500, payment_intent: "pi_1" });
+		expect(replay).toBe(first);
+		expect(second.id).not.toBe(first.id);
+		expect(await client.listPaymentIntentRefunds("pi_1")).toEqual([second, first]);
+		expect(await client.listPaymentIntentRefunds("pi_other")).toEqual([]);
+	});
+
+	it("refuses a key reused for another request, as Stripe does", async () => {
+		const client = fakeClient();
+		await client.createRefund(params, "key_1");
+
+		await expect(
+			client.createRefund({ ...params, amountMinor: 501 }, "key_1"),
+		).rejects.toMatchObject({ statusCode: 400, type: "StripeIdempotencyError" });
+	});
+
+	it("names the PaymentIntent that paid an invoice", async () => {
+		const client = fakeClient();
+		client.attachInvoicePayment("pi_sub", "in_sub");
+
+		expect(await client.findPaymentIntentForInvoice("in_sub")).toBe("pi_sub");
+		expect(await client.findPaymentIntentForInvoice("in_unknown")).toBeNull();
+	});
+});

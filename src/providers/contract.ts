@@ -243,6 +243,7 @@ export const providerOperationMethods: Record<ProviderOperation, readonly Provid
 		"settlement.collect_finalized_charge": ["settlement.collectFinalizedCharge"],
 		"adjustment.issue": ["settlement.collectFinalizedCharge"],
 		"refund.sync": ["webhooks.ingest"],
+		"refund.issue": ["commercial.execute"],
 		"topup.customer_initiated": ["checkout.createHosted", "purchases.verify"],
 		"topup.automatic": ["topups.chargeAutomatic"],
 		"promotion.code_entry": ["commercial.execute", "purchases.promotionSigner"],

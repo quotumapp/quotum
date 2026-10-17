@@ -262,10 +262,16 @@
       "title": "Usage adjustment"
     },
     {
-      "description": "Quotum mirrors refunds, disputes, revocations and voided purchases made in the provider, reversing the grants they funded, and never initiates a refund itself.",
+      "description": "Quotum mirrors refunds, disputes, revocations and voided purchases made in the provider, whoever issued them, reversing the grants they funded.",
       "domain": "refunds",
       "id": "refund.sync",
       "title": "Refund and reversal sync"
+    },
+    {
+      "description": "Quotum asks the provider to return money for one payment on a caller's request, recording the amount and reason; the credits the payment funded are reversed when the provider's refund event arrives through refund sync.",
+      "domain": "refunds",
+      "id": "refund.issue",
+      "title": "Quotum-issued refund"
     },
     {
       "description": "The customer buys a top-up through the provider's own purchase flow when metering reports purchase_required, and Quotum credits the balance from the verified purchase or payment event.",
@@ -578,6 +584,14 @@
             },
             "status": "verified",
             "verifiedOn": "2026-09-17"
+          }
+        },
+        "refund.issue": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Apple decides refunds and exposes no API for a developer to issue one; the customer requests it from Apple.",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "refund.sync": {
@@ -986,6 +1000,14 @@
             },
             "status": "verified",
             "verifiedOn": "2026-09-17"
+          }
+        },
+        "refund.issue": {
+          "conditions": [],
+          "level": "provider_managed",
+          "notes": "Google Play can refund an order through its API, but Quotum has not built the call; refund in Play Console and Quotum mirrors the voided purchase.",
+          "verification": {
+            "status": "not_applicable"
           }
         },
         "refund.sync": {
@@ -1516,16 +1538,34 @@
             "status": "not_applicable"
           }
         },
+        "refund.issue": {
+          "conditions": [],
+          "level": "native",
+          "notes": "Quotum creates the Stripe refund under the execution idempotency key and records the request; one refund may be open per payment and the amount never exceeds what was paid net of earlier refunds. The connection needs write access to Refunds.",
+          "verification": {
+            "evidence": {
+              "questions": [],
+              "scenarios": [],
+              "tests": [
+                "tests/integration/stripe-refund-requests.test.ts",
+                "tests/providers/stripe/commercial-refund.test.ts"
+              ]
+            },
+            "status": "verified",
+            "verifiedOn": "2026-09-17"
+          }
+        },
         "refund.sync": {
           "conditions": [],
           "level": "native",
-          "notes": "Refunds and disputes reverse the purchase they paid for in proportion to the cumulative amount reversed, deduplicated by refund id.",
+          "notes": "Refunds reverse the credits the payment funded in proportion to the cumulative amount reversed, never below what is spent or held, deduplicated by refund id. Disputes reverse a one-time purchase only.",
           "verification": {
             "evidence": {
               "questions": [],
               "scenarios": [],
               "tests": [
                 "tests/integration/stripe-flows.test.ts",
+                "tests/integration/stripe-subscription-refund.test.ts",
                 "tests/providers/stripe/service.test.ts",
                 "tests/providers/stripe/normalizer.test.ts"
               ]
@@ -2176,6 +2216,14 @@
           "conditions": [],
           "level": "not_evaluated",
           "notes": "Paddle purchases are web checkouts fulfilled from webhooks; the assessment covers no client-submitted purchase verification.",
+          "verification": {
+            "status": "not_applicable"
+          }
+        },
+        "refund.issue": {
+          "conditions": [],
+          "level": "unsupported",
+          "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
             "status": "not_applicable"
           }

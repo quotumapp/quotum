@@ -102,6 +102,7 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 				"cancel",
 				"uncancel",
 				"setup_payment",
+				"refund",
 				"none",
 			]),
 			provider: z.enum(["stripe", "paddle"]),
@@ -165,6 +166,22 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsPreviewResp
 					postpaidUsageSettlesAt: z.union([z.null(), z.string()]),
 					supersedesChangeId: z.union([z.null(), z.string()]),
 					activeAddOnSubscriptionIds: z.array(z.string()),
+				}),
+			]),
+			refund: z.union([
+				z.null(),
+				z.object({
+					targetKind: z.enum(["subscription_payment", "purchase"]),
+					externalInvoiceId: z.union([z.null(), z.string()]),
+					purchaseId: z.union([z.null(), z.string()]),
+					providerPaymentId: z.string(),
+					currency: z.string(),
+					amountPaidMinor: z.number(),
+					refundedMinor: z.number(),
+					refundableMinor: z.number(),
+					refundAmountMinor: z.number(),
+					basis: z.enum(["full", "remaining_time", "unconsumed_credit"]),
+					cancelsSubscriptionId: z.union([z.null(), z.string()]),
 				}),
 			]),
 			paymentSetup: z.union([
@@ -242,6 +259,27 @@ const checkoutExecutionResponseSchemas = [
 	}),
 ] as const;
 
+const subscriptionCancellationExecutionSchema = z.object({
+	kind: z.literal("subscription_cancellation"),
+	action: z.enum(["cancel", "uncancel", "none"]),
+	externalSubscriptionId: z.string(),
+	effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
+	effectiveAt: z.union([z.null(), z.string()]),
+	cancelAtPeriodEnd: z.boolean(),
+	supersededChangeId: z.union([z.null(), z.string()]),
+});
+
+/** A refund Quotum asked the provider for; the refund read route carries its later state. */
+const refundRequestExecutionSchema = z.object({
+	kind: z.literal("refund_request"),
+	refundRequestId: z.string(),
+	status: z.enum(["requested", "pending", "succeeded", "failed", "requires_review"]),
+	amountMinor: z.number(),
+	currency: z.string(),
+	providerRefundId: z.union([z.null(), z.string()]),
+	cancellation: z.union([z.null(), subscriptionCancellationExecutionSchema]),
+});
+
 export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.union([
@@ -280,15 +318,8 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse200
 				}),
 			]),
 		}),
-		z.object({
-			kind: z.literal("subscription_cancellation"),
-			action: z.enum(["cancel", "uncancel", "none"]),
-			externalSubscriptionId: z.string(),
-			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
-			effectiveAt: z.union([z.null(), z.string()]),
-			cancelAtPeriodEnd: z.boolean(),
-			supersededChangeId: z.union([z.null(), z.string()]),
-		}),
+		subscriptionCancellationExecutionSchema,
+		refundRequestExecutionSchema,
 	]),
 });
 
@@ -330,15 +361,8 @@ export const postV1BillingAccountsByBillingAccountIdCommercialActionsResponse202
 				}),
 			]),
 		}),
-		z.object({
-			kind: z.literal("subscription_cancellation"),
-			action: z.enum(["cancel", "uncancel", "none"]),
-			externalSubscriptionId: z.string(),
-			effectiveMode: z.union([z.null(), z.literal("immediate"), z.literal("period_end")]),
-			effectiveAt: z.union([z.null(), z.string()]),
-			cancelAtPeriodEnd: z.boolean(),
-			supersededChangeId: z.union([z.null(), z.string()]),
-		}),
+		subscriptionCancellationExecutionSchema,
+		refundRequestExecutionSchema,
 	]),
 });
 

@@ -172,6 +172,33 @@ const commercialActionIntentSchema = z.discriminatedUnion("kind", [
 		.strict(),
 	z
 		.object({
+			kind: z.literal("refund"),
+			target: z.discriminatedUnion("type", [
+				z
+					.object({
+						type: z.literal("subscription_payment"),
+						externalSubscriptionId: z.string().trim().min(1),
+					})
+					.strict(),
+				z.object({ type: z.literal("purchase"), purchaseId: z.uuid() }).strict(),
+			]),
+			/** `full` returns what was paid net of earlier refunds; `prorated` the unused share. */
+			mode: z.enum(["full", "prorated"]),
+			/** Ends the subscription too, once the provider accepts the refund. */
+			cancelImmediately: z.boolean().optional(),
+			reason: z.string().trim().min(1).max(500),
+		})
+		.strict()
+		.refine(
+			(intent) =>
+				intent.cancelImmediately !== true || intent.target.type === "subscription_payment",
+			{
+				message: "cancelImmediately applies to the refund of a subscription payment",
+				path: ["cancelImmediately"],
+			},
+		),
+	z
+		.object({
 			kind: z.literal("setup_payment"),
 			/**
 			 * Selects the eligible setup methods. When `plan` is set it must equal that plan's

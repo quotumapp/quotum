@@ -214,6 +214,11 @@ const paddleAssessment: ProviderCapabilityDeclaration = {
 			questions: ["Q-REF-01"],
 			notes: "Refunds arrive as adjustments whose approval state can change after creation.",
 		}),
+		"refund.issue": inP4({
+			questions: ["Q-REF-01", "Q-REF-02"],
+			notes:
+				"Paddle refunds are adjustments that most often wait for Paddle's approval, so a request would stay pending until the adjustment is approved; the adapter has no durable dispatcher for it yet.",
+		}),
 		"topup.customer_initiated": awaitingDecision({
 			questions: ["Q-ELIG-03", "Q-CHK-03"],
 			notes: "Paddle must confirm that software-usage credit packs are acceptable products.",
@@ -280,6 +285,7 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 				"subscription.change.period_end",
 				"settlement.collect_finalized_charge",
 				"adjustment.issue",
+				"refund.issue",
 				"topup.automatic",
 			].map((operation) => [
 				operation,

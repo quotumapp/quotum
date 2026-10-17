@@ -13,6 +13,12 @@ export const stripeWritePermissions = [
 	"promotion_code_write",
 ] as const;
 
+/**
+ * A write that only some merchants use. A key without it still validates, so a merchant that never
+ * refunds is not asked for the permission; it is reported as unverified when it cannot be confirmed.
+ */
+export const stripeOptionalWritePermissions = ["refund_write"] as const;
+
 type Probe = [check: string, run: () => Promise<unknown>];
 
 interface FailedCheck {
@@ -86,6 +92,12 @@ function writeProbes(client: Stripe): Probe[] {
 	];
 }
 
+function optionalWriteProbes(client: Stripe): Probe[] {
+	return [
+		["refund_write", () => client.refunds.create({ payment_intent: `pi_${absent}`, amount: 1 })],
+	];
+}
+
 type ProbeResult = { check: string; ok: true } | { check: string; ok: false; error: unknown };
 
 /** Runs the probes four at a time, in order. */
@@ -154,7 +166,11 @@ export async function validateStripeAccess(
 		},
 		{ events: options.eventRead === true },
 	);
-	const permissions = [...reads.map(([check]) => check), ...stripeWritePermissions];
+	const permissions = [
+		...reads.map(([check]) => check),
+		...stripeWritePermissions,
+		...stripeOptionalWritePermissions,
+	];
 	const checks: FailedCheck[] = [];
 	const passed: ConnectionValidation["checks"] = [];
 	for (const result of await run(reads)) {
@@ -180,9 +196,20 @@ export async function validateStripeAccess(
 			settled.add(result.check);
 		}
 	}
-	const unverifiedPermissions = stripeWritePermissions.filter(
-		(permission) => !settled.has(permission),
-	);
+	if (options.writeProbes !== false && authenticated) {
+		for (const result of await run(optionalWriteProbes(client))) {
+			const status = result.ok ? undefined : stripeErrorStatus(result.error);
+			// Only a pass settles it: a refusal, a rate limit and an outage all leave it unverified.
+			if (result.ok || status === 404 || status === 400) {
+				passed.push({ code: result.check, passed: true });
+				settled.add(result.check);
+			}
+		}
+	}
+	const unverifiedPermissions = [
+		...stripeWritePermissions,
+		...stripeOptionalWritePermissions,
+	].filter((permission) => !settled.has(permission));
 
 	checks.sort((a, b) => a.check.localeCompare(b.check));
 	if (checks.length)

@@ -166,6 +166,9 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 			"Apple decides refunds; Quotum mirrors refund, revocation and refund reversal notifications.",
 			[appleFlows, appleNormalizer],
 		),
+		"refund.issue": providerManaged(
+			"Apple decides refunds and exposes no API for a developer to issue one; the customer requests it from Apple.",
+		),
 		"topup.customer_initiated": verified(
 			[appleFlows],
 			"The customer buys a consumable top-up through StoreKit.",

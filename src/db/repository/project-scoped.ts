@@ -32,6 +32,7 @@ import type {
 	RecordPaymentSetupPlanOutcomeInput,
 	ReservePaymentSetupInput,
 } from "./payment-setup";
+import type { ClaimRefundRequestInput, RecordRefundOutcomeInput } from "./refund-requests";
 import type {
 	CompleteStripeCheckoutRequestInput,
 	GetStripeProviderCustomerInput,
@@ -229,6 +230,42 @@ export class ProjectScopedBillingRepository {
 		return await this.repository.previewSubscriptionCancellation(this.project, input);
 	}
 
+	readSubscriptionPaymentForRefund(input: {
+		billingAccountId: string;
+		externalSubscriptionId: string;
+	}) {
+		return this.repository.refundRequests.readSubscriptionPaymentForRefund(this.project, input);
+	}
+
+	readPurchaseForRefund(input: { billingAccountId: string; purchaseId: string }) {
+		return this.repository.refundRequests.readPurchaseForRefund(this.project, input);
+	}
+
+	findRefundRequestForPreview(input: { billingAccountId: string; previewToken: string }) {
+		return this.repository.refundRequests.findRefundRequestForPreview(this.project, input);
+	}
+
+	claimRefundRequest(input: ClaimRefundRequestInput) {
+		return this.repository.refundRequests.claimRefundRequest(this.project, input);
+	}
+
+	recordRefundOutcome(input: RecordRefundOutcomeInput) {
+		return this.repository.refundRequests.recordRefundOutcome(this.project, input);
+	}
+
+	listRefundRequests(input: { billingAccountId: string; limit: number }) {
+		return this.repository.refundRequests.listRefundRequests(this.project, input);
+	}
+
+	applyProviderRefundState(input: {
+		requestId: string | null;
+		providerRefundId: string;
+		outcome: "pending" | "succeeded" | "failed";
+		failureCode: string | null;
+	}) {
+		return this.repository.refundRequests.applyProviderRefundState(this.project, input);
+	}
+
 	async previewSubscriptionCarryOver(
 		input: Parameters<BillingRepository["previewSubscriptionCarryOver"]>[1],
 	): Promise<CommercialPreviewCarryOver> {
@@ -353,6 +390,9 @@ export class ProjectScopedBillingRepository {
 			Extract<CommercialActionExecutionResult, { kind: "subscription_cancellation" }>,
 			"supersededChangeId"
 		>;
+		finalize?: (
+			cancellation: Extract<CommercialActionExecutionResult, { kind: "subscription_cancellation" }>,
+		) => StoredCommercialActionExecutionResult;
 	}): Promise<StoredCommercialActionExecutionResult> {
 		return await this.repository.completeSubscriptionCancellation(this.project, input);
 	}
