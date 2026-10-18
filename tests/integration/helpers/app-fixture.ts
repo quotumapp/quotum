@@ -3,6 +3,7 @@ import type { ApplePromotionSigner } from "../../../src/billing/apple-promotions
 import { EntitlementService } from "../../../src/billing/entitlements";
 import { MeteringService } from "../../../src/billing/metering";
 import type { BillingRepository } from "../../../src/db/repository";
+import type { WebhookEndpointServiceLike } from "../../../src/events/endpoints";
 import type { BillingLogger } from "../../../src/observability/logger";
 import { createInMemoryBillingMetrics } from "../../../src/observability/metrics";
 import type { BillingAdminOperations } from "../../../src/operations/admin";
@@ -47,6 +48,7 @@ export interface CreateIntegrationAppOptions {
 	googleVoidedEventTimeMillis?: string;
 	adminOperations?: BillingAdminOperations;
 	logger?: BillingLogger;
+	webhookEndpointService?: WebhookEndpointServiceLike;
 }
 
 export function createIntegrationApp({
@@ -68,6 +70,7 @@ export function createIntegrationApp({
 	googleVoidedEventTimeMillis = "1780185600000",
 	adminOperations,
 	logger,
+	webhookEndpointService,
 }: CreateIntegrationAppOptions) {
 	const metrics = createInMemoryBillingMetrics();
 	const apple = createFakeAppleStoreKitClient({
@@ -229,6 +232,7 @@ export function createIntegrationApp({
 			adminOperations,
 			logger,
 			metrics,
+			...(webhookEndpointService === undefined ? {} : { webhookEndpointService }),
 		}),
 	);
 

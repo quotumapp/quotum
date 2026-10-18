@@ -32,6 +32,7 @@ import type {
 	SubscriptionStatus,
 } from "../billing/types";
 import type { UsageReceipt } from "../billing/usage-api";
+import type { WebhookDeliveryStatus, WebhookEndpointDisabledReason } from "../events/endpoints";
 import type { ProjectEnvironment, ProjectLifecycleStatus } from "../projects/context";
 import type { BillingCadenceUnit, CadenceUnit } from "../shared/cadence";
 
@@ -1286,6 +1287,185 @@ export const projectionSyncJobs = pgTable(
 		check(
 			"projection_sync_jobs_status_check",
 			sql`${table.status} IN ('pending', 'processing', 'succeeded', 'failed')`,
+		),
+	],
+);
+
+export const webhookEndpoints = pgTable(
+	"webhook_endpoints",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		url: text("url").notNull(),
+		description: text("description"),
+		eventTypes: text("event_types").array().notNull().default([]),
+		enabled: boolean("enabled").notNull().default(true),
+		disabledReason: text("disabled_reason").$type<WebhookEndpointDisabledReason>(),
+		secretGeneration: integer("secret_generation").notNull().default(1),
+		secretEnvelope: jsonb("secret_envelope").$type<Record<string, unknown>>().notNull(),
+		previousSecretEnvelope: jsonb("previous_secret_envelope").$type<Record<string, unknown>>(),
+		previousSecretExpiresAt: timestamp("previous_secret_expires_at", { withTimezone: true }),
+		rotationKey: text("rotation_key"),
+		failingSince: timestamp("failing_since", { withTimezone: true }),
+		createdBy: text("created_by").notNull(),
+		idempotencyKey: text("idempotency_key").notNull(),
+		requestHash: text("request_hash").notNull(),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check("webhook_endpoints_url_check", sql`char_length(${table.url}) BETWEEN 9 AND 2048`),
+		check(
+			"webhook_endpoints_description_check",
+			sql`${table.description} IS NULL OR char_length(${table.description}) BETWEEN 1 AND 500`,
+		),
+		check("webhook_endpoints_event_types_check", sql`cardinality(${table.eventTypes}) <= 64`),
+		check(
+			"webhook_endpoints_disabled_reason_check",
+			sql`${table.disabledReason} IN ('operator', 'failing')`,
+		),
+		check("webhook_endpoints_secret_generation_check", sql`${table.secretGeneration} >= 1`),
+		check(
+			"webhook_endpoints_rotation_key_check",
+			sql`${table.rotationKey} IS NULL OR char_length(${table.rotationKey}) BETWEEN 1 AND 255`,
+		),
+		check(
+			"webhook_endpoints_secret_envelope_check",
+			sql`jsonb_typeof(${table.secretEnvelope}) = 'object'`,
+		),
+		check(
+			"webhook_endpoints_previous_secret_envelope_check",
+			sql`${table.previousSecretEnvelope} IS NULL OR jsonb_typeof(${table.previousSecretEnvelope}) = 'object'`,
+		),
+		check(
+			"webhook_endpoints_created_by_check",
+			sql`char_length(${table.createdBy}) BETWEEN 1 AND 200`,
+		),
+		check(
+			"webhook_endpoints_idempotency_key_check",
+			sql`char_length(${table.idempotencyKey}) BETWEEN 1 AND 255`,
+		),
+		check("webhook_endpoints_request_hash_check", sql`char_length(${table.requestHash}) = 64`),
+		check(
+			"webhook_endpoints_disabled_check",
+			sql`(${table.disabledReason} IS NULL) = ${table.enabled}`,
+		),
+		check(
+			"webhook_endpoints_previous_secret_check",
+			sql`(${table.previousSecretEnvelope} IS NULL) = (${table.previousSecretExpiresAt} IS NULL)`,
+		),
+		unique("webhook_endpoints_project_id_id_unique").on(table.projectId, table.id),
+		unique("webhook_endpoints_idempotency_unique").on(table.projectId, table.idempotencyKey),
+	],
+);
+
+export const domainEvents = pgTable(
+	"domain_events",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		customerId: uuid("customer_id"),
+		type: text("type").notNull(),
+		sourceKey: text("source_key").notNull(),
+		data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+		occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+		dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"domain_events_type_check",
+			sql`char_length(${table.type}) <= 100 AND ${table.type} ~ '^[a-z][a-z_]*\\.[a-z][a-z_]*$'`,
+		),
+		check("domain_events_source_key_check", sql`char_length(${table.sourceKey}) BETWEEN 1 AND 500`),
+		check("domain_events_data_check", sql`jsonb_typeof(${table.data}) = 'object'`),
+		unique("domain_events_project_id_id_unique").on(table.projectId, table.id),
+		unique("domain_events_source_unique").on(table.projectId, table.sourceKey),
+		foreignKey({
+			name: "domain_events_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		index("idx_billing_domain_events_undispatched")
+			.on(table.createdAt)
+			.where(sql`${table.dispatchedAt} IS NULL`),
+		index("idx_billing_domain_events_project_created").on(table.projectId, table.createdAt),
+		index("idx_billing_domain_events_created").on(table.createdAt),
+		index("idx_billing_domain_events_customer_id")
+			.on(table.customerId)
+			.where(sql`${table.customerId} IS NOT NULL`),
+	],
+);
+
+export const webhookDeliveries = pgTable(
+	"webhook_deliveries",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		eventId: uuid("event_id").notNull(),
+		endpointId: uuid("endpoint_id").notNull(),
+		status: text("status").$type<WebhookDeliveryStatus>().notNull().default("pending"),
+		attempts: integer("attempts").notNull().default(0),
+		nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+		lockedAt: timestamp("locked_at", { withTimezone: true }),
+		lockedBy: text("locked_by"),
+		lastError: text("last_error"),
+		lastStatusCode: integer("last_status_code"),
+		lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+		deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+		...timestampColumns(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"webhook_deliveries_status_check",
+			sql`${table.status} IN ('pending', 'processing', 'succeeded', 'failed')`,
+		),
+		check("webhook_deliveries_attempts_check", sql`${table.attempts} >= 0`),
+		check(
+			"webhook_deliveries_last_error_check",
+			sql`${table.lastError} IS NULL OR char_length(${table.lastError}) <= 1000`,
+		),
+		check(
+			"webhook_deliveries_last_status_code_check",
+			sql`${table.lastStatusCode} IS NULL OR ${table.lastStatusCode} BETWEEN 100 AND 599`,
+		),
+		unique("webhook_deliveries_project_id_id_unique").on(table.projectId, table.id),
+		unique("webhook_deliveries_event_endpoint_unique").on(
+			table.projectId,
+			table.eventId,
+			table.endpointId,
+		),
+		foreignKey({
+			name: "webhook_deliveries_project_event_fk",
+			columns: [table.projectId, table.eventId],
+			foreignColumns: [domainEvents.projectId, domainEvents.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "webhook_deliveries_project_endpoint_fk",
+			columns: [table.projectId, table.endpointId],
+			foreignColumns: [webhookEndpoints.projectId, webhookEndpoints.id],
+		}).onDelete("cascade"),
+		index("idx_billing_webhook_deliveries_due")
+			.on(table.nextAttemptAt, table.createdAt)
+			.where(sql`${table.status} = 'pending'`),
+		index("idx_billing_webhook_deliveries_stale")
+			.on(table.lockedAt, table.createdAt)
+			.where(sql`${table.status} = 'processing'`),
+		index("idx_billing_webhook_deliveries_project").on(
+			table.projectId,
+			table.createdAt.desc(),
+			table.id.desc(),
+		),
+		index("idx_billing_webhook_deliveries_endpoint").on(
+			table.projectId,
+			table.endpointId,
+			table.createdAt.desc(),
+			table.id.desc(),
 		),
 	],
 );

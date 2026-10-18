@@ -526,6 +526,8 @@ async function previewOf(
 					WHERE project_id = ${projectId} AND customer_id = ${customer.id}
 				UNION ALL SELECT 'projection_sync_jobs', count(*) FROM projection_sync_jobs
 					WHERE project_id = ${projectId} AND customer_id = ${customer.id}
+				UNION ALL SELECT 'domain_events', count(*) FROM domain_events
+					WHERE project_id = ${projectId} AND customer_id = ${customer.id}
 				UNION ALL SELECT 'entities', count(*) FROM entities
 					WHERE project_id = ${projectId} AND customer_id = ${customer.id}
 				UNION ALL SELECT 'store_events', count(*) FROM store_events
@@ -634,6 +636,13 @@ async function erasureBlockers(
 				FROM projection_sync_jobs pj
 				WHERE pj.project_id = ${projectId} AND pj.customer_id = ${customer.id}
 					AND pj.status = 'processing'
+				UNION ALL
+				SELECT 14, 'webhook_delivery', count(*)
+				FROM webhook_deliveries delivery
+				JOIN domain_events event
+					ON event.project_id = delivery.project_id AND event.id = delivery.event_id
+				WHERE delivery.project_id = ${projectId} AND event.customer_id = ${customer.id}
+					AND delivery.status = 'processing'
 			) blocker
 			WHERE blocker.count > 0
 			ORDER BY blocker.position

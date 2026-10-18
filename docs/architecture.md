@@ -9,7 +9,7 @@ unclassified or overlapping files and unresolved imports fail the check.
 
 | Owner | Files | May depend on |
 | --- | --- | --- |
-| Billing | `src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/http`, `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`, `src/sdk`, `src/workers`, `src/env.ts` | Billing, shared |
+| Billing | `src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/events`, `src/http`, `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`, `src/sdk`, `src/workers`, `src/env.ts` | Billing, shared |
 | Platform | `src/platform` | Platform, shared |
 | Shared | `src/shared` | Shared |
 | MCP | `src/mcp` | MCP, shared, and `src/sdk` only |
@@ -44,6 +44,9 @@ The policy is deny-by-default:
 - `src/billing/`, `src/catalog/`, `src/db/`: billing domain, catalog, and persistence.
 - `src/platform/`: organizations, identity, onboarding, connections, and audit.
 - `src/providers/`, `src/workers/`, `src/projections/`: external providers and durable delivery.
+- `src/events/`: outbound domain events, webhook endpoints, Standard Webhooks signing and the
+  event contract; persistence is in `src/db/repository/domain-events.ts` and
+  `webhook-endpoints.ts`, delivery in `src/workers/domain-event-delivery.ts`.
   Each provider declares its operation support in `src/providers/<provider>/capabilities.ts`,
   collected by `src/providers/capabilities.ts`. The runtime builds one provider registry
   (`src/providers/registry.ts`) and shares it between request handlers, merchant billing and the

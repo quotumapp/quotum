@@ -820,3 +820,117 @@ CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_plan_version
 CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_entity
 	ON subscriptions (project_id, entity_id, status)
 	WHERE entity_id IS NOT NULL;
+
+-- Outbound domain events. A merchant registers HTTPS endpoints per project instance and picks the
+-- event types each receives. A billing fact writes its event in its own transaction, and only while
+-- an enabled endpoint subscribes to the type; the delivery worker then fans the event out to one
+-- delivery per subscribed endpoint, each with its own retry state.
+CREATE TABLE IF NOT EXISTS webhook_endpoints (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	url TEXT NOT NULL CHECK (char_length(url) BETWEEN 9 AND 2048),
+	description TEXT CHECK (description IS NULL OR char_length(description) BETWEEN 1 AND 500),
+	-- Empty means every event type.
+	event_types TEXT[] NOT NULL DEFAULT '{}' CHECK (cardinality(event_types) <= 64),
+	enabled BOOLEAN NOT NULL DEFAULT true,
+	disabled_reason TEXT CHECK (disabled_reason IN ('operator', 'failing')),
+	-- The signing secret, sealed with the deployment key. Its generation is part of the sealing
+	-- context, so a rotation moves the current envelope to `previous_secret_envelope` unchanged.
+	secret_generation INTEGER NOT NULL DEFAULT 1 CHECK (secret_generation >= 1),
+	secret_envelope JSONB NOT NULL CHECK (jsonb_typeof(secret_envelope) = 'object'),
+	previous_secret_envelope JSONB CHECK (
+		previous_secret_envelope IS NULL OR jsonb_typeof(previous_secret_envelope) = 'object'
+	),
+	previous_secret_expires_at TIMESTAMPTZ,
+	-- The idempotency key of the last rotation, so a retried rotation does not replace a secret
+	-- nobody received.
+	rotation_key TEXT COLLATE "C" CHECK (rotation_key IS NULL OR char_length(rotation_key) BETWEEN 1 AND 255),
+	-- Since when every delivery to the endpoint has failed; a success clears it.
+	failing_since TIMESTAMPTZ,
+	created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 200),
+	idempotency_key TEXT COLLATE "C" NOT NULL CHECK (char_length(idempotency_key) BETWEEN 1 AND 255),
+	request_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(request_hash) = 64),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT webhook_endpoints_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT webhook_endpoints_idempotency_unique UNIQUE (project_id, idempotency_key),
+	CONSTRAINT webhook_endpoints_disabled_check CHECK ((disabled_reason IS NULL) = enabled),
+	CONSTRAINT webhook_endpoints_previous_secret_check CHECK (
+		(previous_secret_envelope IS NULL) = (previous_secret_expires_at IS NULL)
+	)
+);
+
+CREATE TABLE IF NOT EXISTS domain_events (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	-- The billing account the event is about, when it is about one; erasure deletes its events.
+	customer_id UUID,
+	type TEXT NOT NULL CHECK (
+		char_length(type) <= 100 AND type ~ '^[a-z][a-z_]*\.[a-z][a-z_]*$'
+	),
+	-- Names the fact, so recording the same fact again is a no-op.
+	source_key TEXT COLLATE "C" NOT NULL CHECK (char_length(source_key) BETWEEN 1 AND 500),
+	data JSONB NOT NULL CHECK (jsonb_typeof(data) = 'object'),
+	occurred_at TIMESTAMPTZ NOT NULL,
+	-- Set once the event has been fanned out to its endpoints' deliveries.
+	dispatched_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT domain_events_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT domain_events_source_unique UNIQUE (project_id, source_key),
+	CONSTRAINT domain_events_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	event_id UUID NOT NULL,
+	endpoint_id UUID NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending' CHECK (
+		status IN ('pending', 'processing', 'succeeded', 'failed')
+	),
+	attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+	next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	locked_at TIMESTAMPTZ,
+	locked_by TEXT,
+	last_error TEXT CHECK (last_error IS NULL OR char_length(last_error) <= 1000),
+	last_status_code INTEGER CHECK (last_status_code IS NULL OR last_status_code BETWEEN 100 AND 599),
+	last_attempt_at TIMESTAMPTZ,
+	delivered_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT webhook_deliveries_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT webhook_deliveries_event_endpoint_unique UNIQUE (project_id, event_id, endpoint_id),
+	CONSTRAINT webhook_deliveries_project_event_fk FOREIGN KEY (project_id, event_id)
+		REFERENCES domain_events(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT webhook_deliveries_project_endpoint_fk FOREIGN KEY (project_id, endpoint_id)
+		REFERENCES webhook_endpoints(project_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_domain_events_undispatched
+	ON domain_events (created_at)
+	WHERE dispatched_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_domain_events_project_created
+	ON domain_events (project_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_billing_domain_events_created
+	ON domain_events (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_billing_domain_events_customer_id
+	ON domain_events (customer_id)
+	WHERE customer_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_billing_webhook_deliveries_due
+	ON webhook_deliveries (next_attempt_at, created_at)
+	WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_billing_webhook_deliveries_stale
+	ON webhook_deliveries (locked_at, created_at)
+	WHERE status = 'processing';
+
+CREATE INDEX IF NOT EXISTS idx_billing_webhook_deliveries_project
+	ON webhook_deliveries (project_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_billing_webhook_deliveries_endpoint
+	ON webhook_deliveries (project_id, endpoint_id, created_at DESC, id DESC);

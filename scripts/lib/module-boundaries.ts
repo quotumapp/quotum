@@ -98,6 +98,7 @@ const billingPrefixes = [
 	"src/billing/",
 	"src/catalog/",
 	"src/db/",
+	"src/events/",
 	"src/http/",
 	"src/observability/",
 	"src/operations/",

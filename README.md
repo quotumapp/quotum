@@ -25,8 +25,9 @@ your own [merchant proxy](docs/deployment.md#merchant-proxy-service-principal). 
   operations, with topic guides for [metering](docs/metering.md),
   [subscriptions and commercial actions](docs/subscriptions.md),
   [catalog publication](docs/catalog.md), [promotions](docs/promotions.md),
-  [trials, the default plan and operator grants](docs/grants.md) and
-  [provider capability errors and reads](docs/provider-capabilities.md).
+  [trials, the default plan and operator grants](docs/grants.md),
+  [provider capability errors and reads](docs/provider-capabilities.md) and
+  [outbound webhooks](docs/webhooks.md).
 - [Operations](docs/operations.md): backup, restore, upgrade, rollback, credentials, health and
   workers; [upgrade transitions](docs/upgrade-transitions.md) for populated databases.
 - [Releasing](docs/releasing.md): release verification, support policy and container publishing;

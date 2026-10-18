@@ -91,6 +91,10 @@ export interface BillingEnv {
 	workerId: string;
 	workerPollIntervalMs: number;
 	projectionSyncMaxAttempts: number;
+	/** Attempts per outbound webhook delivery before it fails for good; defaults to 12 (about 34 hours). */
+	eventDeliveryMaxAttempts?: number;
+	/** Days recorded outbound events are kept for replay; defaults to 30. */
+	eventRetentionDays?: number;
 	storeEventReplayMaxAttempts: number;
 	storeEventReplayPollIntervalMs: number;
 	subscriptionReconciliationMaxAttempts: number;
@@ -127,6 +131,10 @@ const envSchema = z.object({
 	BILLING_PROJECTION_SYNC_MAX_ATTEMPTS: positiveIntegerString(
 		"BILLING_PROJECTION_SYNC_MAX_ATTEMPTS",
 	).default("10"),
+	BILLING_EVENT_DELIVERY_MAX_ATTEMPTS: positiveIntegerString(
+		"BILLING_EVENT_DELIVERY_MAX_ATTEMPTS",
+	).default("12"),
+	BILLING_EVENT_RETENTION_DAYS: positiveIntegerString("BILLING_EVENT_RETENTION_DAYS").default("30"),
 	BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS: positiveIntegerString(
 		"BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS",
 	).default("10"),
@@ -233,6 +241,8 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 		workerId: parsed.BILLING_WORKER_ID ?? `billing-worker-${crypto.randomUUID()}`,
 		workerPollIntervalMs: Number.parseInt(parsed.BILLING_WORKER_POLL_INTERVAL_MS, 10),
 		projectionSyncMaxAttempts: Number.parseInt(parsed.BILLING_PROJECTION_SYNC_MAX_ATTEMPTS, 10),
+		eventDeliveryMaxAttempts: Number.parseInt(parsed.BILLING_EVENT_DELIVERY_MAX_ATTEMPTS, 10),
+		eventRetentionDays: Number.parseInt(parsed.BILLING_EVENT_RETENTION_DAYS, 10),
 		storeEventReplayMaxAttempts: Number.parseInt(
 			parsed.BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS,
 			10,

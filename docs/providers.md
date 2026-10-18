@@ -733,6 +733,9 @@ not be read.
 
 ## Projections
 
+Projections carry an account's state to one product receiver. To send selected billing events to
+endpoints of your choice, use [outbound webhooks](webhooks.md).
+
 Quotum never writes your database. It delivers signed HTTP `billing_state_v1` projections with
 the entitlement and exact-string balance snapshot to the connection's projection URL, retrying
 with backoff. Verify `X-Billing-Signature` and `X-Billing-Timestamp`, and treat the projection as a

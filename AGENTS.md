@@ -16,6 +16,8 @@ enabled, the remote MCP endpoint, and it runs the background workers. Runtime co
 - `platform/`: organizations, identity, onboarding, connections, audit and MCP browser
   authorization, behind consumer-owned ports.
 - `billing/`, `catalog/`, `db/`: billing domain, versioned catalog and Drizzle repositories.
+- `events/`: outbound domain events and webhook endpoints, signed with Standard Webhooks
+  ([docs/webhooks.md](docs/webhooks.md)).
 - `providers/`: Apple, Google, Stripe and sandbox Paddle integrations and their capability declarations.
 - `workers/`, `projections/`: durable background work and signed HTTP projection delivery.
 - `mcp/`: the MCP tools and read-only stdio server, a client of `/v1` through the bundled `sdk/`
@@ -38,7 +40,7 @@ How the runtime fits together, and the repository checks that most often reject 
 
 - `src/index.ts` -> `src/composition/public-runtime.ts` (`createQuotumRuntime`) ->
   `src/runtime.ts` (`createBillingRuntime`) builds everything: repositories, the provider registry,
-  ten polling billing workers (plus the merchant-only `platform_retention` sweep), shutdown hooks,
+  eleven polling billing workers (plus the merchant-only `platform_retention` sweep), shutdown hooks,
   then the "staff" Elysia app from `src/app.ts` (`createApp`) and, through `attachMerchantRuntime`
   in `src/composition/merchant-runtime.ts`, the merchant app. `composeRuntimeApp` there routes
   setup-only ingress (connection and Stripe App events) first, then the remote MCP and OAuth
@@ -72,7 +74,7 @@ the repository to exactly one owner and inspects every SQL migration. A new file
 owner, such as a new `scripts/*.ts`, fails until it is classified there. The rules that most often
 bite:
 
-- Billing (`src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/http`,
+- Billing (`src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/events`, `src/http`,
   `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`,
   `src/sdk`, `src/workers`, `src/env.ts`) and Platform (`src/platform`) never import each other,
   not even through the package's own SDK export. Only composition (`src/composition`, including
@@ -168,7 +170,8 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
 
 `createBillingRuntime` schedules each worker's `runOnce` with `startPollingRuntime`
 (`src/workers/runtime.ts`) unless a distribution supplies its own scheduler: projection sync,
-store-event replay, subscription reconciliation, metering maintenance, recurring billing, auto
+outbound domain event delivery (`src/workers/domain-event-delivery.ts`), store-event replay,
+subscription reconciliation, metering maintenance, recurring billing, auto
 top-up, promotion maintenance, customer erasure, provider operation recovery, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
 which adds monthly `usage_events` partitions ahead of time; `quotum partitions` runs it on demand),
 plus Stripe App event processing when Apps OAuth is configured and, only when the merchant platform

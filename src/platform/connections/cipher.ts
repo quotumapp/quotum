@@ -11,6 +11,11 @@ export interface SecretScope {
 	connectionId: string;
 	versionId: string;
 	purpose: string;
+	/**
+	 * Names the kind of record the secret belongs to, so an envelope sealed for one kind never
+	 * opens as another. Connection secrets use the default.
+	 */
+	label?: string;
 }
 
 /** Keys belong to deployment secret storage, never the database or its backups. */
@@ -25,7 +30,7 @@ export class ConnectionCipher {
 	private aad(scope: SecretScope): Buffer {
 		return Buffer.from(
 			JSON.stringify([
-				"quotum-connection-v1",
+				scope.label ?? "quotum-connection-v1",
 				scope.instanceId,
 				scope.connectionId,
 				scope.versionId,

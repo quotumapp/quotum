@@ -482,3 +482,49 @@ it("refuses http unless the policy allows it, and never trusts an unvalidated po
 	).rejects.toThrow("127.0.0.0/8 is not a private network receivers may use");
 	expect(lookups).toBe(0);
 });
+
+it("keeps the status of an oversized response when asked to truncate, and reports Retry-After", async () => {
+	const big = (status: number, headers: Record<string, string>) =>
+		((_url: URL, _options: unknown, onResponse?: (res: IncomingMessage) => void) => {
+			const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void };
+			req.destroy = () => undefined;
+			req.end = () => {
+				const res = new EventEmitter() as EventEmitter & {
+					statusCode: number;
+					headers: Record<string, string>;
+					destroy: () => void;
+				};
+				res.statusCode = status;
+				res.headers = headers;
+				res.destroy = () => undefined;
+				onResponse?.(res as unknown as IncomingMessage);
+				res.emit("data", Buffer.alloc(3000, "a"));
+				res.emit("data", Buffer.alloc(3000, "b"));
+				res.emit("end");
+			};
+			return req;
+		}) as unknown as typeof httpsRequest;
+	const lookup = async () => [{ address: "1.1.1.1", family: 4 }];
+
+	const truncated = await postToDestination(
+		"https://example.com",
+		"body",
+		{},
+		{ lookup, request: big(200, {}), oversizedResponse: "truncate" },
+	);
+	const limited = await postToDestination(
+		"https://example.com",
+		"body",
+		{},
+		{ lookup, request: big(429, { "retry-after": "30" }), oversizedResponse: "truncate" },
+	);
+
+	expect(truncated.status).toBe(200);
+	expect(truncated.body).toHaveLength(4096);
+	expect(truncated.body.endsWith("b")).toBe(true);
+	expect(truncated).not.toHaveProperty("retryAfter");
+	expect(limited).toMatchObject({ status: 429, retryAfter: "30" });
+	await expect(
+		postToDestination("https://example.com", "body", {}, { lookup, request: big(200, {}) }),
+	).rejects.toThrow("Receiver response too large");
+});

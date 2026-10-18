@@ -4,6 +4,10 @@ import { join } from "node:path";
 
 const allowlisted = [
 	{
+		snippet: "UPDATE webhook_endpoints SET previous_secret_envelope = NULL",
+		reason: "maintenance sweep of secret rotation overlaps that ended, across projects",
+	},
+	{
 		snippet: "UPDATE purchases pu SET status = CASE WHEN",
 		reason: "PK write after a scoped purchase lock in the same transaction",
 	},

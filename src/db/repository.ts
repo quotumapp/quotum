@@ -81,6 +81,7 @@ import { CommercialActionRepository } from "./repository/commercial-actions";
 import { ControlsEnterpriseRepository } from "./repository/controls-enterprise";
 import { CoreBillingRepository } from "./repository/core";
 import { CustomerErasureRepository } from "./repository/customer-erasures";
+import { DomainEventDeliveryRepository } from "./repository/domain-events";
 import { GoogleBillingRepository } from "./repository/google";
 import { BillingInsightsRepository } from "./repository/insights";
 import { type GrantAllocationInput, MeteringBillingRepository } from "./repository/metering";
@@ -196,6 +197,8 @@ export type {
 	TrialEndingNoticeResult,
 } from "./repository/types";
 
+import { WebhookEndpointRepository } from "./repository/webhook-endpoints";
+
 export class BillingRepository {
 	private readonly core: CoreBillingRepository;
 	private readonly projectionJobs: ProjectionJobBillingRepository;
@@ -221,6 +224,8 @@ export class BillingRepository {
 	readonly promotionProviders: PromotionProviderObjectRepository;
 	readonly providerCustomerUnlinks: ProviderCustomerUnlinkRepository;
 	readonly customerErasures: CustomerErasureRepository;
+	readonly webhookEndpoints: WebhookEndpointRepository;
+	readonly domainEventDeliveries: DomainEventDeliveryRepository;
 	readonly providerOperations: ProviderOperationRepository;
 	readonly paddle: PaddleBillingRepository;
 	readonly paddleCheckouts: PaddleCheckoutRepository;
@@ -255,6 +260,8 @@ export class BillingRepository {
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 		this.providerCustomerUnlinks = new ProviderCustomerUnlinkRepository(database);
 		this.customerErasures = new CustomerErasureRepository(database);
+		this.webhookEndpoints = new WebhookEndpointRepository(database);
+		this.domainEventDeliveries = new DomainEventDeliveryRepository(database);
 		this.providerOperations = new ProviderOperationRepository(database);
 		this.paddle = new PaddleBillingRepository(database);
 		this.paddleCheckouts = new PaddleCheckoutRepository(database);

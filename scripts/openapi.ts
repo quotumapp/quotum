@@ -6,6 +6,8 @@ import {
 	renderProviderCapabilityBlock,
 	replaceProviderCapabilityBlock,
 } from "../src/composition/provider-capabilities";
+import { domainEventsJsonSchema } from "../src/events/contract";
+import { domainEventExamples } from "../src/events/examples";
 import { createCliBillingLogger } from "../src/observability/logger";
 import { projectionDeliveryJsonSchema } from "../src/projections/contract";
 import { projectionDeliveryExamples } from "../src/projections/delivery-examples";
@@ -71,6 +73,17 @@ async function main(check: boolean): Promise<void> {
 		resolve(root, "contracts/v1/projection-delivery.examples.json"),
 		artifactJson(projectionDeliveryExamples),
 		{ check, stale: "Projection delivery examples are stale. Run bun run openapi:generate." },
+	);
+
+	await syncGeneratedFile(
+		resolve(root, "contracts/v1/domain-events.schema.json"),
+		artifactJson(domainEventsJsonSchema()),
+		{ check, stale: "Domain event schema is stale. Run bun run openapi:generate." },
+	);
+	await syncGeneratedFile(
+		resolve(root, "contracts/v1/domain-events.examples.json"),
+		artifactJson(domainEventExamples),
+		{ check, stale: "Domain event examples are stale. Run bun run openapi:generate." },
 	);
 
 	const capabilities = providerCapabilityContract();
