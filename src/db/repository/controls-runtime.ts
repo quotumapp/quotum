@@ -25,6 +25,7 @@ import {
 	sameControlWindow,
 	tightestControl,
 } from "./controls-enterprise";
+import { recordAutoTopupOutcome, recordUsageAlertTriggered } from "./domain-event-facts";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -988,6 +989,22 @@ export async function recordUsageAlertDelta(
 				) ON CONFLICT DO NOTHING
 			`,
 			);
+			if (eventType === "threshold_crossed") {
+				await recordUsageAlertTriggered(executor, input.projectId, {
+					customerId: input.customerId,
+					alertId: String(alert.id),
+					featureKey: alert.feature_key,
+					entityId: alert.entity_id === null ? null : String(alert.entity_id),
+					thresholdType: alert.threshold_type,
+					thresholdValue: canonicalDecimal(String(alert.threshold_value), "alert threshold", 9),
+					interval: alert.interval,
+					intervalCount: alert.interval_count,
+					window: bounds,
+					threshold,
+					currentValue: unitsToDecimal(nextUnits, 9),
+					crossing: sequence,
+				});
+			}
 		}
 	}
 }
@@ -1150,7 +1167,7 @@ export async function scheduleAutoTopupIfNeeded(
 	`,
 	);
 	if (pending?.pending === true) return;
-	await executeOne(
+	const job = await executeOne<{ id: string }>(
 		executor,
 		drizzleSql`
 		INSERT INTO auto_topup_jobs (
@@ -1167,6 +1184,22 @@ export async function scheduleAutoTopupIfNeeded(
 		) ON CONFLICT (project_id, policy_id, trigger_key) DO NOTHING RETURNING id
 	`,
 	);
+	if (job !== null && !supported) {
+		// No provider here charges on its own: the customer has to buy in the store app.
+		await recordAutoTopupOutcome(executor, input.projectId, {
+			type: "auto_topup.action_required",
+			customerId: input.customerId,
+			policyId: String(policy.id),
+			jobId: job.id,
+			provider: policy.provider,
+			amountMinor: amount,
+			chargedAmountMinor: null,
+			currency: policy.currency?.toLowerCase() ?? null,
+			externalInvoiceId: null,
+			externalPaymentId: null,
+			error: "Provider-native purchase action is required",
+		});
+	}
 	await executeOne(
 		executor,
 		drizzleSql`

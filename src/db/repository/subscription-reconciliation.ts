@@ -1,8 +1,11 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { trialEndingNoticeLeadMs } from "../../billing/trials";
+import type { SubscriptionStatus } from "../../billing/types";
 import { providersComposing } from "../../providers/capabilities";
 import { RepositoryModule } from "./base";
+import { recordSubscriptionChange } from "./domain-event-facts";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
+import { subscriptionEventState } from "./mutations";
 import { parseProviderSubscriptionReconciliationRow } from "./parsers";
 import { assertUpdated, executeRows } from "./query";
 import { readSubscriptionProjection } from "./subscription-projection";
@@ -77,6 +80,11 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 				billing_account_id: string;
 				expires_at: unknown;
 				provider: string;
+				previous_status: SubscriptionStatus;
+				previous_auto_renew: boolean;
+				product_id: string;
+				current_period_end: Date | string | null;
+				cancel_at_period_end: boolean;
 			}>(
 				tx,
 				drizzleSql`
@@ -90,7 +98,8 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 					FOR NO KEY UPDATE OF c
 				),
 				due_subscriptions AS MATERIALIZED (
-					SELECT s.id, s.customer_id
+					SELECT s.id, s.customer_id, s.status AS previous_status,
+						s.auto_renew AS previous_auto_renew
 					FROM subscriptions s
 					JOIN candidates candidate ON candidate.id = s.id
 					JOIN locked_customers locked_customer ON locked_customer.id = s.customer_id
@@ -108,7 +117,9 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 				FROM due_subscriptions due
 				JOIN customers c ON c.id = due.customer_id
 				WHERE s.id = due.id
-				RETURNING s.id, s.project_id, s.customer_id, c.billing_account_id, s.expires_at, s.provider
+				RETURNING s.id, s.project_id, s.customer_id, c.billing_account_id, s.expires_at, s.provider,
+					due.previous_status, due.previous_auto_renew, s.product_id, s.current_period_end,
+					s.cancel_at_period_end
 			`,
 			);
 
@@ -117,6 +128,21 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 
 			for (const row of rows) {
 				customerIds.add(row.customer_id);
+				const after = subscriptionEventState({
+					status: "expired",
+					product_id: row.product_id,
+					expires_at: row.expires_at as Date | string,
+					current_period_end: row.current_period_end,
+					cancel_at_period_end: row.cancel_at_period_end,
+					auto_renew: false,
+				});
+				await recordSubscriptionChange(tx, row.project_id, {
+					subscriptionId: row.id,
+					customerId: row.customer_id,
+					before: { ...after, status: row.previous_status, autoRenew: row.previous_auto_renew },
+					after,
+					changeKey: `expiry:${formatUtcTimestamp(row.expires_at)}`,
+				});
 				const snapshot = await recomputeCustomerEntitlements(
 					tx,
 					row.project_id,

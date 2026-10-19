@@ -15,9 +15,27 @@ rotating its secret also need an `Idempotency-Key`.
 ## Event types
 
 `GET /v1/admin/webhook-event-types` lists the types an endpoint can subscribe to (`subscribable`)
-and every type it can receive (`deliverable`). Today the lane delivers `webhook.test` only; billing
-facts join it as event types, and that list is where they appear. An endpoint subscribes to a list
-of types, or to every type when the list is empty, including types added later.
+and every type it can receive (`deliverable`, which adds `webhook.test`). An endpoint subscribes to
+a list of types, or to every type when the list is empty, including types added later.
+
+| Type | Recorded when | `data` |
+| --- | --- | --- |
+| `subscription.activated` | A subscription starts granting access: it is new, or comes back from `expired`, `refunded` or `revoked` | `subscription` and `previousAttributes` |
+| `subscription.updated` | A subscription that grants access changes its status, product, expiry, period end, `cancelAtPeriodEnd` or `autoRenew` | `subscription` and `previousAttributes`, the changed attributes with their values before |
+| `subscription.ended` | A subscription that granted access becomes `expired`, `refunded` or `revoked` | `subscription` and `previousAttributes` |
+| `invoice.paid`, `invoice.payment_failed` | Stripe reports a subscription invoice paid, or a payment for it failed | `invoice`: Quotum's invoice id, Stripe's id, status, amount paid in minor units, currency, subscription |
+| `refund.recorded`, `dispute.recorded` | A refund or a dispute of a payment is recorded; credits it funded are taken back | `reversal`, and `subscription` for a subscription payment, as the projection carries them |
+| `trial.ending`, `trial.ended` | A trial ends within three days, or a trial without a paid successor ended | `trial`, as the projection carries it |
+| `plan_grant.ending`, `plan_grant.ended` | The plan a redeemed promotion code gave ends within three days, or ended | `planGrant`, as the projection carries it |
+| `usage_alert.triggered` | Usage crosses an alert's threshold in a window | `alert`, `window`, the `threshold` in units, `currentValue` and the window's `crossing` count |
+| `auto_topup.succeeded` | An automatic top-up charged and added its credits | `autoTopup`: job, policy, feature, top-up, amounts, currency, provider ids |
+| `auto_topup.failed` | An automatic top-up failed for good, or its charge exceeded the policy's safety budget and was voided; the policy may be suspended | `autoTopup` with `error` |
+| `auto_topup.action_required` | An automatic top-up needs the customer, such as a purchase in a store app or authentication | `autoTopup` with `error` |
+
+A subscription event's `subscription` is the subscription after the change. The trial,
+plan-grant, refund and dispute events carry the same fact as the `billing_state_v1` projection, from
+the same recorded change, so a receiver of both sees each fact once in each. A retried top-up
+failure records nothing until it succeeds or fails for good.
 
 A billing fact is recorded as an event in the same database transaction as the fact, and only
 while an enabled endpoint of the project subscribes to its type. A project without webhooks

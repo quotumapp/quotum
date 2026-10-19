@@ -180,7 +180,7 @@ export const entitlementSnapshotSchema = z.object({
 	generatedAt: z.string().min(1),
 });
 
-const projectionReversalPayloadSchema = z.object({
+export const projectionReversalPayloadSchema = z.object({
 	provider: z.enum(billingProviders),
 	channel: z.enum(billingChannels),
 	reason: z.enum(["refund", "dispute"]),
@@ -193,7 +193,7 @@ const projectionReversalPayloadSchema = z.object({
 	reversedAt: z.string().min(1),
 });
 
-const projectionTrialPayloadSchema = z
+export const projectionTrialPayloadSchema = z
 	.object({
 		event: z.enum(projectionTrialEvents),
 		source: z.enum(projectionTrialSources),
@@ -234,7 +234,7 @@ const projectionTrialPayloadSchema = z
 		}
 	});
 
-const projectionPlanGrantPayloadSchema = z
+export const projectionPlanGrantPayloadSchema = z
 	.object({
 		event: z.enum(projectionPlanGrantEvents),
 		origin: z.literal("promotion"),

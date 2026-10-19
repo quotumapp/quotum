@@ -4,6 +4,7 @@ import { StripeBillingService } from "../../src/providers/stripe/service";
 import { calendarWindow } from "../../src/shared/cadence";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import { recordedEvents, subscribeToEveryEvent } from "./helpers/domain-event-fixtures";
 import {
 	createLocalPostgresContext,
 	databaseNow,
@@ -32,6 +33,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 	});
 
 	it("persists threshold crossings once, rearms after a correction, and crosses again", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
 		await context.repository.grantAllocation(project, {
 			billingAccountId: "alert-account",
 			featureKey: "ai_credits",
@@ -90,6 +92,27 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			crossed: true,
 			crossing_sequence: 2,
 		});
+		// Each crossing is a webhook event; the rearm in between is not.
+		const triggered = await recordedEvents(
+			context.sql,
+			project.projectInstanceId,
+			"usage_alert.triggered",
+		);
+		expect(triggered.map((recorded) => recorded.data.crossing)).toEqual([1, 2]);
+		expect(triggered[0]?.data).toMatchObject({
+			alert: {
+				featureKey: "ai_credits",
+				entityId: null,
+				thresholdType: "absolute",
+				thresholdValue: "5",
+				interval: "lifetime",
+				intervalCount: null,
+			},
+			window: { endsAt: null },
+			threshold: "5",
+			currentValue: "6",
+		});
+		expect(triggered[0]?.envelope.billingAccountId).toBe("alert-account");
 	});
 
 	it("starts a new alert from the usage its window already recorded", async () => {
@@ -909,6 +932,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 	});
 
 	it("reserves the safety budget before Stripe and grants the purchased allocation atomically", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
 		await prepareAutoTopupAccount("topup-account");
 		await context.repository.grantAllocation(project, {
 			billingAccountId: "topup-account",
@@ -998,6 +1022,29 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(
 			await context.repository.getMeteringBalance(project, "topup-account", "ai_credits"),
 		).toMatchObject({ granted: "20", consumed: "6", available: "14" });
+		// One event for the charge, although its success was reported twice.
+		const succeeded = await recordedEvents(
+			context.sql,
+			project.projectInstanceId,
+			"auto_topup.succeeded",
+		);
+		expect(succeeded).toHaveLength(1);
+		expect(succeeded[0]?.data).toEqual({
+			autoTopup: {
+				jobId: job.jobId,
+				policyId: expect.any(String),
+				featureKey: "ai_credits",
+				topupKey: "credits_10",
+				entityId: null,
+				provider: "stripe",
+				amountMinor: 499,
+				chargedAmountMinor: 499,
+				currency: "usd",
+				externalInvoiceId: "in_auto_1",
+				externalPaymentId: "pi_auto_1",
+				error: null,
+			},
+		});
 		const [durable] = await context.sql<
 			Array<{
 				job_status: string;
@@ -1208,6 +1255,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 	});
 
 	it("releases reserved budget on failure and suspends after provider action is required", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
 		await prepareAutoTopupAccount("failure-account");
 		await context.repository.grantAllocation(project, {
 			billingAccountId: "failure-account",
@@ -1286,6 +1334,103 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			spend: "0",
 			failures: 2,
 			circuit_open: true,
+		});
+		// A failure that is retried records nothing; the one that needs the customer does.
+		const events = await recordedEvents(context.sql, project.projectInstanceId);
+		expect(events.map((recorded) => recorded.type)).toEqual(["auto_topup.action_required"]);
+		expect(events[0]?.data).toMatchObject({
+			autoTopup: {
+				jobId: second.jobId,
+				externalInvoiceId: "in_action",
+				externalPaymentId: "pi_action",
+				chargedAmountMinor: null,
+				error: "saved payment method requires authentication",
+			},
+		});
+	});
+
+	it("records a top-up that failed for good", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
+		await prepareAutoTopupAccount("failed-account");
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "failed-account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:failed-account",
+		});
+		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
+			billingAccountId: "failed-account",
+			featureKey: "ai_credits",
+			topupKey: "credits_10",
+			provider: "stripe",
+			thresholdQuantity: "5",
+			maxPurchasesPerInterval: 2,
+			maxSpendMinor: 1_000,
+			maxConsecutiveFailures: 3,
+			actor: "integration-test",
+		});
+		await consume("failed-account", "6", "failed:trigger");
+		const [job] = await context.repository.claimAutoTopupJobs(
+			"auto-worker",
+			10,
+			new Date(Date.now() - 300_000),
+		);
+
+		await context.repository.markAutoTopupFailed(job.projectId, job.jobId, "auto-worker", {
+			kind: "retryable",
+			error: "card declined",
+			nextAttemptAt: null,
+		});
+
+		const events = await recordedEvents(context.sql, project.projectInstanceId);
+		expect(events.map((recorded) => recorded.type)).toEqual(["auto_topup.failed"]);
+		expect(events[0]?.data).toMatchObject({
+			autoTopup: { jobId: job.jobId, featureKey: "ai_credits", error: "card declined" },
+		});
+		expect(events[0]?.envelope.billingAccountId).toBe("failed-account");
+	});
+
+	it("records a charge over the safety budget as a failed top-up", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
+		await prepareAutoTopupAccount("budget-account");
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "budget-account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:budget-account",
+		});
+		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
+			billingAccountId: "budget-account",
+			featureKey: "ai_credits",
+			topupKey: "credits_10",
+			provider: "stripe",
+			thresholdQuantity: "5",
+			maxPurchasesPerInterval: 2,
+			maxSpendMinor: 1_000,
+			maxConsecutiveFailures: 3,
+			actor: "integration-test",
+		});
+		await consume("budget-account", "6", "budget:trigger");
+		const [job] = await context.repository.claimAutoTopupJobs(
+			"auto-worker",
+			10,
+			new Date(Date.now() - 300_000),
+		);
+
+		await context.repository.markAutoTopupFailed(job.projectId, job.jobId, "auto-worker", {
+			kind: "safety_limit_exceeded",
+			error: "Provider charge exceeded the configured auto top-up safety budget",
+			nextAttemptAt: null,
+			externalInvoiceId: "in_over_budget",
+		});
+
+		// Nothing waits on the customer: the over-budget invoice was voided.
+		const events = await recordedEvents(context.sql, project.projectInstanceId);
+		expect(events.map((recorded) => recorded.type)).toEqual(["auto_topup.failed"]);
+		expect(events[0]?.data).toMatchObject({
+			autoTopup: { jobId: job.jobId, externalInvoiceId: "in_over_budget" },
 		});
 	});
 

@@ -14,5 +14,437 @@
       "type": "webhook.test",
       "version": 1
     }
+  },
+  {
+    "description": "A new Stripe subscription starts granting access.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-01T09:30:05.000Z",
+      "data": {
+        "previousAttributes": {},
+        "subscription": {
+          "autoRenew": true,
+          "cancelAtPeriodEnd": false,
+          "channel": "web",
+          "currentPeriodEnd": "2026-11-01T09:30:00.000Z",
+          "currentPeriodStart": "2026-10-01T09:30:00.000Z",
+          "expiresAt": "2026-11-01T09:30:00.000Z",
+          "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+          "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01",
+          "productKey": "pro_monthly",
+          "provider": "stripe",
+          "providerStatus": "active",
+          "startsAt": "2026-10-01T09:30:00.000Z",
+          "status": "active"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e11",
+      "occurredAt": "2026-10-01T09:30:05.000Z",
+      "projectKey": "acme",
+      "type": "subscription.activated",
+      "version": 1
+    }
+  },
+  {
+    "description": "The customer scheduled the subscription to cancel at the end of the period.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-12T14:02:11.000Z",
+      "data": {
+        "previousAttributes": {
+          "autoRenew": true,
+          "cancelAtPeriodEnd": false,
+          "status": "active"
+        },
+        "subscription": {
+          "autoRenew": false,
+          "cancelAtPeriodEnd": true,
+          "channel": "web",
+          "currentPeriodEnd": "2026-11-01T09:30:00.000Z",
+          "currentPeriodStart": "2026-10-01T09:30:00.000Z",
+          "expiresAt": "2026-11-01T09:30:00.000Z",
+          "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+          "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01",
+          "productKey": "pro_monthly",
+          "provider": "stripe",
+          "providerStatus": "active",
+          "startsAt": "2026-10-01T09:30:00.000Z",
+          "status": "cancelled"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e12",
+      "occurredAt": "2026-10-12T14:02:11.000Z",
+      "projectKey": "acme",
+      "type": "subscription.updated",
+      "version": 1
+    }
+  },
+  {
+    "description": "The subscription expired at the end of its last paid period.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-11-01T09:31:00.000Z",
+      "data": {
+        "previousAttributes": {
+          "autoRenew": true,
+          "status": "cancelled"
+        },
+        "subscription": {
+          "autoRenew": false,
+          "cancelAtPeriodEnd": true,
+          "channel": "web",
+          "currentPeriodEnd": "2026-11-01T09:30:00.000Z",
+          "currentPeriodStart": "2026-10-01T09:30:00.000Z",
+          "expiresAt": "2026-11-01T09:30:00.000Z",
+          "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+          "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01",
+          "productKey": "pro_monthly",
+          "provider": "stripe",
+          "providerStatus": "active",
+          "startsAt": "2026-10-01T09:30:00.000Z",
+          "status": "expired"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e13",
+      "occurredAt": "2026-11-01T09:31:00.000Z",
+      "projectKey": "acme",
+      "type": "subscription.ended",
+      "version": 1
+    }
+  },
+  {
+    "description": "Stripe reports a subscription invoice as paid.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-01T09:30:02.000Z",
+      "data": {
+        "invoice": {
+          "amountPaidMinor": 2000,
+          "currency": "usd",
+          "externalInvoiceId": "in_1QZ8xExampleAcme",
+          "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+          "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e50",
+          "paidAt": "2026-10-01T09:30:01.000Z",
+          "provider": "stripe",
+          "status": "paid",
+          "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e14",
+      "occurredAt": "2026-10-01T09:30:02.000Z",
+      "projectKey": "acme",
+      "type": "invoice.paid",
+      "version": 1
+    }
+  },
+  {
+    "description": "Stripe reports that charging a subscription invoice failed.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-11-01T09:30:04.000Z",
+      "data": {
+        "invoice": {
+          "amountPaidMinor": 0,
+          "currency": "usd",
+          "externalInvoiceId": "in_1QZ9xExampleAcme",
+          "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+          "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e51",
+          "paidAt": null,
+          "provider": "stripe",
+          "status": "open",
+          "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e15",
+      "occurredAt": "2026-11-01T09:30:04.000Z",
+      "projectKey": "acme",
+      "type": "invoice.payment_failed",
+      "version": 1
+    }
+  },
+  {
+    "description": "A subscription payment was refunded; the credits it funded are taken back.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-05T11:00:00.000Z",
+      "data": {
+        "reversal": {
+          "channel": "web",
+          "creditAmount": 0,
+          "originalTransactionId": "in_1QZ8xExampleAcme",
+          "productKey": "pro_monthly",
+          "provider": "stripe",
+          "reason": "refund",
+          "reversedAt": "2026-10-05T11:00:00.000Z",
+          "transactionId": "re_1QZ8xExampleAcme"
+        },
+        "subscription": {
+          "cancelAtPeriodEnd": false,
+          "cancellationReason": null,
+          "channel": "web",
+          "expiresAt": "2026-11-01T09:30:00.000Z",
+          "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+          "planKey": "pro",
+          "productKey": "pro_monthly",
+          "provider": "stripe",
+          "providerStatus": "active",
+          "status": "active",
+          "subscriptionId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e01"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e16",
+      "occurredAt": "2026-10-05T11:00:00.000Z",
+      "projectKey": "acme",
+      "type": "refund.recorded",
+      "version": 1
+    }
+  },
+  {
+    "description": "The customer disputed a credit pack payment.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-07T16:20:00.000Z",
+      "data": {
+        "reversal": {
+          "channel": "web",
+          "creditAmount": 100,
+          "originalTransactionId": "pi_1QZ8xExampleAcme",
+          "productKey": "credits_100",
+          "provider": "stripe",
+          "reason": "dispute",
+          "reversedAt": "2026-10-07T16:20:00.000Z",
+          "totalCreditAmount": 100,
+          "transactionId": "dp_1QZ8xExampleAcme"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e17",
+      "occurredAt": "2026-10-07T16:20:00.000Z",
+      "projectKey": "acme",
+      "type": "dispute.recorded",
+      "version": 1
+    }
+  },
+  {
+    "description": "A Stripe trial ends in three days.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-12T09:30:00.000Z",
+      "data": {
+        "trial": {
+          "autoRenew": true,
+          "channel": "web",
+          "event": "ending",
+          "externalSubscriptionId": "sub_1QZ8xExampleAcme",
+          "productKey": "pro_monthly",
+          "provider": "stripe",
+          "source": "subscription",
+          "trialEndsAt": "2026-10-15T09:30:00.000Z",
+          "trialStartsAt": "2026-10-01T09:30:00.000Z"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e18",
+      "occurredAt": "2026-10-12T09:30:00.000Z",
+      "projectKey": "acme",
+      "type": "trial.ending",
+      "version": 1
+    }
+  },
+  {
+    "description": "A trial Quotum ran ended without a paid plan after it.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-15T09:30:00.000Z",
+      "data": {
+        "trial": {
+          "autoRenew": false,
+          "event": "ended",
+          "planGrantId": "0192f3a1-9a00-7c00-8d00-0e0f10111213",
+          "planKey": "pro",
+          "source": "plan_grant",
+          "trialEndsAt": "2026-10-15T09:30:00.000Z",
+          "trialStartsAt": "2026-10-01T09:30:00.000Z"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e19",
+      "occurredAt": "2026-10-15T09:30:00.000Z",
+      "projectKey": "acme",
+      "type": "trial.ended",
+      "version": 1
+    }
+  },
+  {
+    "description": "The plan a redeemed promotion code gave ends in three days.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-28T09:30:00.000Z",
+      "data": {
+        "planGrant": {
+          "endsAt": "2026-10-31T09:30:00.000Z",
+          "event": "ending",
+          "origin": "promotion",
+          "planGrantId": "0192f3a1-9a00-7c00-8d00-0e0f10111214",
+          "planKey": "pro",
+          "promotionRedemptionId": "0192f3a1-9a00-7c00-8d00-0e0f10111215",
+          "startsAt": "2026-10-01T09:30:00.000Z"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e1a",
+      "occurredAt": "2026-10-28T09:30:00.000Z",
+      "projectKey": "acme",
+      "type": "plan_grant.ending",
+      "version": 1
+    }
+  },
+  {
+    "description": "The plan a redeemed promotion code gave has ended.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-31T09:30:00.000Z",
+      "data": {
+        "planGrant": {
+          "endsAt": "2026-10-31T09:30:00.000Z",
+          "event": "ended",
+          "origin": "promotion",
+          "planGrantId": "0192f3a1-9a00-7c00-8d00-0e0f10111214",
+          "planKey": "pro",
+          "promotionRedemptionId": "0192f3a1-9a00-7c00-8d00-0e0f10111215",
+          "startsAt": "2026-10-01T09:30:00.000Z"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e1b",
+      "occurredAt": "2026-10-31T09:30:00.000Z",
+      "projectKey": "acme",
+      "type": "plan_grant.ended",
+      "version": 1
+    }
+  },
+  {
+    "description": "Usage reached 80% of the month's usage limit.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-20T13:45:12.000Z",
+      "data": {
+        "alert": {
+          "entityId": null,
+          "featureKey": "ai_credits",
+          "id": "42",
+          "interval": "month",
+          "intervalCount": 1,
+          "thresholdType": "percentage",
+          "thresholdValue": "80"
+        },
+        "crossing": 1,
+        "currentValue": "812",
+        "threshold": "800",
+        "window": {
+          "endsAt": "2026-11-01T00:00:00.000Z",
+          "startsAt": "2026-10-01T00:00:00.000Z"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e1c",
+      "occurredAt": "2026-10-20T13:45:12.000Z",
+      "projectKey": "acme",
+      "type": "usage_alert.triggered",
+      "version": 1
+    }
+  },
+  {
+    "description": "An automatic top-up charged the saved card and added the credits.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-20T13:45:40.000Z",
+      "data": {
+        "autoTopup": {
+          "amountMinor": 499,
+          "chargedAmountMinor": 499,
+          "currency": "usd",
+          "entityId": null,
+          "error": null,
+          "externalInvoiceId": "in_1QZAxExampleAcme",
+          "externalPaymentId": "pi_1QZAxExampleAcme",
+          "featureKey": "ai_credits",
+          "jobId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e40",
+          "policyId": "11",
+          "provider": "stripe",
+          "topupKey": "credits_100"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e1d",
+      "occurredAt": "2026-10-20T13:45:40.000Z",
+      "projectKey": "acme",
+      "type": "auto_topup.succeeded",
+      "version": 1
+    }
+  },
+  {
+    "description": "An automatic top-up failed for good; the policy is suspended until it is reset.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-21T08:10:00.000Z",
+      "data": {
+        "autoTopup": {
+          "amountMinor": 499,
+          "chargedAmountMinor": null,
+          "currency": "usd",
+          "entityId": null,
+          "error": "Your card was declined.",
+          "externalInvoiceId": null,
+          "externalPaymentId": null,
+          "featureKey": "ai_credits",
+          "jobId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e40",
+          "policyId": "11",
+          "provider": "stripe",
+          "topupKey": "credits_100"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e1e",
+      "occurredAt": "2026-10-21T08:10:00.000Z",
+      "projectKey": "acme",
+      "type": "auto_topup.failed",
+      "version": 1
+    }
+  },
+  {
+    "description": "An automatic top-up needs the customer, here a purchase in the App Store.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-21T08:10:00.000Z",
+      "data": {
+        "autoTopup": {
+          "amountMinor": 0,
+          "chargedAmountMinor": null,
+          "currency": null,
+          "entityId": null,
+          "error": "Provider-native purchase action is required",
+          "externalInvoiceId": null,
+          "externalPaymentId": null,
+          "featureKey": "ai_credits",
+          "jobId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e40",
+          "policyId": "11",
+          "provider": "apple",
+          "topupKey": "credits_100"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e1f",
+      "occurredAt": "2026-10-21T08:10:00.000Z",
+      "projectKey": "acme",
+      "type": "auto_topup.action_required",
+      "version": 1
+    }
   }
 ]

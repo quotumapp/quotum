@@ -117,7 +117,13 @@ describe("automatic top-up support follows the declared providers", () => {
 
 	it("writes a terminal provider-action job once a declaration drops automatic top-up", async () => {
 		const database = new FakeDatabase(
-			[readyState(), [{ pending: false }], [{ id: "77" }], [{ policy_id: "11" }]],
+			[
+				readyState(),
+				[{ pending: false }],
+				[{ id: "77" }],
+				[{ subscribed: false }],
+				[{ policy_id: "11" }],
+			],
 			{ strict: true },
 		);
 
@@ -147,7 +153,13 @@ describe("automatic top-up support follows the declared providers", () => {
 
 		// The same policy is terminal, not skipped, under the declarations as they ship.
 		const terminal = new FakeDatabase(
-			[readyState(), [{ pending: false }], [{ id: "77" }], [{ policy_id: "11" }]],
+			[
+				readyState(),
+				[{ pending: false }],
+				[{ id: "77" }],
+				[{ subscribed: false }],
+				[{ policy_id: "11" }],
+			],
 			{ strict: true },
 		);
 		expect(

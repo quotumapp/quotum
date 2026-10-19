@@ -75,6 +75,2639 @@
         "data"
       ],
       "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "autoTopup": {
+              "properties": {
+                "amountMinor": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "chargedAmountMinor": {
+                  "anyOf": [
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currency": {
+                  "anyOf": [
+                    {
+                      "maxLength": 3,
+                      "minLength": 3,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "entityId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "externalInvoiceId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalPaymentId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "featureKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "jobId": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "policyId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "topupKey": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "jobId",
+                "policyId",
+                "featureKey",
+                "topupKey",
+                "entityId",
+                "provider",
+                "amountMinor",
+                "chargedAmountMinor",
+                "currency",
+                "externalInvoiceId",
+                "externalPaymentId",
+                "error"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "autoTopup"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "auto_topup.action_required",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "autoTopup": {
+              "properties": {
+                "amountMinor": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "chargedAmountMinor": {
+                  "anyOf": [
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currency": {
+                  "anyOf": [
+                    {
+                      "maxLength": 3,
+                      "minLength": 3,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "entityId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "externalInvoiceId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalPaymentId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "featureKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "jobId": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "policyId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "topupKey": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "jobId",
+                "policyId",
+                "featureKey",
+                "topupKey",
+                "entityId",
+                "provider",
+                "amountMinor",
+                "chargedAmountMinor",
+                "currency",
+                "externalInvoiceId",
+                "externalPaymentId",
+                "error"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "autoTopup"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "auto_topup.failed",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "autoTopup": {
+              "properties": {
+                "amountMinor": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "chargedAmountMinor": {
+                  "anyOf": [
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currency": {
+                  "anyOf": [
+                    {
+                      "maxLength": 3,
+                      "minLength": 3,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "entityId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "externalInvoiceId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalPaymentId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "featureKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "jobId": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "policyId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "topupKey": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "jobId",
+                "policyId",
+                "featureKey",
+                "topupKey",
+                "entityId",
+                "provider",
+                "amountMinor",
+                "chargedAmountMinor",
+                "currency",
+                "externalInvoiceId",
+                "externalPaymentId",
+                "error"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "autoTopup"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "auto_topup.succeeded",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "reversal": {
+              "properties": {
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "creditAmount": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "originalTransactionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "quantity": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "reason": {
+                  "enum": [
+                    "refund",
+                    "dispute"
+                  ],
+                  "type": "string"
+                },
+                "reversedAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "totalCreditAmount": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "transactionId": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "channel",
+                "reason",
+                "transactionId",
+                "originalTransactionId",
+                "productKey",
+                "creditAmount",
+                "reversedAt"
+              ],
+              "type": "object"
+            },
+            "subscription": {
+              "properties": {
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "cancellationReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalSubscriptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "providerStatus": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                },
+                "subscriptionId": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "subscriptionId",
+                "externalSubscriptionId",
+                "provider",
+                "channel",
+                "productKey",
+                "planKey",
+                "status",
+                "providerStatus",
+                "expiresAt",
+                "cancelAtPeriodEnd",
+                "cancellationReason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "reversal"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "dispute.recorded",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "invoice": {
+              "properties": {
+                "amountPaidMinor": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "currency": {
+                  "maxLength": 3,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                "externalInvoiceId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "externalSubscriptionId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "paidAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "provider": {
+                  "const": "stripe",
+                  "type": "string"
+                },
+                "status": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "subscriptionId": {
+                  "anyOf": [
+                    {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "externalInvoiceId",
+                "provider",
+                "status",
+                "amountPaidMinor",
+                "currency",
+                "paidAt",
+                "subscriptionId",
+                "externalSubscriptionId"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "invoice"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "invoice.paid",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "invoice": {
+              "properties": {
+                "amountPaidMinor": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "currency": {
+                  "maxLength": 3,
+                  "minLength": 3,
+                  "type": "string"
+                },
+                "externalInvoiceId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "externalSubscriptionId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "paidAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "provider": {
+                  "const": "stripe",
+                  "type": "string"
+                },
+                "status": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "subscriptionId": {
+                  "anyOf": [
+                    {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "externalInvoiceId",
+                "provider",
+                "status",
+                "amountPaidMinor",
+                "currency",
+                "paidAt",
+                "subscriptionId",
+                "externalSubscriptionId"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "invoice"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "invoice.payment_failed",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "planGrant": {
+              "properties": {
+                "endsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "event": {
+                  "enum": [
+                    "ending",
+                    "ended"
+                  ],
+                  "type": "string"
+                },
+                "origin": {
+                  "const": "promotion",
+                  "type": "string"
+                },
+                "planGrantId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "promotionRedemptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "startsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event",
+                "origin",
+                "planGrantId",
+                "planKey",
+                "promotionRedemptionId",
+                "startsAt",
+                "endsAt"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "planGrant"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "plan_grant.ended",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "planGrant": {
+              "properties": {
+                "endsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "event": {
+                  "enum": [
+                    "ending",
+                    "ended"
+                  ],
+                  "type": "string"
+                },
+                "origin": {
+                  "const": "promotion",
+                  "type": "string"
+                },
+                "planGrantId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "promotionRedemptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "startsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event",
+                "origin",
+                "planGrantId",
+                "planKey",
+                "promotionRedemptionId",
+                "startsAt",
+                "endsAt"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "planGrant"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "plan_grant.ending",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "reversal": {
+              "properties": {
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "creditAmount": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "originalTransactionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "quantity": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "reason": {
+                  "enum": [
+                    "refund",
+                    "dispute"
+                  ],
+                  "type": "string"
+                },
+                "reversedAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "totalCreditAmount": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "transactionId": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "channel",
+                "reason",
+                "transactionId",
+                "originalTransactionId",
+                "productKey",
+                "creditAmount",
+                "reversedAt"
+              ],
+              "type": "object"
+            },
+            "subscription": {
+              "properties": {
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "cancellationReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalSubscriptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "providerStatus": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                },
+                "subscriptionId": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "subscriptionId",
+                "externalSubscriptionId",
+                "provider",
+                "channel",
+                "productKey",
+                "planKey",
+                "status",
+                "providerStatus",
+                "expiresAt",
+                "cancelAtPeriodEnd",
+                "cancellationReason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "reversal"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "refund.recorded",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "previousAttributes": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "currentPeriodEnd": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "subscription": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "currentPeriodEnd": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentPeriodStart": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalSubscriptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "providerStatus": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "startsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "externalSubscriptionId",
+                "provider",
+                "channel",
+                "productKey",
+                "status",
+                "providerStatus",
+                "startsAt",
+                "expiresAt",
+                "currentPeriodStart",
+                "currentPeriodEnd",
+                "cancelAtPeriodEnd",
+                "autoRenew"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "subscription",
+            "previousAttributes"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "subscription.activated",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "previousAttributes": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "currentPeriodEnd": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "subscription": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "currentPeriodEnd": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentPeriodStart": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalSubscriptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "providerStatus": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "startsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "externalSubscriptionId",
+                "provider",
+                "channel",
+                "productKey",
+                "status",
+                "providerStatus",
+                "startsAt",
+                "expiresAt",
+                "currentPeriodStart",
+                "currentPeriodEnd",
+                "cancelAtPeriodEnd",
+                "autoRenew"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "subscription",
+            "previousAttributes"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "subscription.ended",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "previousAttributes": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "currentPeriodEnd": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "subscription": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "cancelAtPeriodEnd": {
+                  "type": "boolean"
+                },
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "currentPeriodEnd": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "currentPeriodStart": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "externalSubscriptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "providerStatus": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "startsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "active",
+                    "grace_period",
+                    "billing_retry",
+                    "cancelled",
+                    "expired",
+                    "refunded",
+                    "revoked"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "externalSubscriptionId",
+                "provider",
+                "channel",
+                "productKey",
+                "status",
+                "providerStatus",
+                "startsAt",
+                "expiresAt",
+                "currentPeriodStart",
+                "currentPeriodEnd",
+                "cancelAtPeriodEnd",
+                "autoRenew"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "subscription",
+            "previousAttributes"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "subscription.updated",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "trial": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "event": {
+                  "enum": [
+                    "ending",
+                    "ended"
+                  ],
+                  "type": "string"
+                },
+                "externalSubscriptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planGrantId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "source": {
+                  "enum": [
+                    "subscription",
+                    "plan_grant"
+                  ],
+                  "type": "string"
+                },
+                "trialEndsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "trialStartsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event",
+                "source",
+                "trialStartsAt",
+                "trialEndsAt",
+                "autoRenew"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "trial"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "trial.ended",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "trial": {
+              "properties": {
+                "autoRenew": {
+                  "type": "boolean"
+                },
+                "channel": {
+                  "enum": [
+                    "ios",
+                    "android",
+                    "web"
+                  ],
+                  "type": "string"
+                },
+                "event": {
+                  "enum": [
+                    "ending",
+                    "ended"
+                  ],
+                  "type": "string"
+                },
+                "externalSubscriptionId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planGrantId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "planKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "productKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "enum": [
+                    "apple",
+                    "google",
+                    "stripe",
+                    "paddle"
+                  ],
+                  "type": "string"
+                },
+                "source": {
+                  "enum": [
+                    "subscription",
+                    "plan_grant"
+                  ],
+                  "type": "string"
+                },
+                "trialEndsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "trialStartsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event",
+                "source",
+                "trialStartsAt",
+                "trialEndsAt",
+                "autoRenew"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "trial"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "trial.ending",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "alert": {
+              "properties": {
+                "entityId": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "featureKey": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "interval": {
+                  "enum": [
+                    "hour",
+                    "day",
+                    "week",
+                    "month",
+                    "quarter",
+                    "semi_annual",
+                    "year",
+                    "lifetime"
+                  ],
+                  "type": "string"
+                },
+                "intervalCount": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "thresholdType": {
+                  "enum": [
+                    "absolute",
+                    "percentage"
+                  ],
+                  "type": "string"
+                },
+                "thresholdValue": {
+                  "pattern": "^\\d+(?:\\.\\d+)?$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "featureKey",
+                "entityId",
+                "thresholdType",
+                "thresholdValue",
+                "interval",
+                "intervalCount"
+              ],
+              "type": "object"
+            },
+            "crossing": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "currentValue": {
+              "pattern": "^\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            "threshold": {
+              "pattern": "^\\d+(?:\\.\\d+)?$",
+              "type": "string"
+            },
+            "window": {
+              "properties": {
+                "endsAt": {
+                  "anyOf": [
+                    {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "startsAt": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "startsAt",
+                "endsAt"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "alert",
+            "window",
+            "threshold",
+            "currentValue",
+            "crossing"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "usage_alert.triggered",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
     }
   ],
   "title": "Quotum outbound domain event"

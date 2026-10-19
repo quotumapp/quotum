@@ -12,6 +12,7 @@ import {
 	setPurchaseAllocationReversal,
 	syncSubscriptionPriceItems,
 } from "./catalog-allocations";
+import { eventTimestamp, recordInvoiceEvent, trackSubscriptionChange } from "./domain-event-facts";
 import {
 	enqueueProjectionSyncJob,
 	enqueueUsageProjection,
@@ -2223,13 +2224,20 @@ async function recordExistingSubscriptionInvoice(
 		Math.max(subscription.last_provider_event_created, Number(previous?.last_event ?? 0))
 	) {
 		const lifecycle = stripeSubscriptionLifecycleState(input, subscription);
-		await executeRows(
+		await trackSubscriptionChange(
 			executor,
-			drizzleSql`
-			UPDATE subscriptions
-			SET status = ${lifecycle.status}, provider_status = ${lifecycle.providerStatus}, updated_at = now()
-			WHERE project_id = ${projectId} AND id = ${subscription.id}
-		`,
+			projectId,
+			{ subscriptionId: subscription.id },
+			async () => {
+				await executeRows(
+					executor,
+					drizzleSql`
+				UPDATE subscriptions
+				SET status = ${lifecycle.status}, provider_status = ${lifecycle.providerStatus}, updated_at = now()
+				WHERE project_id = ${projectId} AND id = ${subscription.id}
+			`,
+				);
+			},
 		);
 	}
 	const snapshot = await recomputeCustomerEntitlements(executor, projectId, fact.billingAccountId);
@@ -2406,7 +2414,7 @@ async function upsertSubscriptionInvoiceFact(
 	) {
 		return;
 	}
-	await upsertStripeInvoice(executor, {
+	const invoiceId = await upsertStripeInvoice(executor, {
 		projectId,
 		customerId: fact.customerId,
 		subscriptionId: fact.subscriptionId,
@@ -2420,6 +2428,30 @@ async function upsertSubscriptionInvoiceFact(
 		lastProviderEventCreated: input.providerEventCreated ?? 0,
 		rawPayload: input.rawPayload,
 	});
+	// The notification is the event: a late one still reports a payment that happened, so it is
+	// recorded even when the row keeps a newer state.
+	if (input.eventType === "invoice.paid" || input.eventType === "invoice.payment_failed") {
+		await recordInvoiceEvent(executor, projectId, {
+			type: input.eventType,
+			sourceKey: `${input.eventType}:${input.externalEventId ?? `${input.invoiceId}:${input.invoiceStatus}`}`,
+			customerId: fact.customerId,
+			occurredAt:
+				input.providerEventCreated === undefined || input.providerEventCreated === 0
+					? new Date()
+					: new Date(input.providerEventCreated * 1000),
+			invoice: {
+				id: invoiceId,
+				externalInvoiceId: input.invoiceId,
+				provider: "stripe",
+				status: input.invoiceStatus,
+				amountPaidMinor: input.invoiceAmountPaid ?? 0,
+				currency: (input.invoiceCurrency ?? "usd").toLowerCase(),
+				paidAt: eventTimestamp(input.invoicePaidAt),
+				subscriptionId: fact.subscriptionId,
+				externalSubscriptionId: input.stripeSubscriptionId,
+			},
+		});
+	}
 }
 
 async function upsertStripeInvoice(
@@ -2438,8 +2470,8 @@ async function upsertStripeInvoice(
 		lastProviderEventCreated: number;
 		rawPayload: Record<string, unknown>;
 	},
-): Promise<void> {
-	await executeRows(
+): Promise<string> {
+	const row = await executeOne<{ id: string }>(
 		executor,
 		drizzleSql`
 			INSERT INTO billing_invoices (
@@ -2483,8 +2515,20 @@ async function upsertStripeInvoice(
 			WHERE billing_invoices.customer_id = EXCLUDED.customer_id
 				AND billing_invoices.external_subscription_id IS NOT DISTINCT FROM EXCLUDED.external_subscription_id
 				AND billing_invoices.last_provider_event_created <= EXCLUDED.last_provider_event_created
+			RETURNING id
 		`,
 	);
+	if (row !== null) return row.id;
+	// A stale event left the row as it was; the id is still the one row the key names.
+	const existing = await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			SELECT id FROM billing_invoices
+			WHERE project_id = ${input.projectId} AND external_invoice_id = ${input.externalInvoiceId}
+		`,
+	);
+	if (existing === null) throw new Error(`invoice ${input.externalInvoiceId} was not recorded`);
+	return existing.id;
 }
 
 function dateOrNull(value: Date | string | null): Date | null {
