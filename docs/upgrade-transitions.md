@@ -14,6 +14,18 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Outbound webhooks
+
+The billing core baseline adds `webhook_endpoints`, `domain_events` and `webhook_deliveries` with
+their indexes for [outbound webhooks](webhooks.md). The tables start empty and nothing else
+changes, so a dump from the previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). Nothing is recorded until an
+operator creates an endpoint. The two optional variables `BILLING_EVENT_DELIVERY_MAX_ATTEMPTS` and
+`BILLING_EVENT_RETENTION_DAYS` default to 12 and 30. Endpoint secrets are sealed with the
+`QUOTUM_SECRETS_KEY_*` keys the deployment already holds. An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup, which loses the endpoints created since;
+recreate them, and give receivers the new secrets.
+
 ## Raw usage retention index
 
 The metering baseline adds `idx_billing_usage_invoice_adjustments_event` on
