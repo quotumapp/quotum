@@ -6,7 +6,7 @@ import {
 	NotFoundBillingError,
 	PersistenceConflictError,
 } from "../../billing/errors";
-import type { UsageConsumeResult } from "../../billing/usage-api";
+import type { PublicUsageOutcome } from "../../billing/usage-api";
 import {
 	type UsageOperationInput,
 	type UsageOperationKind,
@@ -21,7 +21,7 @@ import { resolveUsageCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
-type StoredOutcome = UsageOperationResult | UsageConsumeResult;
+type StoredOutcome = UsageOperationResult | PublicUsageOutcome;
 
 interface Claim {
 	id: string;

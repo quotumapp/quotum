@@ -38,9 +38,9 @@ your own [merchant proxy](docs/deployment.md#merchant-proxy-service-principal). 
   [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [contracts/v1/openapi.json](contracts/v1/openapi.json) owns implemented HTTP structures;
-[contracts/v1/errors.json](contracts/v1/errors.json) lists known errors. The public `@quotum/sdk`,
-separate `@quotum/cli` and replacement usage contract remain a target,
-not a published compatibility promise. The bundled `src/sdk` client and catalog script exist today.
+[contracts/v1/errors.json](contracts/v1/errors.json) lists known errors. The public `@quotum/sdk` preview covers consumption and AI reservations, with packed-package
+conformance gates. The separate `@quotum/cli` and complete `1.0` usage contract remain targets.
+The bundled `src/sdk` client and catalog script also exist today; see [SDK scope](docs/api.md#backend-sdk).
 
 ## Development
 

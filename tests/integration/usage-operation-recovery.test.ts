@@ -72,21 +72,20 @@ localDescribe("usage operation recovery", () => {
 
 		const { app, authHeaders } = createIntegrationApp(context);
 		const route = "/v1/billing-accounts/recovery/usage/reservations";
-		const headers = { ...authHeaders(), "idempotency-key": "http-unicode-order" };
-		const body = (metadata: Record<string, number>) =>
-			JSON.stringify({ featureKey: "model_tokens", quantity: "1", metadata });
+		const headers = { ...authHeaders(), "idempotency-key": "http-public-order" };
 		const created = await testRequest(app, route, {
 			method: "POST",
 			headers,
-			body: body({ [precomposed]: 1, [decomposed]: 2 }),
+			body: JSON.stringify({ featureId: "model_tokens", value: "1" }),
 		});
 		expect(created.status).toBe(200);
 		const replay = await testRequest(app, route, {
 			method: "POST",
 			headers,
-			body: body({ [decomposed]: 2, [precomposed]: 1 }),
+			body: JSON.stringify({ value: "01.000", featureId: "model_tokens" }),
 		});
 		expect(replay.status).toBe(200);
+		expect((await replay.json()).data).toEqual((await created.json()).data);
 	});
 
 	it("still replays a claim whose fingerprint was stored before tied keys were ordered", async () => {

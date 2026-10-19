@@ -359,12 +359,13 @@ localDescribe("public usage SDK contract", () => {
 			code: "FEATURE_OPERATION_UNSUPPORTED",
 			message: "Feature premium_access is not metered: it has no balance and takes no usage",
 		};
-		const flag = { featureKey: "premium_access", quantity: "1" };
 
 		expect(
 			await send("POST", "/usage/consume", { featureId: "premium_access", value: "1" }, "c1"),
 		).toEqual(unsupported);
-		expect(await send("POST", "/usage/reservations", flag, "r1")).toEqual(unsupported);
+		expect(
+			await send("POST", "/usage/reservations", { featureId: "premium_access", value: "1" }, "r1"),
+		).toEqual(unsupported);
 		expect(await send("GET", "/balances/premium_access")).toEqual(unsupported);
 		expect(
 			await send("PUT", "/controls", {

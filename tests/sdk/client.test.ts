@@ -293,8 +293,8 @@ describe("BillingClient", () => {
 		await client.usage.reserve(
 			{
 				billingAccountId: "account_1",
-				featureKey: "model_tokens",
-				quantity: "100",
+				featureId: "model_tokens",
+				value: "100",
 				expiresInSeconds: 300,
 			},
 			"reserve:job:1",
@@ -303,7 +303,7 @@ describe("BillingClient", () => {
 			{
 				billingAccountId: "account_1",
 				reservationId: "11111111-1111-4111-8111-111111111111",
-				quantity: "80",
+				value: "80",
 			},
 			"confirm:job:1",
 		);
@@ -334,8 +334,8 @@ describe("BillingClient", () => {
 			"release:job:2",
 		]);
 		expect(await calls[0]?.json()).toEqual({
-			featureKey: "model_tokens",
-			quantity: "100",
+			featureId: "model_tokens",
+			value: "100",
 			expiresInSeconds: 300,
 		});
 		expect(await calls[3]?.json()).toMatchObject({

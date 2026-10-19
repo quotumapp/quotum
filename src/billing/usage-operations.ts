@@ -9,7 +9,7 @@ import type {
 	ReserveUsageInput,
 	UsageCorrectionResult,
 } from "./metering";
-import type { UsageConsumeResult } from "./usage-api";
+import type { PublicUsageOutcome } from "./usage-api";
 
 export const usageOperationKinds = ["consume", "reserve", "confirm", "release", "correct"] as const;
 export type UsageOperationKind = (typeof usageOperationKinds)[number];
@@ -62,7 +62,7 @@ export type UsageOperationLookupResult = {
 	| { status: "processing"; outcome: null; completedAt: null }
 	| {
 			status: "completed";
-			outcome: UsageOperationReceipt | UsageConsumeResult;
+			outcome: UsageOperationReceipt | PublicUsageOutcome;
 			completedAt: string;
 	  }
 );

@@ -500,8 +500,27 @@ version 2 with the exact public outcome and receipt snapshot. Prior consumes ret
 identity and billing effects; the new HTTP surface returns `OPERATION_RESULT_EXPIRED` for their
 legacy outcome rather than returning another response type or charging again. Drain or reconcile
 in-flight legacy operations before cutover; never mint replacement keys for uncertain charges.
-Reserve/confirm/release/correction retain their current response contract for this preview.
+Corrections retain their existing contract. The reservation cutover is described below.
 No environment variable or API package version change is required.
+## Public SDK reservation cutover
+
+This increment changes reserve and confirm to `featureId`/`value` and removes their metadata,
+filters and caller timestamps. Reserve/confirm/release return compact public results, and
+confirmation stores an immutable receipt. New reservation mutations use recovery version 2;
+retained version-1 outcomes return `OPERATION_RESULT_EXPIRED` on the public surface and must never
+be resubmitted under replacement identities. Corrections retain version 1.
+
+Stop admitting legacy reservations and drain or reconcile active ones before deploying the API
+and updated callers together. The maximum hold TTL is 24 hours. Use the new reservation read to
+observe logical expiry; it does not perform maintenance. The bundled client and load scripts
+change with the API; the standalone SDK pins the resulting immutable public commit. Its release
+workflow requires that commit to have merged into API main.
+
+Existing reservation, operation-claim and usage-event receipt storage is reused: this increment
+changes no migration baseline, environment variable or API package version. Keep legacy claims
+and events for their existing retention periods. Rollback requires coordinated caller rollback;
+never replay a completed version-2 operation through the old detailed contract.
+
 ## Apple promotion signatures
 
 `migrations/003_metering_and_pricing.sql` now adds `promotion_apple_signature_attempts`, binding

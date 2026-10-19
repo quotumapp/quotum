@@ -104,6 +104,10 @@ function recordingMeteringService() {
 		service,
 		calls,
 		usage: {
+			reserve: record("reserve"),
+			confirm: record("confirm"),
+			release: record("release"),
+			getReservation: record("getReservation"),
 			check: record("check"),
 			consume: record("consume"),
 			createAccount: record("createAccount"),

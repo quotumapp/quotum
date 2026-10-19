@@ -501,32 +501,8 @@ export class MeteringBillingRepository extends RepositoryModule {
 			"release",
 			input,
 			async () => undefined,
-			async (tx, input, customer) => {
-				const projectId = project.projectInstanceId;
-				const reservation = await lockReservation(tx, projectId, customer.id, input.reservationId);
-
-				if (reservation.status === "confirmed")
-					return await finalizedReservationResult(tx, reservation);
-				if (reservation.status === "active") {
-					await releaseReservationHolds(
-						tx,
-						reservation,
-						new Date(reservation.expires_at).getTime() <= new Date(reservation.db_now).getTime()
-							? "expired"
-							: "released",
-					);
-				}
-				const current = await lockReservation(tx, projectId, customer.id, input.reservationId);
-				if (reservation.status === "active") {
-					await enqueueMeteringProjection(
-						tx,
-						projectId,
-						customer.id,
-						`usage:release:${customer.id}:${input.idempotencyKey}`,
-					);
-				}
-				return await finalizedReservationResult(tx, current);
-			},
+			(tx, input, customer) =>
+				releaseWithinTransaction(tx, project.projectInstanceId, customer, input.reservationId),
 		);
 	}
 
@@ -2023,7 +1999,7 @@ interface ReserveWithinTransactionInput extends MeteringSubjectInputFields {
 	projectionKey: string;
 }
 
-async function reserveWithinTransaction(
+export async function reserveWithinTransaction(
 	tx: QueryExecutor,
 	projectId: string,
 	customer: { id: string; billingAccountId: string },
@@ -2150,6 +2126,30 @@ async function reserveWithinTransaction(
 	};
 }
 
+export async function releaseWithinTransaction(
+	tx: QueryExecutor,
+	projectId: string,
+	customer: { id: string },
+	reservationId: string,
+): Promise<FinalizeReservationResult> {
+	const reservation = await lockReservation(tx, projectId, customer.id, reservationId);
+	if (reservation.status === "confirmed") return finalizedReservationResult(tx, reservation);
+	if (reservation.status === "active") {
+		await releaseReservationHolds(
+			tx,
+			reservation,
+			new Date(reservation.expires_at).getTime() <= new Date(reservation.db_now).getTime()
+				? "expired"
+				: "released",
+		);
+		await enqueueMeteringProjection(tx, projectId, customer.id, `usage:release:${reservation.id}`);
+	}
+	return finalizedReservationResult(
+		tx,
+		await lockReservation(tx, projectId, customer.id, reservationId),
+	);
+}
+
 interface ConfirmWithinTransactionInput {
 	reservationId: string;
 	quantity: string;
@@ -2158,7 +2158,7 @@ interface ConfirmWithinTransactionInput {
 	projectionKey: string;
 }
 
-async function confirmWithinTransaction(
+export async function confirmWithinTransaction(
 	tx: QueryExecutor,
 	projectId: string,
 	customer: { id: string; billingAccountId: string },

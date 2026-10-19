@@ -69,7 +69,7 @@ const mutations: Array<{ path: string; headers: Record<string, string>; body: un
 	{
 		path: "/v1/billing-accounts/acct_1/usage/reservations",
 		headers: backend,
-		body: { featureKey: "credits", quantity: "1" },
+		body: { featureId: "credits", value: "1" },
 	},
 	{
 		path: "/v1/billing-accounts/acct_1/promotion-redemptions",
