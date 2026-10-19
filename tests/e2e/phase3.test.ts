@@ -96,7 +96,7 @@ e2eDescribe("E2E Phase 3 release journeys", () => {
 		};
 		expect(
 			(await postJson("/v1/admin/contracts/preview", actorHeaders(), contractIntent)).status,
-		).toBe(401);
+		).toBe(403);
 		const preview = await postJson(
 			"/v1/admin/contracts/preview",
 			operatorHeaders(),

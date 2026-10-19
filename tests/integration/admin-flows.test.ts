@@ -642,7 +642,7 @@ localDescribe("Admin flows integration", () => {
 				headers: authHeaders("globex"),
 			},
 		);
-		expect(missingOperator.status).toBe(401);
+		expect(missingOperator.status).toBe(403);
 
 		const crossProjectReplay = await testRequest(
 			operationApp,

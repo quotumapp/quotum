@@ -165,7 +165,7 @@ describe("balance adjustment routes", () => {
 		const noKey = await post(operatorHeaders);
 		const granted = await post({ ...operatorHeaders, "idempotency-key": "grant-1" });
 
-		expect(noOperator.status).toBe(401);
+		expect(noOperator.status).toBe(403);
 		expect(noActor.status).toBe(400);
 		expect(noKey.status).toBe(400);
 		expect(granted.status).toBe(201);

@@ -727,8 +727,10 @@ and the stored access level; the stored level, not the prefix, decides what the 
 instances never receive credentials. Every rejected credential returns the same `401 UNAUTHORIZED`
 error. See
 [replacing project credentials](operations.md#project-credentials) for rotation and the retired
-`qpk_v1` format. Operator routes additionally require `X-Billing-Operator-Key`,
-and audited mutations require `X-Billing-Actor`. Provider webhooks are outside project
+`qpk_v1` format. Operator routes additionally require `X-Billing-Operator-Key`, and audited
+mutations require `X-Billing-Actor`. A missing or wrong operator key answers
+`403 BILLING_OPERATOR_KEY_INVALID` without a `WWW-Authenticate` challenge, because the project
+credential has already been accepted. Provider webhooks are outside project
 authentication and rely on provider signature or token verification.
 
 In `gateway` mode, billing-level key checks are disabled for non-webhook `/v1/*` routes only when

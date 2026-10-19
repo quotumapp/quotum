@@ -99,7 +99,8 @@ list:
   `X-Billing-Operator-Key`. The route modules' operator guards match with it and the documented
   `operatorKey` security is its union, so add a new operator-only path there, not in a guard.
   `tests/app/operator-auth.test.ts` sends a request without the key to every `/v1` route and fails
-  when the routes that answer `401` differ from the routes the contract marks.
+  when the routes that answer `403 BILLING_OPERATOR_KEY_INVALID` differ from the routes the
+  contract marks.
 - **`Idempotency-Key` and `X-Billing-Actor`.** The generator derives both from the route path and
   tags (`headerParameters` in `src/composition/openapi.ts`). A handler that calls
   `requireIdempotencyKey` needs its path added to that rule;

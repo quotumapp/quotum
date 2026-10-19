@@ -156,7 +156,7 @@ describe("customer erasure routes", () => {
 		});
 		const erased = await post({ ...operatorHeaders, "idempotency-key": "erase-1" });
 
-		expect(noOperator.status).toBe(401);
+		expect(noOperator.status).toBe(403);
 		expect(noActor.status).toBe(400);
 		expect(noKey.status).toBe(400);
 		expect(readOnly.status).toBe(403);

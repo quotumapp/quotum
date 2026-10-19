@@ -184,6 +184,12 @@
       ]
     },
     {
+      "code": "BILLING_OPERATOR_KEY_INVALID",
+      "sources": [
+        "src/app/admin-routes.ts"
+      ]
+    },
+    {
       "code": "BILLING_OPERATOR_NOT_CONFIGURED",
       "sources": [
         "src/app/admin-routes.ts"
@@ -1866,7 +1872,6 @@
       "code": "UNAUTHORIZED",
       "sources": [
         "src/app.ts",
-        "src/app/admin-routes.ts",
         "src/billing/errors.ts",
         "src/platform/mcp/changes.ts"
       ]
