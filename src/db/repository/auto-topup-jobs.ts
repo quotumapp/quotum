@@ -321,7 +321,10 @@ export class AutoTopupJobRepository extends RepositoryModule {
 			);
 			if (!retryScheduled) {
 				await recordAutoTopupOutcome(tx, projectId, {
-					type: input.kind === "retryable" ? "auto_topup.failed" : "auto_topup.action_required",
+					// Only a customer can clear `action_required`; a charge over the safety budget was
+					// voided, so it failed, though the job keeps its provider-action status.
+					type:
+						input.kind === "action_required" ? "auto_topup.action_required" : "auto_topup.failed",
 					customerId: job.customer_id,
 					policyId: String(job.policy_id),
 					jobId,

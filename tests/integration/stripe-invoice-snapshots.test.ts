@@ -489,16 +489,26 @@ localDescribe("Stripe invoice snapshots", () => {
 			event("invoice.paid", invoice(), start + 30, "evt_invoice_paid"),
 		);
 
+		// Events of one transaction may tie in order, so they are found by type and content.
 		const events = await recordedEvents(context.sql, projectId);
-		expect(events.map((recorded) => recorded.type)).toEqual([
-			"subscription.activated",
-			"subscription.updated",
+		expect(events.map((recorded) => recorded.type).sort()).toEqual([
 			"invoice.paid",
 			"invoice.payment_failed",
-			"subscription.updated",
+			"subscription.activated",
 			"subscription.ended",
+			"subscription.updated",
+			"subscription.updated",
 		]);
-		const [activated, updated, paid, failed, retrying, ended] = events;
+		const find = (type: string, matches: (data: Record<string, unknown>) => boolean = () => true) =>
+			events.find((recorded) => recorded.type === type && matches(recorded.data));
+		const status = (data: Record<string, unknown>) =>
+			(data.subscription as { status: string }).status;
+		const activated = find("subscription.activated");
+		const updated = find("subscription.updated", (data) => status(data) === "active");
+		const paid = find("invoice.paid");
+		const failed = find("invoice.payment_failed");
+		const retrying = find("subscription.updated", (data) => status(data) === "billing_retry");
+		const ended = find("subscription.ended");
 		expect(activated?.data).toMatchObject({
 			subscription: {
 				externalSubscriptionId: "sub_1",

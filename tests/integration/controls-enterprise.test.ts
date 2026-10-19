@@ -1391,6 +1391,49 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(events[0]?.envelope.billingAccountId).toBe("failed-account");
 	});
 
+	it("records a charge over the safety budget as a failed top-up", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
+		await prepareAutoTopupAccount("budget-account");
+		await context.repository.grantAllocation(project, {
+			billingAccountId: "budget-account",
+			featureKey: "ai_credits",
+			quantity: "10",
+			sourceKind: "credit_grant",
+			sourceKey: "fixture:budget-account",
+		});
+		await context.repository.controlsEnterprise.upsertAutoTopupPolicy(project, {
+			billingAccountId: "budget-account",
+			featureKey: "ai_credits",
+			topupKey: "credits_10",
+			provider: "stripe",
+			thresholdQuantity: "5",
+			maxPurchasesPerInterval: 2,
+			maxSpendMinor: 1_000,
+			maxConsecutiveFailures: 3,
+			actor: "integration-test",
+		});
+		await consume("budget-account", "6", "budget:trigger");
+		const [job] = await context.repository.claimAutoTopupJobs(
+			"auto-worker",
+			10,
+			new Date(Date.now() - 300_000),
+		);
+
+		await context.repository.markAutoTopupFailed(job.projectId, job.jobId, "auto-worker", {
+			kind: "safety_limit_exceeded",
+			error: "Provider charge exceeded the configured auto top-up safety budget",
+			nextAttemptAt: null,
+			externalInvoiceId: "in_over_budget",
+		});
+
+		// Nothing waits on the customer: the over-budget invoice was voided.
+		const events = await recordedEvents(context.sql, project.projectInstanceId);
+		expect(events.map((recorded) => recorded.type)).toEqual(["auto_topup.failed"]);
+		expect(events[0]?.data).toMatchObject({
+			autoTopup: { jobId: job.jobId, externalInvoiceId: "in_over_budget" },
+		});
+	});
+
 	it("tops up the shared pool for entity usage spent from it and credits an entity's own policy to the entity", async () => {
 		await prepareAutoTopupAccount("entity-topup");
 		const controls = context.repository.controlsEnterprise;
