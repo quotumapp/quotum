@@ -44,9 +44,6 @@ The policy is deny-by-default:
 - `src/billing/`, `src/catalog/`, `src/db/`: billing domain, catalog, and persistence.
 - `src/platform/`: organizations, identity, onboarding, connections, and audit.
 - `src/providers/`, `src/workers/`, `src/projections/`: external providers and durable delivery.
-- `src/events/`: outbound domain events, webhook endpoints, Standard Webhooks signing and the
-  event contract; persistence is in `src/db/repository/domain-events.ts` and
-  `webhook-endpoints.ts`, delivery in `src/workers/domain-event-delivery.ts`.
   Each provider declares its operation support in `src/providers/<provider>/capabilities.ts`,
   collected by `src/providers/capabilities.ts`. The runtime builds one provider registry
   (`src/providers/registry.ts`) and shares it between request handlers, merchant billing and the
@@ -63,6 +60,9 @@ The policy is deny-by-default:
   `provider_operation_recovery` observes them with the original encrypted connection version.
   Its dispatcher and fulfillment live in the Paddle adapter, while lease fencing and operator
   receipt/review routes remain provider-neutral.
+- `src/events/`: outbound domain events, webhook endpoints, Standard Webhooks signing and the
+  event contract; persistence is in `src/db/repository/domain-events.ts` and
+  `webhook-endpoints.ts`, delivery in `src/workers/domain-event-delivery.ts`.
 - `src/mcp/`: shared read-only [MCP tools and stdio server](mcp.md), a client of `/v1` through
   `src/sdk/`, plus separately enabled remote proposal tools. The remote transport in
   `composition/remote-mcp.ts` dispatches read tools through guarded SDK requests and

@@ -46,6 +46,7 @@ function delivery(overrides: Partial<ClaimedWebhookDelivery> = {}): ClaimedWebho
 		data: { endpointId: "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e20", message: "hello" },
 		occurredAt: "2026-10-19T07:59:00.000Z",
 		createdAt: "2026-10-19T07:59:01.000Z",
+		customerId: null,
 		billingAccountId: null,
 		url: "https://hooks.example.com/quotum",
 		secretGeneration: 3,
@@ -55,7 +56,7 @@ function delivery(overrides: Partial<ClaimedWebhookDelivery> = {}): ClaimedWebho
 	};
 }
 
-function store(claimed: ClaimedWebhookDelivery[], endpointDisabled = false) {
+function store(claimed: ClaimedWebhookDelivery[], endpointDisabled = false, heldAccounts = false) {
 	const calls: Array<{ method: string; args: unknown[] }> = [];
 	const value: DomainEventDeliveryStore = {
 		dispatchEvents: (limit) => {
@@ -73,6 +74,10 @@ function store(claimed: ClaimedWebhookDelivery[], endpointDisabled = false) {
 		markDeliveryFailed: (...args) => {
 			calls.push({ method: "markDeliveryFailed", args });
 			return Promise.resolve({ endpointDisabled });
+		},
+		holdIfAccountErased: (...args) => {
+			calls.push({ method: "holdIfAccountErased", args });
+			return Promise.resolve(heldAccounts);
 		},
 		deleteExpiredEvents: (...args) => {
 			calls.push({ method: "deleteExpiredEvents", args });
@@ -114,13 +119,22 @@ function worker(
 
 describe("domain event delivery worker", () => {
 	it("fans out, sends a signed envelope and marks the delivery delivered", async () => {
-		const { calls, store: value } = store([delivery({ billingAccountId: "user_42" })]);
+		const { calls, store: value } = store([
+			delivery({ customerId: "customer-42", billingAccountId: "user_42" }),
+		]);
 		const { post, sent } = recordingPost(200);
 		const metrics = createInMemoryBillingMetrics();
 
 		const result = await worker(value, post, { metrics }).runOnce();
 
-		expect(result).toEqual({ dispatched: 2, claimed: 1, succeeded: 1, failed: 0, expired: 0 });
+		expect(result).toEqual({
+			dispatched: 2,
+			claimed: 1,
+			succeeded: 1,
+			failed: 0,
+			held: 0,
+			expired: 0,
+		});
 		const [attempt] = sent;
 		expect(attempt?.url).toBe("https://hooks.example.com/quotum");
 		expect(JSON.parse(attempt?.body ?? "{}")).toEqual({
@@ -147,14 +161,32 @@ describe("domain event delivery worker", () => {
 		expect(calls.map((call) => call.method)).toEqual([
 			"dispatchEvents",
 			"claimDeliveries",
+			"holdIfAccountErased",
 			"markDeliverySucceeded",
 			"deleteExpiredEvents",
 		]);
-		expect(calls[2]?.args).toEqual([project.projectInstanceId, delivery().id, "worker-a", 200]);
-		expect(calls[3]?.args).toEqual([30, 1000]);
+		expect(calls[2]?.args).toEqual([project.projectInstanceId, delivery().id, "worker-a"]);
+		expect(calls[3]?.args).toEqual([project.projectInstanceId, delivery().id, "worker-a", 200]);
+		expect(calls[4]?.args).toEqual([30, 1000]);
 		expect(metrics.renderPrometheus()).toContain(
 			'billing_event_delivery_total{code="HTTP_200",result="succeeded"} 1',
 		);
+	});
+
+	it("never sends a delivery about an account being erased, and skips the check without one", async () => {
+		const held = store([delivery({ customerId: "customer-42" })], false, true);
+		const heldPost = recordingPost(200);
+		const unowned = store([delivery({ customerId: null })], false, true);
+		const unownedPost = recordingPost(200);
+
+		const heldRun = await worker(held.store, heldPost.post).runOnce();
+		const unownedRun = await worker(unowned.store, unownedPost.post).runOnce();
+
+		expect(heldRun).toMatchObject({ claimed: 1, succeeded: 0, failed: 0, held: 1 });
+		expect(heldPost.sent).toEqual([]);
+		expect(held.calls.map((call) => call.method)).not.toContain("markDeliveryFailed");
+		expect(unownedRun).toMatchObject({ succeeded: 1, held: 0 });
+		expect(unowned.calls.map((call) => call.method)).not.toContain("holdIfAccountErased");
 	});
 
 	it("signs with the replaced secret too while a rotation overlap lasts", async () => {

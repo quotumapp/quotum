@@ -36,6 +36,7 @@ export interface DomainEventDeliveryStore {
 		workerId: string,
 		failure: WebhookDeliveryFailure,
 	): Promise<{ endpointDisabled: boolean }>;
+	holdIfAccountErased(projectId: string, deliveryId: string, workerId: string): Promise<boolean>;
 	deleteExpiredEvents(retentionDays: number, limit: number): Promise<number>;
 }
 
@@ -61,6 +62,8 @@ export interface DomainEventDeliveryRunResult {
 	claimed: number;
 	succeeded: number;
 	failed: number;
+	/** Claimed deliveries about an account being erased, parked unsent. */
+	held: number;
 	expired: number;
 }
 
@@ -126,25 +129,48 @@ export class DomainEventDeliveryWorker {
 
 	private async deliverAll(
 		deliveries: ClaimedWebhookDelivery[],
-	): Promise<{ succeeded: number; failed: number }> {
+	): Promise<{ succeeded: number; failed: number; held: number }> {
 		let next = 0;
 		let succeeded = 0;
 		let failed = 0;
+		let held = 0;
 		await Promise.all(
 			Array.from({ length: Math.min(this.options.concurrency, deliveries.length) }, async () => {
 				for (;;) {
 					const delivery = deliveries[next];
 					next += 1;
 					if (delivery === undefined) return;
-					if (await this.deliver(delivery)) succeeded += 1;
+					const outcome = await this.deliver(delivery);
+					if (outcome === "succeeded") succeeded += 1;
+					else if (outcome === "held") held += 1;
 					else failed += 1;
 				}
 			}),
 		);
-		return { succeeded, failed };
+		return { succeeded, failed, held };
 	}
 
-	private async deliver(delivery: ClaimedWebhookDelivery): Promise<boolean> {
+	private async deliver(
+		delivery: ClaimedWebhookDelivery,
+	): Promise<"succeeded" | "failed" | "held"> {
+		if (delivery.customerId !== null) {
+			try {
+				const held = await this.options.store.holdIfAccountErased(
+					delivery.projectId,
+					delivery.id,
+					this.options.workerId,
+				);
+				if (held) return "held";
+			} catch (error) {
+				// The lease was lost or the account could not be checked; the stale reclaim retries it.
+				safelyLogError(this.options.logger, "Webhook delivery account check failed", error, {
+					deliveryId: delivery.id,
+					workerId: this.options.workerId,
+					result: "failed",
+				});
+				return "failed";
+			}
+		}
 		let result: WebhookAttemptResult;
 		try {
 			result = await sendWebhook(this.options.post, await this.request(delivery), this.options.now);
@@ -166,7 +192,7 @@ export class DomainEventDeliveryWorker {
 				);
 				this.recordDeliveryMetric("succeeded", `HTTP_${result.statusCode}`);
 				this.recordWorkerMetric("succeeded");
-				return true;
+				return "succeeded";
 			}
 			const { endpointDisabled } = await this.options.store.markDeliveryFailed(
 				delivery.projectId,
@@ -190,7 +216,7 @@ export class DomainEventDeliveryWorker {
 					endpointId: delivery.endpointId,
 				});
 			}
-			return false;
+			return "failed";
 		} catch (error) {
 			// The lease was lost or the event was erased meanwhile; the claim's stale reclaim or the
 			// erasure decides what happens to the row next.
@@ -200,7 +226,7 @@ export class DomainEventDeliveryWorker {
 				workerId: this.options.workerId,
 				result: "failed",
 			});
-			return false;
+			return "failed";
 		}
 	}
 

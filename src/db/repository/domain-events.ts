@@ -71,6 +71,8 @@ export interface ClaimedWebhookDelivery {
 	data: Record<string, unknown>;
 	occurredAt: string;
 	createdAt: string;
+	/** The account the event is about; the worker checks it is not being erased before sending. */
+	customerId: string | null;
 	billingAccountId: string | null;
 	url: string;
 	secretGeneration: number;
@@ -90,6 +92,7 @@ interface ClaimedDeliveryRow {
 	data: Record<string, unknown>;
 	occurred_at: Date | string;
 	event_created_at: Date | string;
+	customer_id: string | null;
 	billing_account_id: string | null;
 	url: string;
 	secret_generation: number;
@@ -102,6 +105,54 @@ export interface WebhookDeliveryFailure {
 	statusCode: number | null;
 	/** Null when the delivery has used its attempts and fails for good. */
 	nextAttemptAt: Date | null;
+}
+
+/**
+ * A delivery the worker may claim: its endpoint is enabled and its event is not about an account
+ * whose erasure was requested. Used inside statements that name the delivery `delivery`.
+ */
+const claimable = drizzleSql`
+	EXISTS (
+		SELECT 1 FROM webhook_endpoints endpoint
+		WHERE endpoint.project_id = delivery.project_id
+			AND endpoint.id = delivery.endpoint_id
+			AND endpoint.enabled
+	)
+	AND NOT EXISTS (
+		SELECT 1 FROM domain_events event
+		JOIN customers customer
+			ON customer.project_id = event.project_id AND customer.id = event.customer_id
+		WHERE event.project_id = delivery.project_id
+			AND event.id = delivery.event_id
+			AND customer.erased_at IS NOT NULL
+	)
+`;
+
+/**
+ * Moves an endpoint's pending deliveries out of the due range while it is disabled, or back into
+ * it when it is enabled again, so a disabled endpoint's backlog never sits at the head of the
+ * claim's index scan.
+ */
+export async function parkEndpointDeliveries(
+	executor: QueryExecutor,
+	projectId: string,
+	endpointId: string,
+	enabled: boolean,
+): Promise<void> {
+	await executeRows(
+		executor,
+		enabled
+			? drizzleSql`
+				UPDATE webhook_deliveries SET next_attempt_at = now(), updated_at = now()
+				WHERE project_id = ${projectId} AND endpoint_id = ${endpointId}
+					AND status = 'pending' AND next_attempt_at = 'infinity'
+			`
+			: drizzleSql`
+				UPDATE webhook_deliveries SET next_attempt_at = 'infinity', updated_at = now()
+				WHERE project_id = ${projectId} AND endpoint_id = ${endpointId}
+					AND status = 'pending' AND next_attempt_at <> 'infinity'
+			`,
+	);
 }
 
 export class DomainEventDeliveryRepository extends RepositoryModule {
@@ -152,7 +203,9 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 		requireNonBlank(workerId, "p_worker_id");
 		const cappedLimit = requirePositiveLimit(limit);
 		// The same bounded, per-project fair claim as projection jobs. A delivery waits while its
-		// endpoint is disabled and resumes when it is enabled again.
+		// endpoint is disabled and resumes when it is enabled again; disabling parks its deliveries
+		// out of the due range, and the candidate scan skips any that are not claimable, so one
+		// tenant's disabled endpoint can never fill the candidate set of every tenant.
 		const candidateLimit = cappedLimit * 10;
 		const claimed = await executeRows<{ id: string; project_id: string }>(
 			this.database,
@@ -162,6 +215,7 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 					SELECT delivery.id, delivery.project_id, delivery.next_attempt_at AS due_at, delivery.created_at
 					FROM webhook_deliveries delivery
 					WHERE delivery.status = 'pending' AND delivery.next_attempt_at <= now()
+						AND ${claimable}
 					ORDER BY delivery.next_attempt_at ASC, delivery.created_at ASC
 					LIMIT ${candidateLimit}
 				)
@@ -170,6 +224,7 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 					SELECT delivery.id, delivery.project_id, delivery.locked_at AS due_at, delivery.created_at
 					FROM webhook_deliveries delivery
 					WHERE delivery.status = 'processing' AND delivery.locked_at <= now() - INTERVAL '5 minutes'
+						AND ${claimable}
 					ORDER BY delivery.locked_at ASC, delivery.created_at ASC
 					LIMIT ${candidateLimit}
 				)
@@ -189,12 +244,11 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 				SELECT delivery.id
 				FROM webhook_deliveries delivery
 				JOIN ranked ON ranked.id = delivery.id
-				JOIN webhook_endpoints endpoint
-					ON endpoint.project_id = delivery.project_id
-					AND endpoint.id = delivery.endpoint_id
-					AND endpoint.enabled
-				WHERE (delivery.status = 'pending' AND delivery.next_attempt_at <= now())
-					OR (delivery.status = 'processing' AND delivery.locked_at <= now() - INTERVAL '5 minutes')
+				WHERE (
+						(delivery.status = 'pending' AND delivery.next_attempt_at <= now())
+						OR (delivery.status = 'processing' AND delivery.locked_at <= now() - INTERVAL '5 minutes')
+					)
+					AND ${claimable}
 				ORDER BY ranked.project_rank ASC, ranked.due_at ASC, ranked.created_at ASC
 				LIMIT ${cappedLimit}
 				FOR UPDATE OF delivery SKIP LOCKED
@@ -218,7 +272,8 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 				SELECT
 					delivery.id, delivery.project_id, project.key AS project_key, delivery.event_id,
 					delivery.endpoint_id, delivery.attempts, event.type, event.data, event.occurred_at,
-					event.created_at AS event_created_at, customer.billing_account_id, endpoint.url,
+					event.created_at AS event_created_at, event.customer_id, customer.billing_account_id,
+					endpoint.url,
 					endpoint.secret_generation, endpoint.secret_envelope,
 					CASE
 						WHEN endpoint.previous_secret_expires_at > now() THEN endpoint.previous_secret_envelope
@@ -275,6 +330,49 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 	}
 
 	/**
+	 * Holds back a claimed delivery whose account is being erased. The shared lock on the account
+	 * serializes this with an erasure request, which locks the account before it checks for
+	 * deliveries in flight: a request that came first is seen here, and one that comes later sees
+	 * this delivery as in flight and waits. A held delivery is parked, never sent, and the erasure
+	 * deletes it with its event.
+	 */
+	async holdIfAccountErased(
+		projectId: string,
+		deliveryId: string,
+		workerId: string,
+	): Promise<boolean> {
+		return await this.transaction(async (tx) => {
+			const account = await executeOne<{ erased: boolean }>(
+				tx,
+				drizzleSql`
+					SELECT customer.erased_at IS NOT NULL AS erased
+					FROM webhook_deliveries delivery
+					JOIN domain_events event
+						ON event.project_id = delivery.project_id AND event.id = delivery.event_id
+					JOIN customers customer
+						ON customer.project_id = event.project_id AND customer.id = event.customer_id
+					WHERE delivery.project_id = ${projectId} AND delivery.id = ${deliveryId}
+					FOR SHARE OF customer
+				`,
+			);
+			if (account === null || !account.erased) return false;
+			await assertUpdated(
+				tx,
+				drizzleSql`
+					UPDATE webhook_deliveries
+					SET status = 'pending', next_attempt_at = 'infinity', locked_at = NULL,
+						locked_by = NULL, updated_at = now()
+					WHERE project_id = ${projectId} AND id = ${deliveryId}
+						AND status = 'processing' AND locked_by = ${workerId}
+					RETURNING id
+				`,
+				`webhook delivery ${deliveryId} is not locked by worker ${workerId}`,
+			);
+			return true;
+		});
+	}
+
+	/**
 	 * Records a failed attempt. The endpoint starts failing at its first failure after a success,
 	 * and is disabled once every delivery has failed for long enough: a dead receiver must not
 	 * keep a worker busy for every event the project records.
@@ -326,7 +424,11 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 					RETURNING endpoint.enabled
 				`,
 			);
-			return { endpointDisabled: endpoint !== null && !endpoint.enabled };
+			const endpointDisabled = endpoint !== null && !endpoint.enabled;
+			if (endpointDisabled) {
+				await parkEndpointDeliveries(tx, projectId, delivery.endpoint_id, false);
+			}
+			return { endpointDisabled };
 		});
 	}
 
@@ -368,6 +470,19 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 			`,
 		);
 		return rows.length;
+	}
+
+	/** How many endpoints still hold an envelope sealed with another key than `keyId`. */
+	async countEndpointSecretsSealedWithOtherKeys(keyId: string): Promise<number> {
+		const row = await executeOne<{ count: number }>(
+			this.database,
+			drizzleSql`
+				SELECT count(*)::int AS count FROM webhook_endpoints
+				WHERE secret_envelope->>'keyId' <> ${keyId}
+					OR (previous_secret_envelope IS NOT NULL AND previous_secret_envelope->>'keyId' <> ${keyId})
+			`,
+		);
+		return Number(row?.count ?? 0);
 	}
 
 	/**
@@ -451,6 +566,7 @@ function toClaimedDelivery(row: ClaimedDeliveryRow): ClaimedWebhookDelivery {
 		data: row.data,
 		occurredAt: new Date(row.occurred_at).toISOString(),
 		createdAt: new Date(row.event_created_at).toISOString(),
+		customerId: row.customer_id,
 		billingAccountId: row.billing_account_id,
 		url: row.url,
 		secretGeneration: Number(row.secret_generation),

@@ -157,6 +157,6 @@ Endpoint secrets are sealed with the same deployment keys as connection secrets,
 ## Retention and erasure
 
 Events are kept for `BILLING_EVENT_RETENTION_DAYS` days (default 30), which bounds replay; a
-delivery still pending then is dropped with its event. Erasing a billing account deletes its events
-and their deliveries, and the erasure waits while one of them is being delivered (blocker
-`webhook_delivery`).
+delivery still pending then is dropped with its event. Once an erasure of a billing account is
+requested, no delivery about the account is sent; the erasure waits while one is already being
+delivered (blocker `webhook_delivery`), then deletes the account's events and their deliveries.

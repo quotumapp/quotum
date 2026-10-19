@@ -525,4 +525,142 @@ localDescribe("outbound webhook delivery", () => {
 		expect(preview.data.rows.domain_events).toBe(1);
 		expect(preview.data.blockers).toContainEqual({ kind: "webhook_delivery", count: 1 });
 	});
+	it("keeps one endpoint's disabled backlog from stalling every other delivery", async () => {
+		const { call, createEndpoint, worker } = fixture();
+		const stalled = await createEndpoint("create-stalled");
+		for (let index = 0; index < 260; index += 1) {
+			await recordDomainEvent(context.db as never, acme.projectInstanceId, {
+				type: "invoice.paid",
+				sourceKey: `invoice:${index}`,
+				customerId: null,
+				occurredAt: new Date(),
+				data: { invoiceId: `in_${index}` },
+			});
+		}
+		while ((await context.repository.domainEventDeliveries.dispatchEvents(100)) > 0) {}
+		// Disabled behind the API's back, so nothing parks the backlog: the claim alone must cope.
+		await context.sql`
+			UPDATE webhook_endpoints SET enabled = false, disabled_reason = 'operator'
+			WHERE id = ${stalled.data.endpoint.id}
+		`;
+		const other = await createEndpoint("create-other", {}, "globex");
+		await call(
+			"POST",
+			`/v1/admin/webhook-endpoints/${other.data.endpoint.id}/test`,
+			undefined,
+			undefined,
+			"globex",
+		);
+
+		const run = await worker().runOnce();
+
+		expect(run).toMatchObject({ claimed: 1, succeeded: 1 });
+		expect(hooks.received).toHaveLength(1);
+		expect(verifiedBy(other.data.secret, hooks.received[0])).toBe(true);
+	});
+
+	it("parks a disabled endpoint's deliveries, retries and replays, and resumes them when enabled", async () => {
+		const { call, createEndpoint, worker } = fixture();
+		const endpoint = await createEndpoint("create-1");
+		const path = `/v1/admin/webhook-endpoints/${endpoint.data.endpoint.id}`;
+		for (const key of ["invoice:in_1", "invoice:in_2"]) {
+			await recordDomainEvent(context.db as never, acme.projectInstanceId, {
+				type: "invoice.paid",
+				sourceKey: key,
+				customerId: null,
+				occurredAt: new Date(),
+				data: { invoiceId: key },
+			});
+		}
+		await context.repository.domainEventDeliveries.dispatchEvents(10);
+		const parked = async () => {
+			const [row] = await context.sql`
+				SELECT count(*) FILTER (WHERE next_attempt_at = 'infinity')::int AS parked,
+					count(*)::int AS total
+				FROM webhook_deliveries
+			`;
+			return row;
+		};
+
+		await call("PATCH", path, { enabled: false });
+		const afterDisable = await parked();
+		const from = new Date(Date.now() - 60_000).toISOString();
+		const to = new Date(Date.now() + 60_000).toISOString();
+		await call("POST", `${path}/replay`, { from, to });
+		const afterReplay = await parked();
+		await call("PATCH", path, { enabled: true });
+		const afterEnable = await parked();
+		const run = await worker().runOnce();
+
+		expect(afterDisable).toEqual({ parked: 2, total: 2 });
+		expect(afterReplay).toEqual({ parked: 2, total: 2 });
+		expect(afterEnable).toEqual({ parked: 0, total: 2 });
+		expect(run).toMatchObject({ claimed: 2, succeeded: 2 });
+	});
+
+	it("never sends a delivery about an account whose erasure was requested", async () => {
+		const { createEndpoint, worker } = fixture();
+		await createEndpoint("create-1");
+		const customer = await ensureCustomer(context.db as never, acme.projectInstanceId, "user_42");
+		for (const key of ["invoice:in_1", "invoice:in_2"]) {
+			await recordDomainEvent(context.db as never, acme.projectInstanceId, {
+				type: "invoice.paid",
+				sourceKey: key,
+				customerId: customer.id,
+				occurredAt: new Date(),
+				data: { invoiceId: key },
+			});
+		}
+		const deliveries = context.repository.domainEventDeliveries;
+		await deliveries.dispatchEvents(10);
+		const [claimed] = await deliveries.claimDeliveries("worker-a", 1);
+		await context.sql`UPDATE customers SET erased_at = now() WHERE id = ${customer.id}`;
+
+		const held = await deliveries.holdIfAccountErased(
+			acme.projectInstanceId,
+			claimed?.id ?? "",
+			"worker-a",
+		);
+		const run = await worker("worker-b").runOnce();
+
+		expect(claimed?.customerId).toBe(customer.id);
+		expect(held).toBe(true);
+		expect(run).toMatchObject({ claimed: 0, succeeded: 0 });
+		expect(hooks.received).toHaveLength(0);
+		const rows = await context.sql`
+			SELECT status, next_attempt_at = 'infinity' AS parked FROM webhook_deliveries ORDER BY id
+		`;
+		expect(rows).toEqual([
+			{ status: "pending", parked: true },
+			{ status: "pending", parked: false },
+		]);
+	});
+
+	it("counts endpoints a rotation skipped while they were locked", async () => {
+		const { createEndpoint } = fixture();
+		const endpoint = await createEndpoint("create-1");
+		const next = createWebhookSecretSealer(
+			new ConnectionCipher(
+				"k2",
+				new Map([
+					["k2", Buffer.alloc(32, 2)],
+					["k1", Buffer.alloc(32, 1)],
+				]),
+			),
+		);
+		const deliveries = context.repository.domainEventDeliveries;
+
+		const whileLocked = await context.sql.begin(async (tx) => {
+			await tx`SELECT id FROM webhook_endpoints WHERE id = ${endpoint.data.endpoint.id} FOR UPDATE`;
+			return {
+				resealed: await deliveries.resealEndpointSecrets(next),
+				remaining: await deliveries.countEndpointSecretsSealedWithOtherKeys("k2"),
+			};
+		});
+		const resealed = await deliveries.resealEndpointSecrets(next);
+
+		expect(whileLocked).toEqual({ resealed: 0, remaining: 1 });
+		expect(resealed).toBe(1);
+		expect(await deliveries.countEndpointSecretsSealedWithOtherKeys("k2")).toBe(0);
+	});
 });

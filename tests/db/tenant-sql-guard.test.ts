@@ -4,6 +4,10 @@ import { join } from "node:path";
 
 const allowlisted = [
 	{
+		snippet: "SELECT count(*)::int AS count FROM webhook_endpoints WHERE secret_envelope->>'keyId'",
+		reason: "key rotation check across projects; counts only",
+	},
+	{
 		snippet: "UPDATE webhook_endpoints SET previous_secret_envelope = NULL",
 		reason: "maintenance sweep of secret rotation overlaps that ended, across projects",
 	},

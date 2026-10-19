@@ -16,6 +16,7 @@ import {
 import type { SealedWebhookSecret } from "../../events/secret-sealer";
 import { webhookTestEventType } from "../../events/types";
 import { RepositoryModule } from "./base";
+import { parkEndpointDeliveries } from "./domain-events";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { formatUtcTimestamp, requirePositiveLimit } from "./validation";
@@ -165,9 +166,10 @@ export class WebhookEndpointRepository extends RepositoryModule {
 		input: WebhookEndpointUpdateInput,
 	): Promise<WebhookEndpointRecord> {
 		const enabled = input.enabled ?? null;
-		const row = await executeOne<EndpointRow>(
-			this.database,
-			drizzleSql`
+		return await this.transaction(async (tx) => {
+			const row = await executeOne<EndpointRow>(
+				tx,
+				drizzleSql`
 				UPDATE webhook_endpoints AS endpoint
 				SET
 					url = COALESCE(${input.url ?? null}, endpoint.url),
@@ -191,9 +193,11 @@ export class WebhookEndpointRepository extends RepositoryModule {
 				WHERE endpoint.project_id = ${projectId} AND endpoint.id = ${endpointId}
 				RETURNING ${endpointColumns}
 			`,
-		);
-		if (row === null) throw webhookError("WEBHOOK_ENDPOINT_NOT_FOUND");
-		return toEndpointRecord(row);
+			);
+			if (row === null) throw webhookError("WEBHOOK_ENDPOINT_NOT_FOUND");
+			if (enabled !== null) await parkEndpointDeliveries(tx, projectId, endpointId, row.enabled);
+			return toEndpointRecord(row);
+		});
 	}
 
 	/** Deletes an endpoint and its deliveries; recorded events stay until retention. */
@@ -330,10 +334,12 @@ export class WebhookEndpointRepository extends RepositoryModule {
 			const rows = await executeRows<{ id: string }>(
 				tx,
 				drizzleSql`
-					INSERT INTO webhook_deliveries AS delivery (project_id, event_id, endpoint_id)
-					SELECT event.project_id, event.id, ${endpointId}::uuid FROM ${matching}
+					INSERT INTO webhook_deliveries AS delivery (project_id, event_id, endpoint_id, next_attempt_at)
+					SELECT event.project_id, event.id, ${endpointId}::uuid, ${dueWhileEnabled}
+					FROM ${matching}
 					ON CONFLICT (project_id, event_id, endpoint_id) DO UPDATE
-					SET status = 'pending', attempts = 0, next_attempt_at = now(), last_error = NULL,
+					SET status = 'pending', attempts = 0, next_attempt_at = EXCLUDED.next_attempt_at,
+						last_error = NULL,
 						locked_at = NULL, locked_by = NULL, updated_at = now()
 					WHERE delivery.status <> 'processing'
 					RETURNING delivery.id
@@ -387,11 +393,18 @@ export class WebhookEndpointRepository extends RepositoryModule {
 		const retried = await executeOne<{ id: string }>(
 			this.database,
 			drizzleSql`
-				UPDATE webhook_deliveries
-				SET status = 'pending', attempts = 0, next_attempt_at = now(), last_error = NULL,
-					locked_at = NULL, locked_by = NULL, updated_at = now()
-				WHERE project_id = ${projectId} AND id = ${deliveryId}::uuid AND status = 'failed'
-				RETURNING id
+				UPDATE webhook_deliveries delivery
+				SET status = 'pending', attempts = 0, last_error = NULL, locked_at = NULL,
+					locked_by = NULL, updated_at = now(),
+					next_attempt_at = CASE
+						WHEN endpoint.enabled THEN now()
+						ELSE 'infinity'::timestamptz
+					END
+				FROM webhook_endpoints endpoint
+				WHERE delivery.project_id = ${projectId} AND delivery.id = ${deliveryId}::uuid
+					AND delivery.status = 'failed'
+					AND endpoint.project_id = delivery.project_id AND endpoint.id = delivery.endpoint_id
+				RETURNING delivery.id
 			`,
 		);
 		if (retried !== null) return { deliveryId: retried.id, status: "pending" };
@@ -406,6 +419,9 @@ export class WebhookEndpointRepository extends RepositoryModule {
 		throw webhookError("WEBHOOK_DELIVERY_NOT_FAILED", { status: existing.status });
 	}
 }
+
+/** Due now while the replayed endpoint is enabled, parked while it is disabled. */
+const dueWhileEnabled = drizzleSql`CASE WHEN endpoint.enabled THEN now() ELSE 'infinity'::timestamptz END`;
 
 function textArray(values: readonly string[]): DrizzleSQL {
 	return drizzleSql`ARRAY[${drizzleSql.join(
