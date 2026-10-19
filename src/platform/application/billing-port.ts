@@ -118,6 +118,21 @@ export const merchantBillingOperations = [
 		"/billing-accounts/:billingAccountId/usage/events/:usageEventId/corrections",
 		"usage.correct",
 	],
+	["GET", "/admin/webhook-endpoints", "webhooks.endpoints"],
+	["POST", "/admin/webhook-endpoints", "webhooks.endpoints.create"],
+	["GET", "/admin/webhook-endpoints/:endpointId", "webhooks.endpoints.detail"],
+	["PATCH", "/admin/webhook-endpoints/:endpointId", "webhooks.endpoints.update"],
+	["DELETE", "/admin/webhook-endpoints/:endpointId", "webhooks.endpoints.delete"],
+	[
+		"POST",
+		"/admin/webhook-endpoints/:endpointId/rotate-secret",
+		"webhooks.endpoints.rotate-secret",
+	],
+	["POST", "/admin/webhook-endpoints/:endpointId/test", "webhooks.endpoints.test"],
+	["POST", "/admin/webhook-endpoints/:endpointId/replay", "webhooks.endpoints.replay"],
+	["GET", "/admin/webhook-deliveries", "webhooks.deliveries"],
+	["POST", "/admin/webhook-deliveries/:deliveryId/retry", "webhooks.deliveries.retry"],
+	["GET", "/admin/webhook-event-types", "webhooks.event-types"],
 ] as const;
 
 export type MerchantBillingOperation = (

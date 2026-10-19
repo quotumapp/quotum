@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { billingOperation } from "../../src/platform/application/billing-port";
-import { merchantBillingRoute } from "../../src/platform/billing";
+import { merchantBillingRoute, withheldSecret } from "../../src/platform/billing";
 import { loadMerchantConfig } from "../../src/platform/config";
 import {
 	assertCsrf,
@@ -14,7 +14,7 @@ import {
 	sessionCookie,
 	tokenHash,
 } from "../../src/platform/security";
-import { canonicalJson, mutationTarget } from "../../src/platform/step-up";
+import { actionCapability, canonicalJson, mutationTarget } from "../../src/platform/step-up";
 
 describe("merchant security boundaries", () => {
 	it("uses unpredictable opaque tokens and keyed hashes", () => {
@@ -324,6 +324,101 @@ describe("merchant security boundaries", () => {
 		expect(
 			merchantBillingRoute("GET", "/api/billing/admin/promotions/a/codes/b", "sandbox"),
 		).toBeNull();
+	});
+	it("gates webhook endpoints like the projection connection", () => {
+		const endpoint = "/api/billing/admin/webhook-endpoints/11111111-1111-4111-8111-111111111111";
+		const delivery = "/api/billing/admin/webhook-deliveries/22222222-2222-4222-8222-222222222222";
+		for (const path of [
+			"/api/billing/admin/webhook-endpoints",
+			endpoint,
+			"/api/billing/admin/webhook-deliveries",
+			"/api/billing/admin/webhook-event-types",
+		])
+			for (const environment of ["sandbox", "production"] as const)
+				expect(merchantBillingRoute("GET", path, environment)).toMatchObject({
+					readOnly: true,
+					capability: "billing.read",
+					sensitive: false,
+					path: path.replace("/api/billing/", "/v1/"),
+				});
+		const writes: [string, string, boolean][] = [
+			["POST", "/api/billing/admin/webhook-endpoints", true],
+			["PATCH", endpoint, false],
+			["DELETE", endpoint, false],
+			["POST", `${endpoint}/rotate-secret`, true],
+			["POST", `${endpoint}/test`, false],
+			["POST", `${endpoint}/replay`, false],
+			["POST", `${delivery}/retry`, false],
+		];
+		for (const [method, path, discloses] of writes) {
+			expect(merchantBillingRoute(method, path, "sandbox")).toMatchObject({
+				readOnly: false,
+				capability: "sandbox.configure",
+				action: "webhooks.manage",
+				sensitive: false,
+			});
+			const production = merchantBillingRoute(method, path, "production");
+			expect(production).toMatchObject({
+				capability: "production.connections.manage",
+				action: "webhooks.manage",
+				sensitive: true,
+				path: path.replace("/api/billing/", "/v1/"),
+			});
+			expect(production?.disclosesSecret ?? false).toBe(discloses);
+			expect(billingOperation(method, production?.path ?? "")).not.toBeNull();
+		}
+		expect(capabilitiesFor("Developer")).toContain("sandbox.configure");
+		expect(capabilitiesFor("Developer")).not.toContain("production.connections.manage");
+		for (const [method, path] of [
+			["PUT", endpoint],
+			["PATCH", "/api/billing/admin/webhook-endpoints"],
+			["DELETE", `${endpoint}/test`],
+			["POST", "/api/billing/admin/webhook-endpoints/not-a-uuid/test"],
+			["POST", `${endpoint}/rotate-secret/extra`],
+			["POST", "/api/billing/admin/webhook-deliveries"],
+			["POST", "/api/billing/admin/webhook-event-types"],
+		] as const)
+			expect(merchantBillingRoute(method, path, "sandbox")).toBeNull();
+		expect(
+			merchantBillingRoute("GET", "/api/billing/admin/webhook-endpoints/not-a-uuid", "sandbox"),
+		).toBeNull();
+	});
+	it("answers a repeat of a disclosing webhook write without the secret", () => {
+		const endpoint = { id: "11111111-1111-4111-8111-111111111111", url: "https://hooks.test" };
+		const disclosed = {
+			status: 201,
+			body: {
+				success: true,
+				data: { duplicate: false, endpoint, secret: "whsec_c2VjcmV0", secretDisclosed: true },
+			},
+		};
+		const stored = withheldSecret(disclosed);
+		expect(stored).toEqual({
+			status: 200,
+			body: {
+				success: true,
+				data: { duplicate: true, endpoint, secret: null, secretDisclosed: false },
+			},
+		});
+		expect(JSON.stringify(stored)).not.toContain("whsec_");
+		// The live answer is left as it was.
+		expect(disclosed.body.data.secret).toBe("whsec_c2VjcmV0");
+		const refused = {
+			status: 409,
+			body: { success: false, error: { code: "WEBHOOK_ENDPOINT_LIMIT_REACHED" } },
+		};
+		expect(withheldSecret(refused)).toBe(refused);
+	});
+	it("binds webhook step-up grants to the connection capabilities and billing requests", () => {
+		expect(actionCapability("webhooks.manage", "sandbox")).toBe("sandbox.configure");
+		expect(actionCapability("webhooks.manage", "production")).toBe("production.connections.manage");
+		expect(
+			mutationTarget(
+				"PATCH",
+				"/api/billing/admin/webhook-endpoints/11111111-1111-4111-8111-111111111111",
+				{ enabled: false },
+			),
+		).toMatch(/^PATCH \/api\/billing\/admin\/webhook-endpoints\/[0-9a-f-]{36} [a-f0-9]{64}$/);
 	});
 	it("requires merchant configuration everywhere and rejects draft signup policies", () => {
 		expect(() => loadMerchantConfig({})).toThrow("MERCHANT_ORIGIN is required in production");

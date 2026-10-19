@@ -4,14 +4,16 @@ import type { MerchantCapability, MerchantScope } from "./contracts";
 import type { MerchantSql } from "./database";
 import { idempotencyKey, MerchantError, requireCapability } from "./security";
 import { actionCapability, consumeStepUpGrant, mutationTarget } from "./step-up";
-import type { MerchantIdentity, MerchantStore } from "./store";
+import type { MerchantIdentity, MerchantStore, StoredDispatchResponse } from "./store";
 
 interface BillingRoute {
 	readOnly: boolean;
 	path: string;
 	capability: MerchantCapability;
-	action: "catalog.publish" | "operations.recover" | "operations.write" | null;
+	action: "catalog.publish" | "operations.recover" | "operations.write" | "webhooks.manage" | null;
 	sensitive: boolean;
+	/** The response discloses a secret, once: a repeat of the request answers without it. */
+	disclosesSecret?: true;
 }
 const id = "[0-9a-fA-F-]{36}";
 const account = "[^/]+";
@@ -33,6 +35,9 @@ const readPatterns = [
 	"admin/providers/capabilities",
 	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|available-actions|controls|usage/(?:events|series)|promotion-redemptions|refunds|invoices(?:/${id})?)`,
 	`admin/promotions(?:/${account}(?:/(?:codes|redemptions))?)?`,
+	`admin/webhook-endpoints(?:/${id})?`,
+	"admin/webhook-deliveries",
+	"admin/webhook-event-types",
 ];
 export function merchantBillingRoute(
 	method: string,
@@ -112,7 +117,45 @@ export function merchantBillingRoute(
 			action: "operations.write",
 			sensitive: environment === "production" || suffix.endsWith("/corrections"),
 		};
+	// Endpoints are managed like the projection connection: Developers in sandbox, and Owners and
+	// Admins in production after a step-up.
+	if (
+		(method === "POST" &&
+			new RegExp(
+				`^admin/(?:webhook-endpoints(?:/${id}/(?:rotate-secret|test|replay))?|webhook-deliveries/${id}/retry)$`,
+			).test(suffix)) ||
+		((method === "PATCH" || method === "DELETE") &&
+			new RegExp(`^admin/webhook-endpoints/${id}$`).test(suffix))
+	)
+		return {
+			path,
+			readOnly: false,
+			capability: actionCapability("webhooks.manage", environment),
+			action: "webhooks.manage",
+			sensitive: environment === "production",
+			...(method === "POST" &&
+			new RegExp(`^admin/webhook-endpoints(?:/${id}/rotate-secret)?$`).test(suffix)
+				? { disclosesSecret: true as const }
+				: {}),
+		};
 	return null;
+}
+
+/**
+ * What a repeat of a request that disclosed a webhook signing secret answers: the answer `/v1` gives
+ * a repeat, without the secret. Stored responses are kept for days, so the secret never reaches one.
+ */
+export function withheldSecret(response: StoredDispatchResponse): StoredDispatchResponse {
+	const body = response.body as { data?: unknown } | null;
+	if (response.status >= 300 || typeof body?.data !== "object" || body.data === null)
+		return response;
+	return {
+		status: 200,
+		body: {
+			...body,
+			data: { ...body.data, duplicate: true, secret: null, secretDisclosed: false },
+		},
+	};
 }
 export function createMerchantBilling(store: MerchantStore, billing: MerchantBillingPort) {
 	return async (request: Request, identity: MerchantIdentity): Promise<Response> => {
@@ -208,6 +251,7 @@ export function createMerchantBilling(store: MerchantStore, billing: MerchantBil
 			],
 			authorize,
 			dispatch,
+			route.disclosesSecret ? withheldSecret : undefined,
 		);
 		return billingResultResponse(result);
 	};

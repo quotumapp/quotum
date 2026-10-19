@@ -246,7 +246,7 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
   generated capability table in `docs/providers.md`; `openapi:check` fails CI when any is stale.
 - `bun run quotum <command>` runs the operator CLI (`src/cli.ts`, on the image's `PATH` as
   `quotum`): migrations, usage partitions, bootstrap, catalog, connections, credentials and
-  environment activation, key rotation, `healthcheck` and `init`; see
+  environment activation, webhook endpoints, key rotation, `healthcheck` and `init`; see
   [docs/deployment.md](docs/deployment.md#operator-cli).
 - `bun run platform:bootstrap`, `catalog:provision` and `catalog` for operator workflows (see
   [docs/quickstart.md](docs/quickstart.md)); `bun run connections:rotate-secrets` re-encrypts

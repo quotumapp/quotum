@@ -42,7 +42,8 @@ This is the host operator's tool, not a merchant's: the commands that manage con
 credentials open the database directly and need its connection string and the service's secrets, so
 they belong wherever the service runs. While the merchant platform runs, an organization with
 members is managed by them in the merchant application. Operators may still read it with
-`quotum connections list`, `quotum credentials status` and `quotum environments readiness`, and
+`quotum connections list`, `quotum credentials status`, `quotum environments readiness` and
+`quotum webhooks endpoints list`, and
 change it only by naming the reason with `--member-override-reason <why>`, which the audit event
 records beside `--actor`. A headless deployment has no members to defer to and needs no reason.
 
@@ -59,9 +60,10 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum catalog format <file> [--write]` | Print a catalog file in the [canonical spelling](catalog.md#canonical-intent), or rewrite it; needs no API or database. |
 | `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. Changes to an organization with members need `--member-override-reason`. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. Changes to an organization with members need `--member-override-reason`. |
+| `quotum webhooks endpoints list` / `create` / `update` / `delete` / `rotate-secret` / `test`, `quotum webhooks deliveries list` / `retry` / `replay` | Manage an instance's [outbound webhook endpoints](webhooks.md#operator-cli) without a project key; a signing secret goes only to the new file `--secret-out` names. Changes to an organization with members need `--member-override-reason`. |
 | `quotum environments readiness` / `activate` | Check whether a production environment is ready, or [activate it](#activate-a-production-environment) and issue its first project key. Changes to an organization with members need `--member-override-reason`. |
 | `quotum environments suspend <instance> --reason <why>` / `resume <instance>` | [Stop an active environment at once and bring it back](#suspend-and-resume-an-environment). Needs only `POSTGRES_URI`. Changes to an organization with members need `--member-override-reason`. |
-| `quotum audit list [--organization <slug>] [--action <name>] [--since <time>] [--until <time>] [--limit <n>]` | Read the platform audit trail, newest first, as one JSON page: connection, credential and environment changes and owner hand-offs, with the `--actor` an operator command recorded in `metadata`. `nextBefore` continues the listing with `--before`. Read-only, needs only `POSTGRES_URI`, and works headless. Catalog and promotion history are not in it. |
+| `quotum audit list [--organization <slug>] [--action <name>] [--since <time>] [--until <time>] [--limit <n>]` | Read the platform audit trail, newest first, as one JSON page: connection, credential, environment and webhook endpoint changes and owner hand-offs, with the `--actor` an operator command recorded in `metadata`. `nextBefore` continues the listing with `--before`. Read-only, needs only `POSTGRES_URI`, and works headless. Catalog and promotion history are not in it. |
 | `quotum organizations add-owner <organization> --email <address>` | Hand an organization to a person: [make a merchant user who has signed in an owner](#hand-an-organization-to-an-owner). Refused in headless mode. |
 | `quotum organizations rename <organization> --name <name>` / `quotum projects rename <organization> <project> --name <name>` | [Change a display name](#rename-an-organization-or-project). The slug and keys never change. Works headless. |
 | `quotum second-factor reset --email <address> --reason <why>` | [Reset a merchant's authenticator](#merchant-second-factor) after they lost it and their recovery codes. Refused in headless mode. |
@@ -72,8 +74,8 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
 | `quotum version`, `quotum help` | Build version and command list. |
 
-`bootstrap`, `catalog`, `partitions`, `usage scopes`, `connections`, `credentials` and `environments`
-report a failure as one line on stderr and exit `64` for wrong arguments or `1` otherwise. A missing table reads as "the
+`bootstrap`, `catalog`, `partitions`, `usage scopes`, `connections`, `credentials`, `environments`
+and `webhooks` report a failure as one line on stderr and exit `64` for wrong arguments or `1` otherwise. A missing table reads as "the
 database schema is not migrated", and an invalid `BILLING_PLATFORM_BOOTSTRAP_JSON` names the field
 at fault.
 
@@ -152,7 +154,7 @@ API, the provider webhooks and every worker, and nothing else.
 - `QUOTUM_AUTH_SECRET`, `MERCHANT_*` and `QUOTUM_EMAIL_*` become optional for the server, which
   ignores them when set, except that the retired names in the next section are still refused. The
   `quotum connections`, `quotum credentials` and `quotum environments` commands still need
-  `QUOTUM_AUTH_SECRET`, which keys their request fingerprints.
+  `QUOTUM_AUTH_SECRET`, which keys their request fingerprints, and `quotum webhooks` reads it too.
 - Everything else is unchanged: `POSTGRES_URI`, `BILLING_OPERATOR_API_KEY` in production, and the
   `QUOTUM_SECRETS_KEY_*` key, which still decrypts stored connections. Provider webhooks, the
   connection-version verification route and, when `STRIPE_APP_*` is configured, the Stripe App
@@ -459,7 +461,9 @@ repeated later runs the operation again. A different request under the key is
 `409 OPERATION_IN_PROGRESS`. An operation that fails or answers 5xx releases the key, so a retry is
 authorized again, with a new step-up grant where one is required; if the process stops mid-operation
 the key stays in progress and the action needs a new key. A malformed percent-escape in the path is
-`400 INVALID_REQUEST`, as on `/v1`.
+`400 INVALID_REQUEST`, as on `/v1`. A response that disclosed a webhook signing secret is stored as
+the answer a repeat gets from `/v1`, without the secret; see
+[Outbound webhooks](webhooks.md#in-the-console).
 
 ## Optional variables
 

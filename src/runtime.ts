@@ -383,6 +383,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 
 	const sentry = env.sentry.dsn === null ? undefined : dependencies.sentry;
 	const sentryRequestScope = sentry && createSentryRequestScope(sentry, { service: "billing" });
+	const webhookEndpointService = new WebhookEndpointService({
+		store: billingRepository.webhookEndpoints,
+		sealer: webhookSecretSealer,
+		allowInsecureHttp: projectionPolicy.allowInsecureHttp,
+	});
 	const staff = createApp({
 		env,
 		connections,
@@ -393,11 +398,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		),
 		entitlementService: new EntitlementService(billingRepository),
 		usageApiService: billingRepository.usageApi,
-		webhookEndpointService: new WebhookEndpointService({
-			store: billingRepository.webhookEndpoints,
-			sealer: webhookSecretSealer,
-			allowInsecureHttp: projectionPolicy.allowInsecureHttp,
-		}),
+		webhookEndpointService,
 		projectContextResolver,
 		providerRegistry,
 		providerOperationReconciler: async (project, billingAccountId, operationId, actor) => {
@@ -449,6 +450,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		providers: projectProviderServiceResolver(providerRegistry),
 		capabilityReads,
 		operations: adminOperations,
+		webhooks: webhookEndpointService,
 	});
 	const app = attachMerchantRuntime(staff, merchantBilling, {
 		...dependencies.merchant,

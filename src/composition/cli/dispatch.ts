@@ -202,6 +202,39 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => ["status", "rotate", "revoke"].includes(args[0] ?? ""),
 	},
 	{
+		path: ["webhooks"],
+		file: "composition/cli/webhooks.ts",
+		usage: "webhooks endpoints|deliveries <command> <instance> ...",
+		summary: "Manage an instance's outbound webhook endpoints and redeliver their events",
+		environment:
+			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET, optional QUOTUM_ACTOR and BILLING_PROJECTION_* receiver settings",
+		details: [
+			"  webhooks endpoints list <instance>",
+			"  webhooks endpoints create <instance> --url <https-url> --secret-out <new-file>",
+			"      [--event-types <type,...|all>] [--description <text>] [--enabled true|false]",
+			"      [--request-key <key>]",
+			"  webhooks endpoints update <instance> <endpoint-id> [--url <https-url>]",
+			"      [--event-types <type,...|all>] [--description <text>] [--enabled true|false]",
+			"  webhooks endpoints delete|test <instance> <endpoint-id>",
+			"  webhooks endpoints rotate-secret <instance> <endpoint-id> --secret-out <new-file>",
+			"      [--overlap-hours <n>] [--request-key <key>]",
+			"  webhooks deliveries list <instance> [--endpoint <id>] [--status <status>]",
+			"      [--event-type <type>] [--billing-account <id>] [--limit <n>] [--cursor <cursor>]",
+			"  webhooks deliveries retry <instance> <delivery-id>",
+			"  webhooks deliveries replay <instance> <endpoint-id> --from <time> --to <time>",
+			"      [--event-types <type,...>]",
+			"Changes take --actor <name> (or QUOTUM_ACTOR) and are audited; changing an organization",
+			"whose members manage it in the merchant application needs --member-override-reason <why>.",
+			"create and rotate-secret write the signing secret only to --secret-out, never to stdout;",
+			"rerunning one with the same --request-key changes nothing and writes no file. An endpoint",
+			"receives every event type unless --event-types names some; see docs/webhooks.md.",
+		],
+		accepts: (args) =>
+			(args[0] === "endpoints" &&
+				["list", "create", "update", "delete", "rotate-secret", "test"].includes(args[1] ?? "")) ||
+			(args[0] === "deliveries" && ["list", "retry", "replay"].includes(args[1] ?? "")),
+	},
+	{
 		path: ["environments"],
 		file: "composition/cli/environments.ts",
 		usage: "environments readiness|activate|suspend|resume <instance> ...",

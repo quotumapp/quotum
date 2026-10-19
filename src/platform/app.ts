@@ -1123,6 +1123,7 @@ const postApiPlatformStepUpBodySchema = z.strictObject({
 		"operations.recover",
 		"operations.write",
 		"connections.manage",
+		"webhooks.manage",
 		"environment.activate",
 		"credentials.rotate",
 		"credentials.rotate_read_only",
@@ -1132,7 +1133,7 @@ const postApiPlatformStepUpBodySchema = z.strictObject({
 	returnTo: z.string().max(2048),
 	request: z
 		.strictObject({
-			method: z.enum(["POST", "PUT", "DELETE"]),
+			method: z.enum(["POST", "PUT", "PATCH", "DELETE"]),
 			path: z.string().max(512),
 			body: z.unknown(),
 			idempotencyKey: z.string().regex(/^[A-Za-z0-9._:-]{8,128}$/),

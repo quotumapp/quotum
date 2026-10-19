@@ -12,6 +12,8 @@ import {
 	loadProjectionReceivers,
 	loadStripeWritePermissionProbes,
 } from "../../env";
+import type { WebhookEndpointServiceLike } from "../../events/endpoints";
+import { WebhookEndpointService } from "../../events/service";
 import { loadAuthSecret, merchantPlatformEnabled } from "../../platform/config";
 import { loadConnectionCipher } from "../../platform/connections/cipher";
 import { type ConnectionGate, ConnectionLifecycle } from "../../platform/connections/lifecycle";
@@ -37,6 +39,7 @@ import { createEnvironmentBillingPort } from "../environment-billing";
 import { merchantSql } from "../merchant-persistence";
 import { PostgresProjectInstanceContextResolver } from "../project-instance-persistence";
 import { projectionDestinationPolicy } from "../projection-destinations";
+import { createWebhookSecretSealer } from "../webhook-secrets";
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -262,6 +265,8 @@ export interface OperatorContext {
 	readonly billingDatabase: TransactionalQueryExecutor;
 	/** Resolves an instance's active provider connection, decrypting its secrets. */
 	readonly connections: RuntimeConnectionResolver;
+	/** Webhook endpoints on this command's own connection, sealed with the connection keys. */
+	readonly webhooks: WebhookEndpointServiceLike;
 	target(instanceKey: string): Promise<OperatorTarget>;
 	gate(
 		target: OperatorTarget,
@@ -321,6 +326,11 @@ export async function openOperatorContext(
 		billingDatabase,
 		// No Stripe OAuth port: a connection made through the console's OAuth cannot be read here.
 		connections: createRuntimeConnectionResolver(repository, sql, null),
+		webhooks: new WebhookEndpointService({
+			store: new BillingRepository(billingDatabase).webhookEndpoints,
+			sealer: () => createWebhookSecretSealer(cipher),
+			allowInsecureHttp: destinationPolicy.allowInsecureHttp,
+		}),
 		async target(instanceKey) {
 			const lookup = await resolver.resolveInstanceKey(instanceKey);
 			if (lookup.kind === "not_found")

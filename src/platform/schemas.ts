@@ -157,7 +157,7 @@ export const TeamViewSchema = z.object({
 export const StepUpChallengeViewSchema = z.object({
 	request: z
 		.object({
-			method: z.enum(["POST", "PUT", "DELETE"]),
+			method: z.enum(["POST", "PUT", "PATCH", "DELETE"]),
 			path: z.string(),
 			body: z.unknown(),
 			idempotencyKey: z.string(),

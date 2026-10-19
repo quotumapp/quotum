@@ -34,7 +34,9 @@ const credentialActions: ReadonlySet<string> = new Set([
 	"credentials.revoke_read_only",
 ]);
 export function actionCapability(action: string, environment: MerchantScope["environment"]) {
-	if (action === "connections.manage")
+	// Webhook endpoints are managed like connections, but through the billing proxy, so their
+	// grants bind a billing request rather than a saved setup operation.
+	if (action === "connections.manage" || action === "webhooks.manage")
 		return environment === "production" ? "production.connections.manage" : "sandbox.configure";
 	if (action === "environment.activate") return "production.activate";
 	if (credentialActions.has(action))
@@ -89,7 +91,7 @@ export class MerchantStepUp {
 					? /^[a-f0-9]{64}$/
 					: credentialActions.has(input.action)
 						? /^[A-Za-z0-9._:-]{8,128}$/
-						: /^(?:(POST|PUT|DELETE) \/api\/billing\/[^ ]+|POST \/api\/platform\/mcp\/changes\/[0-9a-f-]{36}\/approve) [a-f0-9]{64}$/;
+						: /^(?:(POST|PUT|PATCH|DELETE) \/api\/billing\/[^ ]+|POST \/api\/platform\/mcp\/changes\/[0-9a-f-]{36}\/approve) [a-f0-9]{64}$/;
 		if (!setupTarget.test(input.target))
 			throw new MerchantError("ACTION_REJECTED", "Confirm a saved operation identifier.");
 		if (
