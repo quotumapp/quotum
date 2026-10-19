@@ -25,15 +25,7 @@ import type {
 	UsageEventItem,
 	UsageSeriesPoint,
 } from "../billing/insights";
-import type {
-	ConfirmReservationInput,
-	FinalizeReservationResult,
-	MeteringBalance,
-	MeteringSubjectInput,
-	ReleaseReservationInput,
-	ReservationResult,
-	ReserveUsageInput,
-} from "../billing/metering";
+import type { MeteringBalance } from "../billing/metering";
 import type { PaymentSetupSession } from "../billing/payment-setup";
 import type { TrialEligibility, TrialMutationResult, TrialRecord } from "../billing/plan-grants";
 import type {
@@ -63,8 +55,15 @@ import type {
 import type {
 	UsageCheckInput,
 	UsageCheckResult,
+	UsageConfirmInput,
+	UsageConfirmResult,
 	UsageConsumeInput,
 	UsageConsumeResult,
+	UsageFinalizeInput,
+	UsageReleaseResult,
+	UsageReservation,
+	UsageReserveInput,
+	UsageReserveResult,
 } from "../billing/usage-api";
 import type {
 	UsageOperationLookupInput,
@@ -269,36 +268,33 @@ export class BillingClient {
 					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/consume`,
 					{ method: "POST", body: publicUsageBody(input), idempotencyKey: key },
 				),
-			reserve: (input: Omit<ReserveUsageInput, "idempotencyKey">, key: string) =>
-				this.request<ReservationResult>(
+			reserve: (input: Omit<UsageReserveInput, "operationId">, key: string) =>
+				this.request<UsageReserveResult>(
 					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/reservations`,
 					{
 						method: "POST",
-						body: { ...meteringBody(input), expiresInSeconds: input.expiresInSeconds },
-						idempotencyKey: key,
-					},
-				),
-			confirm: (input: Omit<ConfirmReservationInput, "idempotencyKey">, key: string) =>
-				this.request<FinalizeReservationResult>(
-					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/reservations/${segment(input.reservationId)}/confirm`,
-					{
-						method: "POST",
 						body: {
-							quantity: input.quantity,
-							...(input.occurredAt === undefined
-								? {}
-								: {
-										occurredAt: input.occurredAt === null ? null : input.occurredAt.toISOString(),
-									}),
-							...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+							featureId: input.featureId,
+							value: input.value,
+							entityId: input.entityId,
+							expiresInSeconds: input.expiresInSeconds,
 						},
 						idempotencyKey: key,
 					},
 				),
-			release: (input: Omit<ReleaseReservationInput, "idempotencyKey">, key: string) =>
-				this.request<FinalizeReservationResult>(
+			confirm: (input: Omit<UsageConfirmInput, "operationId">, key: string) =>
+				this.request<UsageConfirmResult>(
+					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/reservations/${segment(input.reservationId)}/confirm`,
+					{ method: "POST", body: { value: input.value }, idempotencyKey: key },
+				),
+			release: (input: Omit<UsageFinalizeInput, "operationId">, key: string) =>
+				this.request<UsageReleaseResult>(
 					`/v1/billing-accounts/${segment(input.billingAccountId)}/usage/reservations/${segment(input.reservationId)}/release`,
 					{ method: "POST", body: {}, idempotencyKey: key },
+				),
+			getReservation: (billingAccountId: string, reservationId: string) =>
+				this.request<UsageReservation>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/usage/reservations/${segment(reservationId)}`,
 				),
 			events: (
 				billingAccountId: string,
@@ -777,19 +773,6 @@ function pathWithQuery(path: string, query: Record<string, unknown>): string {
 	}
 	const rendered = params.toString();
 	return rendered === "" ? path : `${path}?${rendered}`;
-}
-
-function meteringBody(input: MeteringSubjectInput & { metadata?: Record<string, unknown> }) {
-	return {
-		featureKey: input.featureKey,
-		quantity: input.quantity,
-		...(input.entityId === undefined ? {} : { entityId: input.entityId }),
-		...(input.filters === undefined ? {} : { filters: input.filters }),
-		...(input.occurredAt === undefined
-			? {}
-			: { occurredAt: input.occurredAt === null ? null : input.occurredAt.toISOString() }),
-		...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-	};
 }
 
 /**

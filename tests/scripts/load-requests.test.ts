@@ -31,8 +31,8 @@ describe("load lane request bodies", () => {
 		const legacy = { featureKey: "model_tokens", quantity: "1" };
 		expect(checkBodySchema.safeParse(legacy).success).toBe(false);
 		expect(consumeBodySchema.safeParse(legacy).success).toBe(false);
-		// Reserve and confirm keep the featureKey and quantity names.
-		expect(reserveBodySchema.safeParse({ ...legacy, expiresInSeconds: 60 }).success).toBe(true);
-		expect(reserveBodySchema.safeParse(consumeRequestBody()).success).toBe(false);
+		// Reservations use the same public featureId/value vocabulary.
+		expect(reserveBodySchema.safeParse({ ...legacy, expiresInSeconds: 60 }).success).toBe(false);
+		expect(reserveBodySchema.safeParse(consumeRequestBody()).success).toBe(true);
 	});
 });

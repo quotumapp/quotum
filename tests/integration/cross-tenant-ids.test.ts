@@ -69,7 +69,7 @@ localDescribe("Cross-tenant identifiers", () => {
 					"content-type": "application/json",
 					"idempotency-key": "confirm:foreign",
 				},
-				body: JSON.stringify({ quantity: "100" }),
+				body: JSON.stringify({ value: "100" }),
 			},
 		);
 		expect(confirm.status).toBe(404);

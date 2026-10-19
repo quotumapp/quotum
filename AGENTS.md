@@ -138,6 +138,12 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
   does not match its schema, or a successful request whose body does not match the documented
   request schema fails the test, not just the contract check.
 
+Public usage check/consume/reserve use `featureId` and `value`; confirm takes actual `value`.
+Reservation reads expose logical expiry without maintenance, and confirmation receipts and recovery
+outcomes commit with accounting. Reserve/confirm/release use recovery version 2; corrections keep
+their existing contract. Review `docs/metering.md` and the reservation cutover in
+`docs/upgrade-transitions.md` when changing these routes or their SDK callers.
+
 ### Persistence
 
 - `src/db/schema.ts` is the Drizzle mirror of the SQL under `migrations/`; SQL is authoritative,

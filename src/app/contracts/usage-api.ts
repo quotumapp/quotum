@@ -30,6 +30,10 @@ export const checkBodySchema = z
 export const consumeBodySchema = checkBodySchema.extend({
 	value: checkBodySchema.shape.value.unwrap(),
 });
+export const reserveBodySchema = consumeBodySchema.omit({ occurredAt: true }).extend({
+	expiresInSeconds: z.number().int().min(1).max(86400).optional(),
+});
+export const confirmBodySchema = z.object({ value: consumeBodySchema.shape.value }).strict();
 export const accountSchema = z.object({ id: z.string(), createdAt: z.string() });
 const quantitySchema = z.object({ featureId: z.string(), unit: z.string(), value: z.string() });
 const balanceSchema = z.object({
@@ -47,13 +51,13 @@ const balanceSchema = z.object({
 	windowEndAt: z.string().optional(),
 });
 const scopeShape = { featureId: z.string(), entityId: z.string().nullable() };
-const meteredShape = {
+export const meteredShape = {
 	...scopeShape,
 	usage: quantitySchema,
 	rated: quantitySchema,
 	balance: balanceSchema,
 };
-const denialShape = {
+export const denialShape = {
 	allowed: z.literal(false),
 	reason: z.enum(["not_entitled", "insufficient_balance", "control_limit_exceeded"]),
 	control: z
@@ -86,6 +90,69 @@ export const checkSchema = z.union([
 	z.object({ ...meteredShape, kind: z.literal("metered"), checkedAt: z.string(), ...denialShape }),
 ]);
 const identityShape = { operation: z.literal("consume"), operationId: z.string() };
+const reservationIdentityShape = { operationId: z.string(), reservationId: z.string() };
+export const reserveSchema = z.discriminatedUnion("allowed", [
+	z.object({
+		...meteredShape,
+		operation: z.literal("reserve"),
+		...reservationIdentityShape,
+		allowed: z.literal(true),
+		status: z.literal("active"),
+		expiresAt: z.string(),
+	}),
+	z.object({
+		...meteredShape,
+		operation: z.literal("reserve"),
+		operationId: z.string(),
+		...denialShape,
+	}),
+]);
+export const confirmSchema = z.union([
+	z.object({
+		...meteredShape,
+		...reservationIdentityShape,
+		operation: z.literal("confirm"),
+		allowed: z.literal(true),
+		status: z.literal("confirmed"),
+		receiptId: z.string(),
+		usageEventId: z.string(),
+		recordedAt: z.string(),
+	}),
+	z.object({
+		...meteredShape,
+		...reservationIdentityShape,
+		operation: z.literal("confirm"),
+		status: z.literal("active"),
+		...denialShape,
+	}),
+	z.object({
+		...meteredShape,
+		...reservationIdentityShape,
+		operation: z.literal("confirm"),
+		status: z.literal("expired"),
+		allowed: z.literal(false),
+		reason: z.literal("reservation_expired"),
+	}),
+]);
+export const releaseSchema = z.object({
+	...scopeShape,
+	...reservationIdentityShape,
+	operation: z.literal("release"),
+	status: z.enum(["confirmed", "released", "expired"]),
+	finalizedAt: z.string(),
+});
+export const reservationSchema = z.object({
+	...scopeShape,
+	reservationId: z.string(),
+	billingAccountId: z.string(),
+	usage: quantitySchema,
+	confirmedValue: z.string().nullable(),
+	status: z.enum(["active", "confirmed", "released", "expired"]),
+	createdAt: z.string(),
+	expiresAt: z.string(),
+	finalizedAt: z.string().nullable(),
+	receiptId: z.string().nullable(),
+});
 export const consumeSchema = z.discriminatedUnion("allowed", [
 	z.object({
 		...meteredShape,
@@ -100,6 +167,8 @@ export const consumeSchema = z.discriminatedUnion("allowed", [
 export const receiptSchema = z.object({
 	...meteredShape,
 	...identityShape,
+	operation: z.enum(["consume", "confirm"]),
+	reservationId: z.string().optional(),
 	receiptId: z.string(),
 	usageEventId: z.string(),
 	billingAccountId: z.string(),

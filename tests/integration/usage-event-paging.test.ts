@@ -217,7 +217,7 @@ localDescribe("usage event paging and receipt identifiers", () => {
 			get("/v1/billing-accounts/padded/usage/reservations", {
 				method: "POST",
 				headers: { "content-type": "application/json", "idempotency-key": key },
-				body: JSON.stringify({ featureKey: "model_tokens", quantity, expiresInSeconds: 300 }),
+				body: JSON.stringify({ featureId: "model_tokens", value: quantity, expiresInSeconds: 300 }),
 			});
 		for (const [index, quantity] of [" 1 ", "1\n", "\t1", "1 "].entries()) {
 			const response = await reserve(quantity, `padded-${index}`);

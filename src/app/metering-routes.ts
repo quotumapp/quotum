@@ -15,9 +15,13 @@ import * as responses from "./contracts/metering-responses";
 import {
 	accountParamsSchema,
 	checkBodySchema,
+	confirmBodySchema,
 	consumeBodySchema,
+	envelope,
 	operationLookupQuerySchema,
 	publicIdSchema,
+	reservationSchema,
+	reserveBodySchema,
 } from "./contracts/usage-api";
 import { privateProject, rejectCallerProjectSelectorBody, requireActor } from "./request-context";
 import type { BillingElysia, PostAuthGuard, RequestObserver } from "./types";
@@ -73,17 +77,7 @@ export const usageBodySchema = z
 	})
 	.strict();
 
-export const reserveBodySchema = usageBodySchema.extend({
-	expiresInSeconds: z.number().int().min(1).max(86400).default(300),
-});
-
-export const confirmBodySchema = z
-	.object({
-		quantity: z.string().trim().min(1).max(80),
-		occurredAt: storableDateTimeSchema().nullable().optional(),
-		metadata: z.record(z.string(), z.unknown()).optional(),
-	})
-	.strict();
+export { confirmBodySchema, reserveBodySchema } from "./contracts/usage-api";
 
 /** Absent request bodies are allowed; `.optional()` keeps the rendered schema a plain object. */
 const emptyBodySchema = z.object({}).strict().optional();
@@ -241,11 +235,13 @@ export function registerMeteringRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/usage/reservations",
 		async ({ params, body, request, project }) => {
-			const result = await meteringService.reserve(privateProject(project), {
+			const result = await usageApi.reserve(privateProject(project), {
 				billingAccountId: params.billingAccountId,
-				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
+				operationId: requireIdempotencyKey(request.headers.get("idempotency-key")),
 				expiresInSeconds: body.expiresInSeconds,
-				...usageInput(body),
+				featureId: body.featureId,
+				value: body.value,
+				entityId: body.entityId,
 			});
 			return { success: true, data: result };
 		},
@@ -268,13 +264,11 @@ export function registerMeteringRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/confirm",
 		async ({ params, body, request, project }) => {
-			const result = await meteringService.confirm(privateProject(project), {
+			const result = await usageApi.confirm(privateProject(project), {
 				billingAccountId: params.billingAccountId,
 				reservationId: params.reservationId,
-				quantity: body.quantity,
-				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
-				occurredAt: body.occurredAt === undefined ? undefined : dateOrNull(body.occurredAt),
-				metadata: body.metadata,
+				value: body.value,
+				operationId: requireIdempotencyKey(request.headers.get("idempotency-key")),
 			});
 			return { success: true, data: result };
 		},
@@ -298,10 +292,10 @@ export function registerMeteringRoutes({
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/release",
 		async ({ params, request, project }) => {
-			const result = await meteringService.release(privateProject(project), {
+			const result = await usageApi.release(privateProject(project), {
 				billingAccountId: params.billingAccountId,
 				reservationId: params.reservationId,
-				idempotencyKey: requireIdempotencyKey(request.headers.get("idempotency-key")),
+				operationId: requireIdempotencyKey(request.headers.get("idempotency-key")),
 			});
 			return { success: true, data: result };
 		},
@@ -322,6 +316,23 @@ export function registerMeteringRoutes({
 		},
 	);
 
+	app.get(
+		"/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId",
+		async ({ params, project }) => ({
+			success: true,
+			data: await usageApi.getReservation(privateProject(project), params),
+		}),
+		{
+			params: reservationParamsSchema,
+			detail: operationDetail({
+				operationId: "getV1BillingAccountsByBillingAccountIdUsageReservationsByReservationId",
+				credentialAccess: "read_only",
+				tags: ["metering"],
+				path: "/v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId",
+				responses: { 200: envelope(reservationSchema) },
+			}),
+		},
+	);
 	app.post(
 		"/v1/billing-accounts/:billingAccountId/usage/events/:usageEventId/corrections",
 		async ({ params, body, request, project }) => {

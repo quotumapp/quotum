@@ -237,12 +237,12 @@ localDescribe("operator grants and administrative debits", () => {
 			value: "6000",
 		});
 		const reserved = await usage("revoke_account", "reservations", "hold-1", {
-			featureKey: "model_tokens",
-			quantity: "2000",
+			featureId: "model_tokens",
+			value: "2000",
 			expiresInSeconds: 300,
 		});
 		const reservation = (await reserved.json()).data;
-		expect(reservation).toMatchObject({ allowed: true, walletQuantity: "10" });
+		expect(reservation).toMatchObject({ allowed: true, rated: { value: "10" } });
 		const path = `/v1/admin/operator-grants/revoke_account/${created.id}/revoke`;
 
 		const foreign = await post(path.replace("revoke_account", "other_account"), "revoke-1", {
@@ -274,7 +274,7 @@ localDescribe("operator grants and administrative debits", () => {
 			"revoke_account",
 			`reservations/${reservation.reservationId}/confirm`,
 			"confirm-1",
-			{ quantity: "2000" },
+			{ value: "2000" },
 		);
 		expect((await confirmed.json()).data).toMatchObject({ status: "confirmed" });
 		const read = await get(`/v1/admin/operator-grants/revoke_account/${created.id}`);
@@ -301,8 +301,8 @@ localDescribe("operator grants and administrative debits", () => {
 			(
 				await (
 					await usage("hold_account", "reservations", key, {
-						featureKey: "model_tokens",
-						quantity: "2000",
+						featureId: "model_tokens",
+						value: "2000",
 						expiresInSeconds: 300,
 					})
 				).json()
@@ -341,7 +341,7 @@ localDescribe("operator grants and administrative debits", () => {
 			"hold_account",
 			`reservations/${confirmed.reservationId}/confirm`,
 			"confirm-1",
-			{ quantity: "1000" },
+			{ value: "1000" },
 		);
 		expect((await confirm.json()).data).toMatchObject({ status: "confirmed" });
 
@@ -378,8 +378,8 @@ localDescribe("operator grants and administrative debits", () => {
 		const reservation = (
 			await (
 				await usage("expiry_account", "reservations", "hold-1", {
-					featureKey: "model_tokens",
-					quantity: "2000",
+					featureId: "model_tokens",
+					value: "2000",
 					expiresInSeconds: 300,
 				})
 			).json()

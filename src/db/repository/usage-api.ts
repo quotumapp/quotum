@@ -16,16 +16,19 @@ import { MeteringBillingRepository } from "./metering";
 import { requireActiveFeature, resolveEntityId } from "./metering-persistence";
 import type { TransactionalQueryExecutor } from "./types";
 import { UsageReceiptRepository } from "./usage-receipts";
+import { UsageReservationRepository } from "./usage-reservations";
 
 export class UsageApiRepository extends RepositoryModule implements UsageApiServiceLike {
 	private readonly accounts: BillingAccountRepository;
 	private readonly metering: MeteringBillingRepository;
 	private readonly receipts: UsageReceiptRepository;
+	private readonly reservations: UsageReservationRepository;
 	constructor(database: TransactionalQueryExecutor) {
 		super(database);
 		this.accounts = new BillingAccountRepository(database);
 		this.metering = new MeteringBillingRepository(database);
 		this.receipts = new UsageReceiptRepository(database);
+		this.reservations = new UsageReservationRepository(database);
 	}
 	createAccount: UsageApiServiceLike["createAccount"] = (project, id) =>
 		this.accounts.create(project, id);
@@ -34,6 +37,14 @@ export class UsageApiRepository extends RepositoryModule implements UsageApiServ
 		this.receipts.get(project, input);
 	listReceiptDeductions: UsageApiServiceLike["listReceiptDeductions"] = (project, input) =>
 		this.receipts.listDeductions(project, input);
+	reserve: UsageApiServiceLike["reserve"] = (project, input) =>
+		this.reservations.reserve(project, input);
+	confirm: UsageApiServiceLike["confirm"] = (project, input) =>
+		this.reservations.confirm(project, input);
+	release: UsageApiServiceLike["release"] = (project, input) =>
+		this.reservations.release(project, input);
+	getReservation: UsageApiServiceLike["getReservation"] = (project, input) =>
+		this.reservations.get(project, input);
 
 	async check(project: ProjectInstanceContext, input: UsageCheckInput): Promise<UsageCheckResult> {
 		const projectId = project.projectInstanceId;

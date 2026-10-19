@@ -58,7 +58,7 @@ localDescribe("authoritative metering flows", () => {
 		const rejected = await testRequest(app, path, {
 			method: "POST",
 			headers: jsonHeaders(authHeaders(), "confirm-over"),
-			body: JSON.stringify({ quantity: "200" }),
+			body: JSON.stringify({ value: "200" }),
 		});
 		expect(rejected.status).toBe(409);
 		expect((await rejected.json()).error.code).toBe("RESERVATION_QUANTITY_EXCEEDED");
@@ -542,12 +542,12 @@ localDescribe("authoritative metering flows", () => {
 		const accepted = results.find((result) => result.data.allowed === true)?.data;
 		const denied = results.find((result) => result.data.allowed === false)?.data;
 
-		expect(accepted).toMatchObject({ walletQuantity: "7", status: "active" });
+		expect(accepted).toMatchObject({ rated: { value: "7" }, status: "active" });
 		expect(denied).toMatchObject({
 			reason: "insufficient_balance",
-			reservationId: null,
 			balance: { available: "3", held: "7" },
 		});
+		expect(denied).not.toHaveProperty("reservationId");
 
 		const confirm = await testRequest(
 			app,
@@ -555,7 +555,7 @@ localDescribe("authoritative metering flows", () => {
 			{
 				method: "POST",
 				headers: jsonHeaders(authHeaders(), "confirm:1"),
-				body: JSON.stringify({ quantity: "1000" }),
+				body: JSON.stringify({ value: "1000" }),
 			},
 		);
 		expect(confirm.status).toBe(200);
@@ -566,7 +566,7 @@ localDescribe("authoritative metering flows", () => {
 
 		const third = await reserveRequest(app, authHeaders(), "account_2", "reserve:3", "800");
 		const thirdData = (await third.json()).data;
-		expect(thirdData).toMatchObject({ allowed: true, walletQuantity: "4", status: "active" });
+		expect(thirdData).toMatchObject({ allowed: true, rated: { value: "4" }, status: "active" });
 		const release = await testRequest(
 			app,
 			`/v1/billing-accounts/account_2/usage/reservations/${thirdData.reservationId}/release`,
@@ -579,8 +579,14 @@ localDescribe("authoritative metering flows", () => {
 		expect(release.status).toBe(200);
 		expect((await release.json()).data).toMatchObject({
 			status: "released",
-			balance: { consumed: "5", held: "0", available: "5" },
 		});
+		expect(
+			await context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"account_2",
+				"ai_credits",
+			),
+		).toMatchObject({ consumed: "5", held: "0", available: "5" });
 	});
 
 	it("suppresses worker redelivery in its own idempotency lane", async () => {
@@ -2357,8 +2363,8 @@ function reserveRequest(
 		method: "POST",
 		headers: jsonHeaders(authHeaders, idempotencyKey),
 		body: JSON.stringify({
-			featureKey: "model_tokens",
-			quantity,
+			featureId: "model_tokens",
+			value: quantity,
 			expiresInSeconds: 300,
 		}),
 	});

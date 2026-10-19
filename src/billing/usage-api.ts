@@ -1,7 +1,7 @@
 import type { ProjectInstanceContext } from "../projects/context";
 import { positiveDecimal } from "./decimal";
 import { InvalidRequestError, NotConfiguredError, PersistenceConflictError } from "./errors";
-import type { MeteringDecision } from "./metering";
+import type { MeteringBalance, MeteringDecision } from "./metering";
 import type { UsageOperationLookupResult } from "./usage-operations";
 
 export interface BillingAccountRecord {
@@ -21,12 +21,12 @@ export function publicOperationLookup(
 	result: UsageOperationLookupResult,
 ): UsageOperationLookupResult {
 	if (
-		result.operation === "consume" &&
+		["consume", "reserve", "confirm", "release"].includes(result.operation) &&
 		result.status === "completed" &&
 		!("operationId" in result.outcome)
 	) {
 		throw new PersistenceConflictError(
-			"This retained consume predates the public receipt contract; reconcile it without reusing its identity",
+			"This retained operation predates the public receipt contract; reconcile it without reusing its identity",
 			"OPERATION_RESULT_EXPIRED",
 		);
 	}
@@ -48,6 +48,78 @@ export interface UsageConsumeInput extends UsageCheckInput {
 	value: string;
 	operationId: string;
 }
+
+export interface UsageReserveInput extends UsageScope {
+	featureId: string;
+	value: string;
+	operationId: string;
+	expiresInSeconds?: number;
+}
+
+export interface UsageFinalizeInput {
+	billingAccountId: string;
+	reservationId: string;
+	operationId: string;
+}
+
+export interface UsageConfirmInput extends UsageFinalizeInput {
+	value: string;
+}
+
+export type UsageReserveResult = UsageMeteredContext & {
+	operation: "reserve";
+	operationId: string;
+} & (UsageVerdict &
+		(
+			| { allowed: true; reservationId: string; status: "active"; expiresAt: string }
+			| { allowed: false }
+		));
+
+export type UsageConfirmResult = UsageMeteredContext & {
+	operation: "confirm";
+	operationId: string;
+	reservationId: string;
+} & (
+		| {
+				allowed: true;
+				status: "confirmed";
+				receiptId: string;
+				usageEventId: string;
+				recordedAt: string;
+		  }
+		| ({ status: "active" } & Extract<UsageVerdict, { allowed: false }>)
+		| { allowed: false; status: "expired"; reason: "reservation_expired" }
+	);
+
+export interface UsageReleaseResult {
+	operation: "release";
+	operationId: string;
+	reservationId: string;
+	featureId: string;
+	entityId: string | null;
+	status: "confirmed" | "released" | "expired";
+	finalizedAt: string;
+}
+
+export interface UsageReservation {
+	reservationId: string;
+	billingAccountId: string;
+	featureId: string;
+	entityId: string | null;
+	usage: UsageQuantity;
+	confirmedValue: string | null;
+	status: "active" | "confirmed" | "released" | "expired";
+	createdAt: string;
+	expiresAt: string;
+	finalizedAt: string | null;
+	receiptId: string | null;
+}
+
+export type PublicUsageOutcome =
+	| UsageConsumeResult
+	| UsageReserveResult
+	| UsageConfirmResult
+	| UsageReleaseResult;
 
 export interface UsageQuantity {
 	featureId: string;
@@ -110,7 +182,8 @@ export interface UsageReceipt extends UsageMeteredContext {
 	receiptId: string;
 	/** The usage event a correction names, with `recordedAt` as its `originalRecordedAt`. */
 	usageEventId: string;
-	operation: "consume";
+	operation: "consume" | "confirm";
+	reservationId?: string;
 	operationId: string;
 	billingAccountId: string;
 	occurredAt: string | null;
@@ -133,6 +206,13 @@ export interface UsageApiServiceLike {
 	getAccount(project: ProjectInstanceContext, id: string): Promise<BillingAccountRecord>;
 	check(project: ProjectInstanceContext, input: UsageCheckInput): Promise<UsageCheckResult>;
 	consume(project: ProjectInstanceContext, input: UsageConsumeInput): Promise<UsageConsumeResult>;
+	reserve(project: ProjectInstanceContext, input: UsageReserveInput): Promise<UsageReserveResult>;
+	confirm(project: ProjectInstanceContext, input: UsageConfirmInput): Promise<UsageConfirmResult>;
+	release(project: ProjectInstanceContext, input: UsageFinalizeInput): Promise<UsageReleaseResult>;
+	getReservation(
+		project: ProjectInstanceContext,
+		input: { billingAccountId: string; reservationId: string },
+	): Promise<UsageReservation>;
 	getReceipt(project: ProjectInstanceContext, input: UsageReceiptInput): Promise<UsageReceipt>;
 	listReceiptDeductions(
 		project: ProjectInstanceContext,
@@ -164,17 +244,21 @@ export function usageContext(
 		entityId: input.entityId ?? null,
 		usage: { featureId: input.featureId, unit, value: decision.requestedQuantity },
 		rated: { featureId: balance.featureKey, unit: balance.unit, value: decision.walletQuantity },
-		balance: {
-			featureId: balance.featureKey,
-			unit: balance.unit,
-			granted: balance.granted,
-			consumed: balance.consumed,
-			held: balance.held,
-			available: balance.available,
-			...(balance.unlimited === true ? { unlimited: true as const } : {}),
-			...(balance.scope === undefined ? {} : { scope: balance.scope }),
-			...(balance.windowStartAt === undefined ? {} : { windowStartAt: balance.windowStartAt }),
-			...(balance.windowEndAt === undefined ? {} : { windowEndAt: balance.windowEndAt }),
-		},
+		balance: publicUsageBalance(balance),
+	};
+}
+
+export function publicUsageBalance(balance: MeteringBalance): UsageBalance {
+	return {
+		featureId: balance.featureKey,
+		unit: balance.unit,
+		granted: balance.granted,
+		consumed: balance.consumed,
+		held: balance.held,
+		available: balance.available,
+		...(balance.unlimited === true ? { unlimited: true as const } : {}),
+		...(balance.scope === undefined ? {} : { scope: balance.scope }),
+		...(balance.windowStartAt === undefined ? {} : { windowStartAt: balance.windowStartAt }),
+		...(balance.windowEndAt === undefined ? {} : { windowEndAt: balance.windowEndAt }),
 	};
 }

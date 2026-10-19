@@ -133,7 +133,7 @@ alert: a read-only key used for writes is either a misconfigured tool or a leake
 
 The separate public [`@quotum/sdk`](https://github.com/quotumapp/quotum-js) is developed in the
 `quotum-js` repository. Its first preview covers explicit account/entity handles, feature-aware
-checks, known-cost consumption, operation recovery and receipts. See [metering](metering.md) for
+checks, known-cost consumption, AI reservations, operation recovery and receipts. See [metering](metering.md) for
 the matching server contract; a public SDK release must pin the API revision and pass packed
 conformance. A local development artifact is not an npm publication or a frozen `/v1` contract.
 
@@ -187,9 +187,10 @@ Checkout creation is not payment confirmation. Access follows verified server ev
 Configure the SDK's `operatorKey` and `actor`. It returns the same safe receipt shape and records
 the operator request. It never sends the uncertain mutation again.
 
-Its `usage.check` and `usage.consume` methods now accept `featureId` and `value`, returning the
-compact public results. Other usage methods retain their existing fields until their coordinated
-cutover. The bundled client remains distinct from the standalone SDK's automatic retry and recovery
+Its `usage.check`, `usage.consume` and `usage.reserve` methods accept `featureId` and `value`,
+returning compact public results. `usage.confirm` takes `value`; `usage.release` returns terminal
+state without an authorization verdict. `usage.getReservation(accountId, reservationId)` reads
+current state. Corrections and balance reads retain their existing fields. The bundled client remains distinct from the standalone SDK's automatic retry and recovery
 transport.
 
 ## Admin operations

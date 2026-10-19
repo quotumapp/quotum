@@ -19,6 +19,7 @@ GET    /v1/billing-accounts/:billingAccountId/usage/series
 POST   /v1/billing-accounts/:billingAccountId/usage/check
 POST   /v1/billing-accounts/:billingAccountId/usage/consume
 POST   /v1/billing-accounts/:billingAccountId/usage/reservations
+GET    /v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId
 POST   /v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/confirm
 POST   /v1/billing-accounts/:billingAccountId/usage/reservations/:reservationId/release
 POST   /v1/billing-accounts/:billingAccountId/usage/events/:usageEventId/corrections
@@ -100,20 +101,39 @@ recovery result commit in one transaction.
 
 The independently versioned [`@quotum/sdk`](https://github.com/quotumapp/quotum-js) preview uses these
 account/entity handles. Its release must pin the exact public API revision containing this contract.
-It is distinct from the internal `quotum-api/sdk` client. Reserve/confirm/release, correction and
-balance endpoints retain their existing field names and detailed responses until their next
-coordinated pre-1.0 increment; the public SDK does not expose placeholder methods for them.
+It is distinct from the internal `quotum-api/sdk` client. Both expose reserve/confirm/release and
+reservation reads with the compact contract below. Corrections and balance endpoints retain their
+existing field names and detailed responses.
 
 ## Reservations and related operations
 
-Quantities are decimal strings, and a reservation's `quantity` takes no surrounding whitespace. A
-check is side-effect-free, consume records an immutable receipt, and reservation finalization is
-atomic. Usage mutations require `Idempotency-Key`; corrections, controls, alerts, automatic top-ups,
+Reserve takes `{ featureId, value, entityId?, expiresInSeconds? }`, confirm takes `{ value }`,
+and release takes an empty body. Values are positive exact decimal strings. Filters, metadata,
+`occurredAt`, and legacy `featureKey`/`quantity` fields are refused on reservation mutations.
+
+All three mutations echo `operation` and caller `operationId`. An allowed reserve includes
+`reservationId`, `status: "active"` and authoritative `expiresAt`; a denied reserve omits them.
+Confirmation records actual usage up to the reserved ceiling, releases the unused hold, and returns
+`status: "confirmed"`, `receiptId`, `usageEventId` and `recordedAt`. Repeated confirmation returns
+the original receipt; a new operation ID echoes that ID without creating another usage fact.
+Zero actual usage uses release. Release has no `allowed` field and returns terminal `status` and
+`finalizedAt`; releasing a confirmed hold leaves its usage intact.
+
+`GET /usage/reservations/:reservationId` is read-only, including with a read-only credential. It
+returns the stored account/entity/feature scope, reserved `usage`, nullable `confirmedValue`,
+`createdAt`, `expiresAt`, nullable `finalizedAt`, and nullable confirmed `receiptId`. An active row
+at or after expiry reads as `expired`, finalized at `expiresAt`, without waiting for maintenance.
+Finalization derives its entity scope from the reservation; it takes no entity override. The public
+SDK checks the reservation against its handle before finalizing, within the same request deadline.
+Use current state before starting work after recovering an old reserve result: replay is the
+immutable acceptance snapshot and may already be expired.
+
+Reservation finalization is atomic. Usage mutations require `Idempotency-Key`; corrections, controls, alerts, automatic top-ups,
 and license assignments also require `X-Billing-Actor`. Confirming more than the reserved quantity
 returns `RESERVATION_QUANTITY_EXCEEDED`, a changed confirmation returns
 `RESERVATION_ALREADY_CONFIRMED`, and using a newly published meter absent from the account's
 purchased catalog returns `METER_RATE_NOT_ACTIVATED`. Omitted `expiresInSeconds` on a reservation
-defaults to 300. A reservation's expiry, and whether a correction or confirmation may still use an
+defaults to 300, accepts integer overrides from 1 to 86,400 seconds, and cannot be renewed. A reservation's expiry, and whether a correction or confirmation may still use an
 allocation, are decided on the database clock, so an application host whose clock drifts never
 expires a live hold or refuses a valid refund. An open reservation keeps its hold on an allocation
 that ends while it waits (revoked, expired, or a plan allowance that ended): balance reads, the
@@ -457,8 +477,7 @@ Consume, reserve, confirm, release, and correction are recoverable under the cal
 `Idempotency-Key`, scoped to `(projectInstanceId, billingAccountId, operation kind, key)`. After a
 timeout, lost response, `5xx`, or restart, retry with the same key and input: same-input replay
 returns the original result, including a denial; different input returns `409 IDEMPOTENCY_CONFLICT`.
-Keep `occurredAt` stable across retries and put per-attempt tracing in headers. Deferred reservation
-and correction inputs still accept metadata, which also participates in their fingerprint. The
+Keep `occurredAt` stable across retries and put per-attempt tracing in headers. Correction inputs still accept metadata, which also participates in their fingerprint. The
 fingerprint does not depend on JSON property order, including for keys that are canonically
 equivalent Unicode (for example U+00E9 and U+0065 U+0301), which stay distinct keys.
 
@@ -468,8 +487,9 @@ GET /v1/billing-accounts/:billingAccountId/usage/operations/:operation/:operatio
 
 returns `operation`, `operationId`, `status`, `completedAt`, and a compact `outcome`. The SDK exposes
 it as `account.getOperation` or `entity.getOperation`; the bundled client uses `client.usage.getOperation`.
-For new consume operations, `outcome` is exactly the original compact command result. Entity-scoped
-lookup requires `?entityId=...`. Retained consumes from the older response contract return
+For public consume, reserve, confirm and release operations, `outcome` is exactly the original
+compact command result. Entity-scoped lookup requires `?entityId=...`. Retained operations from
+their older response contracts return
 `OPERATION_RESULT_EXPIRED` through the new HTTP contract; do not replace their operation key.
 
 - `409 OPERATION_IN_PROGRESS`: another transaction owns the operation; retry the same input.
@@ -479,7 +499,7 @@ lookup requires `?entityId=...`. Retained consumes from the older response contr
   key.
 
 Outcomes are retained for at least 24 hours and identities for at least seven days. Stored outcomes
-are limited to 64 KiB. New consume results are constant-size and omit allocation provenance.
+are limited to 64 KiB. Public usage results are constant-size and omit allocation provenance.
 For deferred operations and internal callers still returning detailed results, when a result with
 the full balance breakdown would exceed that, which takes
 about 150 live allocations of the feature, the result's `balance.breakdown` lists only the
