@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import { recordedEvents, subscribeToEveryEvent } from "./helpers/domain-event-fixtures";
 import { createFakeStripeBillingClient, stripeRefundObject } from "./helpers/fake-provider-clients";
 import {
 	createLocalPostgresContext,
@@ -91,6 +92,21 @@ describeLocalPostgres(describe, describe.skip)("a refunded subscription payment"
 	});
 
 	// capability: refund.sync
+	it("records a refund event with the reversal and the subscription it was paid for", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
+		await insertInvoice("in_paid", 1000, "advance");
+
+		await refund("re_event", 400);
+		await refund("re_event", 400, "refund.updated");
+
+		const events = await recordedEvents(context.sql, project.projectInstanceId, "refund.recorded");
+		expect(events).toHaveLength(1);
+		expect(events[0]?.data).toMatchObject({
+			reversal: { provider: "stripe", reason: "refund", transactionId: "re_event" },
+			subscription: { externalSubscriptionId: "sub_migrate_stripe" },
+		});
+	});
+
 	it("refunds more than was paid only up to the payment", async () => {
 		await insertInvoice("in_cap", 1000, "advance");
 

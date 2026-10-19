@@ -4,6 +4,7 @@ import type { CatalogIntent } from "../../src/catalog/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import { recordedEvents, subscribeToEveryEvent } from "./helpers/domain-event-fixtures";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
@@ -333,6 +334,8 @@ localDescribe("Plan grant trials integration", () => {
 	});
 
 	it("opens each window on the first spend in it, notices the end once, and expires the trial", async () => {
+		const projectId = integrationProjectContext().projectInstanceId;
+		await subscribeToEveryEvent(context.sql, projectId);
 		const api = trialApi();
 		const trial = (await api.start("long_user", { planKey: "premium", durationDays: 60 }, "start"))
 			.body.data.trial;
@@ -419,6 +422,17 @@ localDescribe("Plan grant trials integration", () => {
 				)
 			)?.payload.trial,
 		).toMatchObject({ event: "ended", source: "plan_grant", planGrantId: trial.id });
+
+		// The same two facts reach webhook endpoints, once each.
+		const events = await recordedEvents(context.sql, projectId);
+		expect(events.map((recorded) => recorded.type)).toEqual(["trial.ending", "trial.ended"]);
+		expect(events[0]?.data).toMatchObject({
+			trial: { event: "ending", source: "plan_grant", planGrantId: trial.id },
+		});
+		expect(events[1]?.data).toMatchObject({
+			trial: { event: "ended", source: "plan_grant", planGrantId: trial.id },
+		});
+		expect(events[1]?.envelope.billingAccountId).toBe("long_user");
 	});
 });
 

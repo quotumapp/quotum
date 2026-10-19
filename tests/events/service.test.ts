@@ -163,9 +163,9 @@ describe("webhook endpoint service", () => {
 			"without credentials or a fragment",
 		);
 		await expect(attempt({ url: "hooks.example.com" })).rejects.toThrow("absolute URL");
-		await expect(attempt({ eventTypes: ["invoice.paid"] })).rejects.toMatchObject({
+		await expect(attempt({ eventTypes: ["invoice.paid", "invoice.lost"] })).rejects.toMatchObject({
 			code: "WEBHOOK_EVENT_TYPE_UNKNOWN",
-			details: { unknown: ["invoice.paid"] },
+			details: { unknown: ["invoice.lost"] },
 		});
 		expect(calls).toEqual([]);
 	});

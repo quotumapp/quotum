@@ -206,6 +206,8 @@ describe("BillingRepository Stripe", () => {
 				[],
 				[],
 				[{ project_id: "project-id" }],
+				// The refund event: no endpoint subscribes, so nothing is recorded.
+				[],
 			],
 			{ strict: true },
 		);
@@ -246,7 +248,8 @@ describe("BillingRepository Stripe", () => {
 		expect(customerLockIndex).toBeGreaterThan(-1);
 		expect(purchaseLockIndex).toBeGreaterThan(customerLockIndex);
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(14);
+		expect(database.queries).toHaveLength(15);
+		expect(database.queries.at(-1)).toContain("INSERT INTO domain_events");
 	});
 
 	it("records Stripe subscription events without synthetic purchase rows", async () => {
@@ -265,7 +268,22 @@ describe("BillingRepository Stripe", () => {
 					},
 				],
 				[{ id: "store-event-id" }],
-				[{ id: "subscription-id" }],
+				// No subscription row yet: the write creates it.
+				[],
+				[
+					{
+						id: "subscription-id",
+						status: "active",
+						product_id: "product-id",
+						expires_at: null,
+						current_period_end: null,
+						cancel_at_period_end: false,
+						auto_renew: true,
+						updated_at: new Date("2026-06-01T00:00:00.000Z"),
+					},
+				],
+				// A new active subscription is an activation; no endpoint subscribes to it.
+				[{ subscribed: false }],
 				[],
 				[],
 				[{ id: "customer-id" }],
@@ -323,7 +341,7 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(22);
+		expect(database.queries).toHaveLength(24);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");

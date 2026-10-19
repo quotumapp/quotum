@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import type { DeepPartial } from "../helpers/deep-partial";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import { recordedEvents, subscribeToEveryEvent } from "./helpers/domain-event-fixtures";
 import {
 	createFakeStripeBillingClient,
 	stripeSubscriptionObject,
@@ -448,5 +449,86 @@ localDescribe("Stripe invoice snapshots", () => {
 		expect(
 			(await context.sql`SELECT status,amount_paid::integer FROM billing_invoices`)[0],
 		).toEqual({ status: "paid", amount_paid: 999 });
+	});
+	it("records subscription and invoice events from Stripe notifications", async () => {
+		const projectId = integrationProjectContext("acme").projectInstanceId;
+		await subscribeToEveryEvent(context.sql, projectId);
+
+		await service.handleVerifiedAppEvent(
+			event("customer.subscription.created", subscription(), start + 10, "evt_created"),
+		);
+		await service.handleVerifiedAppEvent(
+			event(
+				"customer.subscription.updated",
+				subscription({ cancel_at_period_end: true }),
+				start + 20,
+				"evt_cancel_scheduled",
+			),
+		);
+		await service.handleVerifiedAppEvent(
+			event("invoice.paid", invoice(), start + 30, "evt_invoice_paid"),
+		);
+		await service.handleVerifiedAppEvent(
+			event(
+				"invoice.payment_failed",
+				invoice({ id: "in_failed", status: "open", amount_paid: 0 }),
+				start + 40,
+				"evt_invoice_failed",
+			),
+		);
+		await service.handleVerifiedAppEvent(
+			event(
+				"customer.subscription.updated",
+				subscription({ status: "unpaid", cancel_at_period_end: true }),
+				start + 50,
+				"evt_unpaid",
+			),
+		);
+		// A redelivered notification changes nothing and records nothing new.
+		await service.handleVerifiedAppEvent(
+			event("invoice.paid", invoice(), start + 30, "evt_invoice_paid"),
+		);
+
+		const events = await recordedEvents(context.sql, projectId);
+		expect(events.map((recorded) => recorded.type)).toEqual([
+			"subscription.activated",
+			"subscription.updated",
+			"invoice.paid",
+			"invoice.payment_failed",
+			"subscription.updated",
+			"subscription.ended",
+		]);
+		const [activated, updated, paid, failed, retrying, ended] = events;
+		expect(activated?.data).toMatchObject({
+			subscription: {
+				externalSubscriptionId: "sub_1",
+				status: "active",
+				productKey: "premium_monthly",
+			},
+			previousAttributes: {},
+		});
+		expect(activated?.envelope.billingAccountId).toBe("integration_user");
+		expect(updated?.data.previousAttributes).toEqual({ cancelAtPeriodEnd: false, autoRenew: true });
+		expect(paid?.data).toMatchObject({
+			invoice: {
+				externalInvoiceId: "in_audit",
+				status: "paid",
+				amountPaidMinor: 999,
+				currency: "usd",
+				externalSubscriptionId: "sub_1",
+			},
+		});
+		expect(failed?.data).toMatchObject({
+			invoice: { externalInvoiceId: "in_failed", status: "open" },
+		});
+		// The failed payment moves the subscription to its retry state before it ends.
+		expect(retrying?.data).toMatchObject({
+			subscription: { status: "billing_retry" },
+			previousAttributes: { status: "active" },
+		});
+		expect(ended?.data).toMatchObject({
+			subscription: { status: "expired" },
+			previousAttributes: { status: "billing_retry" },
+		});
 	});
 });

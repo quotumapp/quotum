@@ -9,6 +9,7 @@ import {
 	reversePurchaseAllocations,
 	setPurchaseAllocationReversal,
 } from "./catalog-allocations";
+import { trackSubscriptionChange } from "./domain-event-facts";
 import {
 	enqueueProjectionSyncJob,
 	getEntitlementSnapshot,
@@ -275,21 +276,29 @@ export class GoogleBillingRepository extends RepositoryModule {
 				);
 			}
 
-			if (input.linkedPurchaseToken !== null) {
-				await executeRows(
+			const linkedPurchaseToken = input.linkedPurchaseToken;
+			if (linkedPurchaseToken !== null) {
+				await trackSubscriptionChange(
 					tx,
-					drizzleSql`
-					UPDATE subscriptions linked
-					SET
-						status = 'expired',
-						expires_at = LEAST(COALESCE(linked.expires_at, now()), now()),
-						auto_renew = false,
-						updated_at = now()
-					WHERE linked.project_id = ${projectId}
-						AND linked.provider = 'google'
-						AND linked.external_subscription_id = ${input.linkedPurchaseToken}
-						AND linked.customer_id = ${customer.id}
-				`,
+					projectId,
+					{ provider: "google", externalSubscriptionId: linkedPurchaseToken },
+					async () => {
+						await executeRows(
+							tx,
+							drizzleSql`
+							UPDATE subscriptions linked
+							SET
+								status = 'expired',
+								expires_at = LEAST(COALESCE(linked.expires_at, now()), now()),
+								auto_renew = false,
+								updated_at = now()
+							WHERE linked.project_id = ${projectId}
+								AND linked.provider = 'google'
+								AND linked.external_subscription_id = ${linkedPurchaseToken}
+								AND linked.customer_id = ${customer.id}
+						`,
+						);
+					},
 				);
 			}
 
@@ -499,20 +508,28 @@ export class GoogleBillingRepository extends RepositoryModule {
 				);
 			}
 
-			if (target.subscription_id !== null && input.refundType === 1) {
-				await executeRows(
+			const voidedSubscriptionId = target.subscription_id;
+			if (voidedSubscriptionId !== null && input.refundType === 1) {
+				await trackSubscriptionChange(
 					tx,
-					drizzleSql`
-					UPDATE subscriptions s
-					SET
-						status = 'expired',
-						expires_at = LEAST(COALESCE(s.expires_at, ${input.eventTime.toISOString()}), ${input.eventTime.toISOString()}),
-						auto_renew = false,
-						raw_state = ${jsonb(input.rawPayload)},
-						updated_at = now()
-					WHERE s.id = ${target.subscription_id}
-						AND s.project_id = ${projectId}
-				`,
+					projectId,
+					{ subscriptionId: voidedSubscriptionId },
+					async () => {
+						await executeRows(
+							tx,
+							drizzleSql`
+							UPDATE subscriptions s
+							SET
+								status = 'expired',
+								expires_at = LEAST(COALESCE(s.expires_at, ${input.eventTime.toISOString()}), ${input.eventTime.toISOString()}),
+								auto_renew = false,
+								raw_state = ${jsonb(input.rawPayload)},
+								updated_at = now()
+							WHERE s.id = ${voidedSubscriptionId}
+								AND s.project_id = ${projectId}
+						`,
+						);
+					},
 				);
 			}
 

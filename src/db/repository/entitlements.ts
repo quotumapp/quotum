@@ -19,6 +19,7 @@ import {
 	defaultPlanReadVersionSql,
 	defaultPlanTargetSql,
 } from "./default-plan-sql";
+import { recordProjectionFactEvents } from "./domain-event-facts";
 import {
 	governingMeterLimitScope,
 	meterLimitScopeSelector,
@@ -610,13 +611,26 @@ export async function enqueueProjectionSyncJob(
 		balances,
 		sequence,
 	};
-	return await insertProjectionSyncJob(executor, {
+	const enqueued = await insertProjectionSyncJob(executor, {
 		projectId: customer.project_id,
 		customerId: input.customerId,
 		idempotencyKey: input.idempotencyKey,
 		reason: input.reason,
 		payload,
 	});
+	// Refund, dispute, trial and plan-grant facts are also outbound events, from this same fact.
+	if (
+		payload.reversal !== undefined ||
+		payload.trial !== undefined ||
+		payload.planGrant !== undefined
+	) {
+		await recordProjectionFactEvents(executor, customer.project_id, {
+			customerId: input.customerId,
+			idempotencyKey: input.idempotencyKey,
+			payload,
+		});
+	}
+	return enqueued;
 }
 
 /** Inserts or refreshes the per-key projection job for a payload the caller already built. */

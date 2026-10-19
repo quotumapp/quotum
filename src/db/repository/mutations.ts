@@ -6,6 +6,12 @@ import type {
 	PurchaseStatus,
 	SubscriptionStatus,
 } from "../../billing/types";
+import {
+	eventTimestamp,
+	recordSubscriptionChange,
+	type SubscriptionEventState,
+	subscriptionChangeKey,
+} from "./domain-event-facts";
 import { IdentityConflictError } from "./identity-conflicts";
 import { executeOne, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
@@ -56,7 +62,19 @@ export async function upsertSubscription(
 				input.allowRestoration ?? false,
 				input.providerEnded ?? false,
 			);
-	const row = await executeOne<{ id: string }>(
+	// The state before the write, locked for the rest of the transaction, so the event this write
+	// may record compares against exactly what it replaced.
+	const previous = await executeOne<SubscriptionStateRow>(
+		executor,
+		drizzleSql`
+		SELECT status, product_id, expires_at, current_period_end, cancel_at_period_end, auto_renew
+		FROM subscriptions
+		WHERE project_id = ${projectId} AND provider = ${input.provider}
+			AND external_subscription_id = ${input.externalSubscriptionId}
+		FOR NO KEY UPDATE
+	`,
+	);
+	const row = await executeOne<SubscriptionStateRow & { id: string; updated_at: Date | string }>(
 		executor,
 		drizzleSql`
 		INSERT INTO subscriptions (
@@ -192,13 +210,42 @@ export async function upsertSubscription(
 					AND subscriptions.store_product_id = EXCLUDED.store_product_id
 				)
 			)
-		RETURNING id
+		RETURNING id, status, product_id, expires_at, current_period_end, cancel_at_period_end,
+			auto_renew, updated_at
 	`,
 	);
 	if (row === null) {
 		throw new IdentityConflictError("subscription_identity_conflict", input.identityError);
 	}
+	const after = subscriptionEventState(row);
+	await recordSubscriptionChange(executor, projectId, {
+		subscriptionId: row.id,
+		customerId: input.customerId,
+		before: previous === null ? null : subscriptionEventState(previous),
+		after,
+		changeKey: subscriptionChangeKey(row.updated_at, after),
+	});
 	return row.id;
+}
+
+interface SubscriptionStateRow {
+	status: SubscriptionStatus;
+	product_id: string;
+	expires_at: Date | string | null;
+	current_period_end: Date | string | null;
+	cancel_at_period_end: boolean;
+	auto_renew: boolean;
+}
+
+export function subscriptionEventState(row: SubscriptionStateRow): SubscriptionEventState {
+	return {
+		status: row.status,
+		productId: row.product_id,
+		expiresAt: eventTimestamp(row.expires_at),
+		currentPeriodEnd: eventTimestamp(row.current_period_end),
+		cancelAtPeriodEnd: row.cancel_at_period_end,
+		autoRenew: row.auto_renew,
+	};
 }
 
 export function subscriptionUpdateIsMonotonicSql(

@@ -41,6 +41,7 @@ import { RepositoryModule } from "./base";
 import { sameStoredCadenceSql } from "./cadence-sql";
 import { readDefaultPlanTarget } from "./default-plan-grants";
 import { defaultPlanReadVersionSql } from "./default-plan-sql";
+import { recordUsageAlertTriggered } from "./domain-event-facts";
 import { featureNotMetered } from "./feature-errors";
 import { ensureCustomer } from "./identities";
 import { executeOne, executeRows, jsonb } from "./query";
@@ -355,6 +356,20 @@ export class ControlsEnterpriseRepository
 						RETURNING id
 					`,
 				);
+				await recordUsageAlertTriggered(tx, projectId, {
+					customerId: customer.id,
+					alertId: String(row.id),
+					featureKey: feature.key,
+					entityId: entity === null || entity === undefined ? null : String(entity.id),
+					thresholdType: input.thresholdType,
+					thresholdValue: threshold,
+					interval: input.interval,
+					intervalCount: cadence?.count ?? null,
+					window: bounds,
+					threshold: evaluatedThreshold,
+					currentValue: used,
+					crossing: 1,
+				});
 			}
 			return alertRecord(row, feature.key, entity?.external_id ?? null, used, crossed);
 		});

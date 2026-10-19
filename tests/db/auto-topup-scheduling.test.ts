@@ -81,7 +81,13 @@ describe("automatic top-up scheduling", () => {
 	for (const provider of ["apple", "google"] as const) {
 		it(`writes a terminal provider-action job for ${provider}`, async () => {
 			const database = new FakeDatabase(
-				[readyState(), [{ pending: false }], [{ id: "77" }], [{ policy_id: "11" }]],
+				[
+					readyState(),
+					[{ pending: false }],
+					[{ id: "77" }],
+					[{ subscribed: false }],
+					[{ policy_id: "11" }],
+				],
 				{ strict: true },
 			);
 			const before = Date.now();
@@ -96,7 +102,9 @@ describe("automatic top-up scheduling", () => {
 			);
 			const after = Date.now();
 
-			expect(queries).toHaveLength(4);
+			// The terminal job is an outbound event; the subscriber check finds no endpoint.
+			expect(queries).toHaveLength(5);
+			expect(queries[3]).toContain("FROM webhook_endpoints endpoint");
 			expect(queries.some((query) => query.includes("interval_started_at = now()"))).toBe(false);
 			// Asserted by value: PR1 shifted every positional index in this insert.
 			expect(insertParams).toContain(provider);

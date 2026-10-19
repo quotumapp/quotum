@@ -5,6 +5,7 @@ import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
+import { recordedEvents, subscribeToEveryEvent } from "./helpers/domain-event-fixtures";
 import {
 	createLocalPostgresContext,
 	describeLocalPostgres,
@@ -345,6 +346,7 @@ localDescribe("Promotion plan grants integration", () => {
 	});
 
 	it("gives way to a paid plan, expires at its end, and leaves repeats to the code's limits", async () => {
+		await subscribeToEveryEvent(context.sql, project.projectInstanceId);
 		await publish({ defaultPlan: false });
 		await promotion("premium-pass", "premium", { unit: "day", count: 30 }, [
 			{ code: "PASS" },
@@ -417,6 +419,25 @@ localDescribe("Promotion plan grants integration", () => {
 			)?.payload.planGrant,
 		).toMatchObject({ event: "ended", origin: "promotion", planGrantId: grantId });
 		expect(await activeKeys(api, "lapser")).toEqual([]);
+		// Webhook endpoints get the same two facts; the conversion sends neither.
+		const grantEvents = [
+			...(await recordedEvents(context.sql, project.projectInstanceId, "plan_grant.ending")),
+			...(await recordedEvents(context.sql, project.projectInstanceId, "plan_grant.ended")),
+		];
+		expect(grantEvents.map((recorded) => recorded.type)).toEqual([
+			"plan_grant.ending",
+			"plan_grant.ended",
+		]);
+		for (const recorded of grantEvents) {
+			expect(recorded.data).toMatchObject({
+				planGrant: { origin: "promotion", planGrantId: grantId, promotionRedemptionId: lapsing.id },
+			});
+			expect(recorded.envelope.billingAccountId).toBe("lapser");
+		}
+		// The Apple purchase that converted the other account is a subscription event of its own.
+		expect(
+			await recordedEvents(context.sql, project.projectInstanceId, "subscription.activated"),
+		).toHaveLength(1);
 
 		// Revoking a redemption whose grant is over reverses the redemption and leaves the grant.
 		for (const [account, redemptionId, status] of [

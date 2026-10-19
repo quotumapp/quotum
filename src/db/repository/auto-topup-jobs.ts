@@ -8,6 +8,7 @@ import type { BillingProvider } from "../../billing/types";
 import { providerCapabilityDeclaration } from "../../providers/capabilities";
 import { RepositoryModule } from "./base";
 import { materializeTopupAllocation } from "./catalog-allocations";
+import { recordAutoTopupOutcome } from "./domain-event-facts";
 import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entitlements";
 import { upsertPurchase } from "./mutations";
 import { executeOne, executeRows, jsonb } from "./query";
@@ -223,6 +224,19 @@ export class AutoTopupJobRepository extends RepositoryModule {
 				RETURNING id
 			`,
 			);
+			await recordAutoTopupOutcome(tx, projectId, {
+				type: "auto_topup.succeeded",
+				customerId: job.customer_id,
+				policyId: String(job.policy_id),
+				jobId,
+				provider: job.provider,
+				amountMinor: expected,
+				chargedAmountMinor: amountPaid,
+				currency: currency.toLowerCase(),
+				externalInvoiceId: charge.externalInvoiceId,
+				externalPaymentId: charge.externalPaymentId,
+				error: null,
+			});
 			await executeOne(
 				tx,
 				drizzleSql`
@@ -305,6 +319,21 @@ export class AutoTopupJobRepository extends RepositoryModule {
 				RETURNING policy_id
 			`,
 			);
+			if (!retryScheduled) {
+				await recordAutoTopupOutcome(tx, projectId, {
+					type: input.kind === "retryable" ? "auto_topup.failed" : "auto_topup.action_required",
+					customerId: job.customer_id,
+					policyId: String(job.policy_id),
+					jobId,
+					provider: job.provider,
+					amountMinor: expected,
+					chargedAmountMinor: null,
+					currency: job.currency?.toLowerCase() ?? null,
+					externalInvoiceId: input.externalInvoiceId ?? job.external_invoice_id ?? null,
+					externalPaymentId: input.externalPaymentId ?? job.external_payment_id ?? null,
+					error,
+				});
+			}
 			return { retryScheduled, circuitOpened };
 		});
 	}
@@ -542,6 +571,19 @@ async function terminateUnclaimableJob(
 		RETURNING id
 	`,
 	);
+	await recordAutoTopupOutcome(executor, row.project_id, {
+		type: "auto_topup.failed",
+		customerId: row.customer_id,
+		policyId: String(row.policy_id),
+		jobId: row.id,
+		provider: row.provider,
+		amountMinor: amount,
+		chargedAmountMinor: null,
+		currency: row.currency?.toLowerCase() ?? null,
+		externalInvoiceId: null,
+		externalPaymentId: null,
+		error,
+	});
 }
 
 async function suspendUnclaimableJob(
