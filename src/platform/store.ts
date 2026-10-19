@@ -489,7 +489,9 @@ export class MerchantStore {
 	 * claim; `dispatch` then runs once and its response is stored. A repeat with the same principal,
 	 * key and input gets the stored response without authorizing or dispatching again, and a repeat
 	 * while the claim is pending gets 409 OPERATION_IN_PROGRESS. A dispatch that throws or answers
-	 * 5xx releases the key, so a retry authorizes again, including a fresh step-up grant.
+	 * 5xx releases the key, so a retry authorizes again, including a fresh step-up grant. `repeat`
+	 * gives what a repeat answers when that must differ from the first response, such as one that
+	 * disclosed a secret once.
 	 */
 	async idempotentDispatch(
 		identity: MerchantIdentity,
@@ -497,6 +499,7 @@ export class MerchantStore {
 		input: unknown,
 		authorize: (tx: MerchantSql) => Promise<void>,
 		dispatch: () => Promise<StoredDispatchResponse>,
+		repeat: (response: StoredDispatchResponse) => StoredDispatchResponse = (response) => response,
 	): Promise<StoredDispatchResponse> {
 		const requestHash = digest(JSON.stringify(input));
 		const stored = await this.sql.begin(async (tx) => {
@@ -538,9 +541,10 @@ export class MerchantStore {
 			await this.releaseDispatch(identity, key, requestHash);
 			return response;
 		}
+		const answer = repeat(response);
 		const completed: StoredDispatch = {
 			state: "completed",
-			response: { status: response.status, body: response.body },
+			response: { status: answer.status, body: answer.body },
 		};
 		await this
 			.sql`UPDATE platform_idempotency SET result=${JSON.stringify(completed)}::text::jsonb WHERE principal_id=${identity.principalId} AND key=${key} AND request_hash=${requestHash} AND result->>'state'='pending'`;

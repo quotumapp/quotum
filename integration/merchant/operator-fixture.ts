@@ -15,6 +15,7 @@ import type {
 	EnvironmentsCommandDependencies,
 	runEnvironmentsCommand,
 } from "../../src/composition/cli/environments";
+import type { runWebhooksCommand } from "../../src/composition/cli/webhooks";
 import {
 	BunPlatformUnitOfWork,
 	PostgresProjectInstanceContextResolver,
@@ -98,7 +99,8 @@ export async function runOperator(
 	command:
 		| typeof runConnectionsCommand
 		| typeof runCredentialsCommand
-		| typeof runEnvironmentsCommand,
+		| typeof runEnvironmentsCommand
+		| typeof runWebhooksCommand,
 	argv: string[],
 	dependencies: ConnectionsCommandDependencies & EnvironmentsCommandDependencies = {},
 	settings: Record<string, string | undefined> = operatorEnv,

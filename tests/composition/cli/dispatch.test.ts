@@ -161,6 +161,16 @@ describe("quotum command resolution", () => {
 			"composition/cli/audit.ts",
 			["list", "--organization", "acme", "--limit", "10"],
 		],
+		[
+			["webhooks", "endpoints", "list", "acme"],
+			"composition/cli/webhooks.ts",
+			["endpoints", "list", "acme"],
+		],
+		[
+			["webhooks", "deliveries", "replay", "acme", "endpoint", "--from", "2026-10-01T00:00:00Z"],
+			"composition/cli/webhooks.ts",
+			["deliveries", "replay", "acme", "endpoint", "--from", "2026-10-01T00:00:00Z"],
+		],
 		[["mcp"], "mcp/index.ts", []],
 	] as const)("resolves %j to %s", (argv, file, args) => {
 		const resolution = resolveQuotumCommand(argv);
@@ -223,6 +233,11 @@ describe("quotum command resolution", () => {
 			["catalog", "format", "a.ts", "b.ts"],
 			["catalog", "format", "--write", "--write"],
 			["connections", "rotate-secrets", "--force"],
+			["webhooks"],
+			["webhooks", "endpoints"],
+			["webhooks", "endpoints", "purge", "acme"],
+			["webhooks", "deliveries", "delete", "acme"],
+			["webhooks", "events", "list", "acme"],
 			["merchant", "service-principal"],
 			["mcp", "extra"],
 		])

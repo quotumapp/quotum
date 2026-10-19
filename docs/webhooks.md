@@ -10,7 +10,9 @@ state and replay.
 
 Every route below is an operator route: it needs a project credential with full access, the
 `X-Billing-Operator-Key` header and, on a write, `X-Billing-Actor`. Creating an endpoint and
-rotating its secret also need an `Idempotency-Key`.
+rotating its secret also need an `Idempotency-Key`. Merchant members manage the same endpoints
+[in the console](#in-the-console), and a host operator can manage them without a project key using
+[`quotum webhooks`](#operator-cli).
 
 ## Event types
 
@@ -171,6 +173,59 @@ rotation with the same idempotency key changes nothing and returns no secret.
 Endpoint secrets are sealed with the same deployment keys as connection secrets, and
 `quotum connections rotate-secrets` re-seals both after a key change; see
 [deployment](deployment.md#encryption-key-rotation).
+
+## In the console
+
+The merchant console reaches these routes under `/api/billing/admin/webhook-endpoints`,
+`/api/billing/admin/webhook-deliveries` and `/api/billing/admin/webhook-event-types`, for the
+environment the member selected. That environment must be active. Endpoints are managed like
+provider and projection connections:
+
+- Every member can read endpoints, deliveries and event types (`billing.read`).
+- In sandbox, Owners, Admins and Developers can change them (`sandbox.configure`).
+- In production, only Owners and Admins can (`production.connections.manage`). Each change needs a
+  step-up grant for the action `webhooks.manage`, bound to that request: create, update, delete,
+  rotate, test, replay and retry alike.
+
+Each change is audited as `billing.action_accepted` with the action `webhooks.manage`. The console
+keeps the answer to every write for 30 days, so that a repeated request
+[answers the same](deployment.md#merchant-proxy-service-principal). For creating an endpoint and
+rotating its secret, it keeps the answer `/v1` gives a repeat instead: `200`, `"duplicate": true`,
+`"secret": null` and `"secretDisclosed": false`. The secret therefore never sits outside its
+sealed envelope. Show it to the member from the first answer.
+
+## Operator CLI
+
+`quotum webhooks` manages an instance's endpoints in the database directly, with no project key or
+operator key. It works headless and on a production environment that is not active yet:
+
+```sh
+quotum webhooks endpoints create alpha --url https://hooks.example.com/quotum \
+  --event-types invoice.paid,subscription.updated --secret-out webhook.json
+quotum webhooks endpoints list alpha
+quotum webhooks endpoints update alpha <endpoint-id> --enabled false
+quotum webhooks endpoints rotate-secret alpha <endpoint-id> --secret-out rotated.json
+quotum webhooks endpoints test alpha <endpoint-id>
+quotum webhooks endpoints delete alpha <endpoint-id>
+quotum webhooks deliveries list alpha --status failed
+quotum webhooks deliveries retry alpha <delivery-id>
+quotum webhooks deliveries replay alpha <endpoint-id> --from <time> --to <time>
+```
+
+- **Secrets go only to a file.** The secret is written to the new owner-only file `--secret-out`
+  names, never to stdout, as `{ "version": 1, "endpointId", "secretGeneration", "webhookSecret" }`.
+  An existing file is refused before anything changes. Rerunning a create or rotation with the same
+  `--request-key` changes nothing, writes no file, and says to rotate instead.
+- **Changes name an operator.** Each change takes `--actor <name>` (or `QUOTUM_ACTOR`); a new
+  endpoint records it as `operator:<name>`. The change is audited as `billing.action_accepted` with
+  the action `webhooks.manage` once it is accepted, before its input is checked.
+- **Member organizations need a reason.** While the merchant platform runs, changing an organization
+  whose members manage it needs `--member-override-reason <why>`.
+- **Event types.** `--event-types all` subscribes an endpoint to every type again, and
+  `--description ""` clears the description.
+- **Settings.** The commands read the same settings as `quotum connections`: `POSTGRES_URI`, the
+  `QUOTUM_SECRETS_KEY_*` key, `QUOTUM_AUTH_SECRET` and, headless, the `BILLING_PROJECTION_*`
+  receiver settings that allow private and `http` URLs.
 
 ## Retention and erasure
 

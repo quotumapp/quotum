@@ -61,6 +61,8 @@ import { providerOperationReceipt } from "../billing/provider-operations";
 import { publicRefundRequest } from "../billing/refunds";
 import { publicOperationLookup } from "../billing/usage-api";
 import type { BillingRepository } from "../db/repository";
+import type { WebhookEndpointServiceLike } from "../events/endpoints";
+import { WebhookEndpointService } from "../events/service";
 import type { BillingAdminOperations } from "../operations/admin";
 import {
 	allowedOnInactiveEnvironment,
@@ -72,6 +74,8 @@ import type { ProviderCapabilityReads } from "../providers/capability-read-types
 import { describeRequestIssues, requestIssues } from "../shared/request-issues";
 import { createBillingChangesPort } from "./billing-changes";
 import { dispatchExtendedBilling } from "./merchant-billing-extended";
+import { dispatchWebhookOperation, isWebhookOperation } from "./merchant-webhooks";
+import { lazyWebhookSecretSealer } from "./webhook-secrets";
 
 export function createMerchantBillingPort(input: {
 	repository: BillingRepository;
@@ -81,9 +85,18 @@ export function createMerchantBillingPort(input: {
 	providers: ProjectProviderServiceResolver;
 	capabilityReads: ProviderCapabilityReads;
 	operations?: BillingAdminOperations | null;
+	/** The runtime's webhook endpoint service, which the operator `/v1` routes share. */
+	webhooks?: WebhookEndpointServiceLike;
 }): MerchantBillingPort {
 	const { repository: repo, reader, resolver, providers, capabilityReads } = input;
 	const meter = new MeteringService(repo);
+	const webhooks =
+		input.webhooks ??
+		new WebhookEndpointService({
+			store: repo.webhookEndpoints,
+			sealer: lazyWebhookSecretSealer(),
+			allowInsecureHttp: false,
+		});
 	const run = async (command: MerchantBillingCommand) => {
 		const resolved = await resolver.resolveInstanceId(command.projectInstanceId);
 		if (
@@ -592,7 +605,9 @@ export function createMerchantBillingPort(input: {
 				return ok(result, result.kind === "subscription_change" ? 202 : 200);
 			}
 			default:
-				return dispatchExtendedBilling(repo, project, command);
+				return isWebhookOperation(command.operation)
+					? dispatchWebhookOperation(webhooks, project, command)
+					: dispatchExtendedBilling(repo, project, command);
 		}
 	};
 	return {

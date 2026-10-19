@@ -5,8 +5,10 @@ import { projectProviderServiceResolver } from "../../src/app/provider-services"
 import { createMerchantBillingPort } from "../../src/composition/merchant-billing";
 import { merchantAuthDatabase, merchantSql } from "../../src/composition/merchant-persistence";
 import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
+import { createWebhookSecretSealer } from "../../src/composition/webhook-secrets";
 import { AdminBillingRepository } from "../../src/db/admin-repository";
 import { BillingRepository } from "../../src/db/repository";
+import { WebhookEndpointService } from "../../src/events/service";
 import { createMerchantApp } from "../../src/platform/app";
 import { createMerchantAuth } from "../../src/platform/auth";
 import { createMerchantBilling } from "../../src/platform/billing";
@@ -117,6 +119,7 @@ export function merchantFixture(
 		connections: fixtureConnections(env.connectionFixtures),
 		getRepository: () => repository,
 	});
+	const cipher = new ConnectionCipher("test", new Map([["test", Buffer.alloc(32, 7)]]));
 	const billingPort = createMerchantBillingPort({
 		repository,
 		reader: new AdminBillingRepository({
@@ -125,12 +128,14 @@ export function merchantFixture(
 		resolver,
 		providers: projectProviderServiceResolver(registry),
 		capabilityReads: createProviderCapabilityReads({ registry, facts: repository }),
+		webhooks: new WebhookEndpointService({
+			store: repository.webhookEndpoints,
+			sealer: () => createWebhookSecretSealer(cipher),
+			allowInsecureHttp: false,
+		}),
 	});
 	const billing = createMerchantBilling(store, billingPort);
-	const connectionRepository = new ConnectionRepository(
-		sql,
-		new ConnectionCipher("test", new Map([["test", Buffer.alloc(32, 7)]])),
-	);
+	const connectionRepository = new ConnectionRepository(sql, cipher);
 	const connections =
 		options.connectionValidation && options.environmentBilling
 			? new MerchantConnections(
