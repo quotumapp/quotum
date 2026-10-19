@@ -71,6 +71,9 @@ export type {
 	CatalogProviderPricedIntent,
 	PublishedCatalog,
 } from "../catalog/types";
+export type { WebhookVerificationInput } from "../events/signing";
+export { verifyWebhookSignature } from "../events/signing";
+export type { DomainEventEnvelope } from "../events/types";
 export type {
 	BillingAccountAvailableActions,
 	ProviderConnectionSummary,

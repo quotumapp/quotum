@@ -39,7 +39,7 @@ The current schema is initialized from these ordered baseline files:
 | File | Owns |
 | --- | --- |
 | [001_platform.sql](../migrations/001_platform.sql) | Organizations, projects, instances, credentials and customer connections |
-| [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements and provider/projection jobs |
+| [002_billing_core.sql](../migrations/002_billing_core.sql) | Billing accounts, purchases, subscriptions, entitlements, provider/projection jobs and outbound webhook endpoints, events and deliveries |
 | [003_metering_and_pricing.sql](../migrations/003_metering_and_pricing.sql) | Catalog, metering, operation recovery, pricing, controls, commercial actions, payment setup, promotions, plan grants, operator grants, administrative debits, default plans, plan-change carry-over and Stripe binding adoption receipts |
 | [004_merchant.sql](../migrations/004_merchant.sql) | Merchant identity, authentication, sessions, membership, audit and connection OAuth state |
 <!-- migration-inventory:end -->
@@ -317,6 +317,7 @@ One process runs the HTTP API and all workers. Each polls on the interval shown:
 | Worker | Interval variable |
 | --- | --- |
 | Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
+| [Outbound webhook delivery](webhooks.md) (fan-out, signed deliveries, event retention) | `BILLING_WORKER_POLL_INTERVAL_MS` |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
 | Subscription reconciliation (provider reads, subscription and plan grant expiry, default-plan passes, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
 | Metering maintenance (reservation expiry, reset-window subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
@@ -742,7 +743,7 @@ and a read-only credential is refused.
    until it ends, including a store subscription Quotum cannot cancel. The other blockers are open
    provider operations, payment setups, checkouts and commercial actions, pending subscription
    changes and catalog migrations, reserved promotion redemptions, held usage reservations, top-up
-   jobs, usage invoices and a projection delivery in flight.
+   jobs, usage invoices, and a projection or webhook delivery in flight.
 3. `POST /v1/admin/customer-erasures` with an `Idempotency-Key` and
    `{"billingAccountId": "…", "basis": "data_subject_request", "reference": "ticket-4411",
    "acknowledge": ["forfeit_paid_balances"]}`. `basis` is one of `data_subject_request`,
@@ -762,7 +763,8 @@ after that the id is an ordinary new account. The `customer-erasure` worker then
 batches under a lease and resumes after a stop:
 
 - deletes the account's provider links, checkout requests, payment setup sessions, idempotency
-  claims, entitlements, projection jobs and closed Paddle reservations;
+  claims, entitlements, projection jobs, outbound webhook events with their deliveries and closed
+  Paddle reservations;
 - rewrites ids, actors and free text on entities, provider operations, commercial action previews,
   promotion codes, plan grants, redemptions, operator grants, debits, balance allocation keys and
   refund requests (the account id, the caller's reason and both idempotency keys; the amounts,

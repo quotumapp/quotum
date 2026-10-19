@@ -26,6 +26,9 @@ interface SeededStoreProduct {
 }
 
 export const publicBillingTableResetOrder = [
+	"webhook_deliveries",
+	"domain_events",
+	"webhook_endpoints",
 	"customer_erasure_tombstones",
 	"customer_erasures",
 	"paddle_checkout_reservations",
@@ -199,6 +202,9 @@ export async function resetPublicBillingTables(sql: SQL): Promise<void> {
 	await sql`UPDATE projects SET published_catalog_revision_id = NULL`;
 	await sql`
 		TRUNCATE TABLE
+			webhook_deliveries,
+			domain_events,
+			webhook_endpoints,
 			paddle_checkout_reservations,
 			provider_operations,
 			default_plan_reconciliations,

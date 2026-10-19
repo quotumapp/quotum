@@ -132,6 +132,19 @@ export interface DestinationPostDependencies extends PublicHttpsPostDependencies
 	policy?: DestinationPolicy;
 	/** Sends `http:` requests, which only an approved private network can receive. */
 	httpRequest?: typeof httpRequest;
+	/**
+	 * What a response body larger than 4 KiB means. `reject` (the default) fails the exchange, for
+	 * receivers whose reply is part of the protocol; `truncate` keeps the status and the first
+	 * 4 KiB, for receivers whose status alone is the answer.
+	 */
+	oversizedResponse?: "reject" | "truncate";
+}
+
+export interface DestinationResponse {
+	status: number;
+	body: string;
+	/** The `Retry-After` header, when the receiver sent one. */
+	retryAfter?: string;
 }
 
 /** Resolve before connecting and pin the verified address while keeping hostname TLS verification. */
@@ -140,7 +153,7 @@ export async function publicHttpsPost(
 	body: string,
 	headers: Record<string, string>,
 	dependencies: PublicHttpsPostDependencies = {},
-): Promise<{ status: number; body: string }> {
+): Promise<DestinationResponse> {
 	return await postToDestination(urlString, body, headers, {
 		...dependencies,
 		policy: publicDestinationPolicy,
@@ -169,8 +182,9 @@ export async function postToDestination(
 		lookup: resolveAddresses = lookup,
 		request: sendRequest = request,
 		httpRequest: sendHttpRequest = httpRequest,
+		oversizedResponse = "reject",
 	}: DestinationPostDependencies = {},
-): Promise<{ status: number; body: string }> {
+): Promise<DestinationResponse> {
 	const url = new URL(urlString);
 	const insecure = url.protocol === "http:" && policy.allowInsecureHttp;
 	if ((url.protocol !== "https:" && !insecure) || url.username || url.password || url.hash)
@@ -220,18 +234,31 @@ export async function postToDestination(
 		const onResponse = (res: IncomingMessage) => {
 			const chunks: Buffer[] = [];
 			let length = 0;
+			const retryAfter = res.headers?.["retry-after"];
+			const settle = () =>
+				resolve({
+					status: res.statusCode ?? 502,
+					body: Buffer.concat(chunks).toString("utf8"),
+					...(typeof retryAfter === "string" ? { retryAfter } : {}),
+				});
 			res.on("data", (chunk) => {
-				length += chunk.length;
-				if (length > 4096) {
+				const buffer = Buffer.from(chunk);
+				if (length + buffer.length > 4096) {
+					if (oversizedResponse === "truncate") {
+						chunks.push(buffer.subarray(0, 4096 - length));
+						length = 4096;
+						settle();
+						res.destroy();
+						return;
+					}
 					res.destroy();
 					reject(new DestinationError("Receiver response too large"));
 					return;
 				}
-				chunks.push(Buffer.from(chunk));
+				length += buffer.length;
+				chunks.push(buffer);
 			});
-			res.on("end", () =>
-				resolve({ status: res.statusCode ?? 502, body: Buffer.concat(chunks).toString("utf8") }),
-			);
+			res.on("end", settle);
 			res.on("error", () => reject(new DestinationError("Receiver request failed")));
 		};
 		const req = insecure

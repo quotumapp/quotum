@@ -31,6 +31,8 @@ export const operatorKeyPaths = {
 		path.startsWith("/v1/admin/provider-customer-unlinks/"),
 	/** Erasing a billing account, its preview and its receipts. */
 	customerErasures: (path: string): boolean => path.startsWith("/v1/admin/customer-erasures"),
+	/** Outbound webhook endpoints, their deliveries and the event types they can receive. */
+	webhookEndpoints: (path: string): boolean => path.startsWith("/v1/admin/webhook-"),
 } as const satisfies Record<string, (path: string) => boolean>;
 
 /** Whether a `/v1` path needs the operator key, as the contract documents it. */

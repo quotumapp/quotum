@@ -336,6 +336,7 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 			tags.includes("balance-adjustments") ||
 			tags.includes("provider-customers") ||
 			tags.includes("customer-erasures") ||
+			tags.includes("webhooks") ||
 			route.path.endsWith("/corrections");
 		const idempotent =
 			route.path.endsWith("/providers/paddle/checkout-sessions") ||
@@ -343,6 +344,8 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 			tags.includes("balance-adjustments") ||
 			tags.includes("provider-customers") ||
 			route.path.endsWith("/customer-erasures") ||
+			route.path.endsWith("/webhook-endpoints") ||
+			route.path.endsWith("/webhook-endpoints/:endpointId/rotate-secret") ||
 			route.path.endsWith("/commercial-actions") ||
 			route.path.endsWith("/changes") ||
 			route.path.endsWith("/promotion-redemptions") ||

@@ -24,6 +24,7 @@ import {
 	type QuotumRuntimeScheduler,
 	type QuotumScheduledJob,
 } from "./composition/runtime-lifecycle";
+import { lazyWebhookSecretSealer } from "./composition/webhook-secrets";
 import { createWorkerProviderSelectors } from "./composition/worker-providers";
 import { AdminBillingRepository } from "./db/admin-repository";
 import {
@@ -45,6 +46,8 @@ import {
 	StoreEventReplayJobRepository,
 } from "./db/repository-domains";
 import type { BillingEnv } from "./env";
+import { createWebhookPost, type WebhookPost } from "./events/delivery";
+import { WebhookEndpointService } from "./events/service";
 import { createPinoBillingLogger, safelyLogError, safelyLogInfo } from "./observability/logger";
 import { createInMemoryBillingMetrics } from "./observability/metrics";
 import {
@@ -67,6 +70,7 @@ import type { StripeBillingConfig } from "./providers/stripe/client";
 import type { StripeBillingClientDependency } from "./providers/stripe/service";
 import { AutoTopupWorker } from "./workers/auto-topup";
 import { CustomerErasureWorker } from "./workers/customer-erasure";
+import { DomainEventDeliveryWorker } from "./workers/domain-event-delivery";
 import { MeteringMaintenanceWorker } from "./workers/metering-maintenance";
 import { ProjectionSyncWorker } from "./workers/projection-sync";
 import { PromotionMaintenanceWorker } from "./workers/promotion-maintenance";
@@ -80,6 +84,8 @@ import { UsagePartitionUpkeepWorker } from "./workers/usage-partition-upkeep";
 export interface BillingRuntimeDependencies {
 	scheduler?: QuotumRuntimeScheduler;
 	projectionFetch?: ApiProjectProjectionFetch;
+	/** Sends outbound webhook deliveries; tests inject a recorder. */
+	webhookPost?: WebhookPost;
 	connections?: RuntimeConnectionResolver;
 	/** `null` runs headless (no merchant platform); omitted reads `QUOTUM_CONSOLE_ENABLED` (headless by default). */
 	merchant?: MerchantRuntimeOptions | null;
@@ -145,6 +151,21 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		metrics,
 	});
 	const projectionSyncRepository = new ProjectionSyncJobRepository(billingRepository);
+	// Webhook endpoints share the projection receivers' destination policy and the connection keys.
+	const webhookSecretSealer = lazyWebhookSecretSealer();
+	const domainEventDeliveryWorker = new DomainEventDeliveryWorker({
+		workerId: env.workerId,
+		maxAttempts: env.eventDeliveryMaxAttempts ?? 12,
+		retentionDays: env.eventRetentionDays ?? 30,
+		batchSize: 25,
+		concurrency: 5,
+		store: billingRepository.domainEventDeliveries,
+		sealer: webhookSecretSealer,
+		post: dependencies.webhookPost ?? createWebhookPost({ policy: projectionPolicy }),
+		projectContextResolver,
+		logger,
+		metrics,
+	});
 	const storeEventReplayRepository = new StoreEventReplayJobRepository(billingRepository);
 	const subscriptionReconciliationRepository = new ProviderSubscriptionReconciliationRepository(
 		billingRepository,
@@ -300,6 +321,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		pollIntervalMs: env.workerPollIntervalMs,
 	});
 	jobs.push({
+		name: "domain_event_delivery",
+		runOnce: () => domainEventDeliveryWorker.runOnce(),
+		pollIntervalMs: env.workerPollIntervalMs,
+	});
+	jobs.push({
 		name: "store_event_replay",
 		runOnce: () => storeEventReplayWorker.runOnce(),
 		pollIntervalMs: env.storeEventReplayPollIntervalMs,
@@ -367,6 +393,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		),
 		entitlementService: new EntitlementService(billingRepository),
 		usageApiService: billingRepository.usageApi,
+		webhookEndpointService: new WebhookEndpointService({
+			store: billingRepository.webhookEndpoints,
+			sealer: webhookSecretSealer,
+			allowInsecureHttp: projectionPolicy.allowInsecureHttp,
+		}),
 		projectContextResolver,
 		providerRegistry,
 		providerOperationReconciler: async (project, billingAccountId, operationId, actor) => {

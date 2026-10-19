@@ -74,6 +74,8 @@ const COLLECTIONS = new Set([
 	"trials",
 	"usage-invoice-adjustments",
 	"usage-invoice-periods",
+	"webhook-deliveries",
+	"webhook-endpoints",
 ]);
 
 /** Path segments followed by two identifiers, e.g. `contracts/:billingAccountId/:contractId`. */

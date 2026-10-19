@@ -27,6 +27,7 @@ import type { WebBillingService } from "../billing/web-provider";
 import type { CatalogBindingsLike } from "../catalog/bindings";
 import type { CatalogControlPlaneLike } from "../catalog/types";
 import type { BillingEnv } from "../env";
+import type { WebhookEndpointServiceLike } from "../events/endpoints";
 import type { BillingLogger } from "../observability/logger";
 import type { BillingMetrics } from "../observability/metrics";
 import type { BillingAdminOperations } from "../operations/admin";
@@ -164,6 +165,8 @@ export interface AppDependencies {
 	balanceAdjustmentService?: BalanceAdjustmentServiceLike;
 	providerCustomerUnlinkService?: ProviderCustomerUnlinkServiceLike;
 	customerErasureService?: CustomerErasureServiceLike;
+	/** Outbound webhook endpoints; the default seals secrets with the deployment's secrets key. */
+	webhookEndpointService?: WebhookEndpointServiceLike;
 	catalogControlPlane?: CatalogControlPlaneLike;
 	catalogBindings?: CatalogBindingsLike;
 	billingInsightsService?: BillingInsightsServiceLike;

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Body of a webhook delivery, signed with Standard Webhooks headers (webhook-id, webhook-timestamp, webhook-signature). Verify the raw body before parsing it, and ignore fields and event types this schema does not name.",
+  "oneOf": [
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "endpointId": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "endpointId",
+            "message"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "webhook.test",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Quotum outbound domain event"
+}

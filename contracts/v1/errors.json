@@ -643,6 +643,7 @@
         "src/db/repository/recurring-pricing.ts",
         "src/db/repository/stripe.ts",
         "src/db/repository/usage-operations.ts",
+        "src/db/repository/webhook-endpoints.ts",
         "src/platform/connections/lifecycle.ts",
         "src/platform/mcp/changes.ts",
         "src/platform/store.ts",
@@ -1886,6 +1887,48 @@
       "code": "USAGE_NOT_CONFIGURED",
       "sources": [
         "src/billing/usage-api.ts"
+      ]
+    },
+    {
+      "code": "WEBHOOK_DELIVERY_NOT_FAILED",
+      "sources": [
+        "src/events/endpoints.ts"
+      ]
+    },
+    {
+      "code": "WEBHOOK_DELIVERY_NOT_FOUND",
+      "sources": [
+        "src/events/endpoints.ts"
+      ]
+    },
+    {
+      "code": "WEBHOOK_ENDPOINT_DISABLED",
+      "sources": [
+        "src/events/endpoints.ts"
+      ]
+    },
+    {
+      "code": "WEBHOOK_ENDPOINT_LIMIT_REACHED",
+      "sources": [
+        "src/events/endpoints.ts"
+      ]
+    },
+    {
+      "code": "WEBHOOK_ENDPOINT_NOT_FOUND",
+      "sources": [
+        "src/events/endpoints.ts"
+      ]
+    },
+    {
+      "code": "WEBHOOK_EVENT_TYPE_UNKNOWN",
+      "sources": [
+        "src/events/endpoints.ts"
+      ]
+    },
+    {
+      "code": "WEBHOOK_REPLAY_TOO_LARGE",
+      "sources": [
+        "src/events/endpoints.ts"
       ]
     }
   ],

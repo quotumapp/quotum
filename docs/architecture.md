@@ -9,7 +9,7 @@ unclassified or overlapping files and unresolved imports fail the check.
 
 | Owner | Files | May depend on |
 | --- | --- | --- |
-| Billing | `src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/http`, `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`, `src/sdk`, `src/workers`, `src/env.ts` | Billing, shared |
+| Billing | `src/admin`, `src/app`, `src/billing`, `src/catalog`, `src/db`, `src/events`, `src/http`, `src/observability`, `src/operations`, `src/projects`, `src/projections`, `src/providers`, `src/sdk`, `src/workers`, `src/env.ts` | Billing, shared |
 | Platform | `src/platform` | Platform, shared |
 | Shared | `src/shared` | Shared |
 | MCP | `src/mcp` | MCP, shared, and `src/sdk` only |
@@ -60,6 +60,9 @@ The policy is deny-by-default:
   `provider_operation_recovery` observes them with the original encrypted connection version.
   Its dispatcher and fulfillment live in the Paddle adapter, while lease fencing and operator
   receipt/review routes remain provider-neutral.
+- `src/events/`: outbound domain events, webhook endpoints, Standard Webhooks signing and the
+  event contract; persistence is in `src/db/repository/domain-events.ts` and
+  `webhook-endpoints.ts`, delivery in `src/workers/domain-event-delivery.ts`.
 - `src/mcp/`: shared read-only [MCP tools and stdio server](mcp.md), a client of `/v1` through
   `src/sdk/`, plus separately enabled remote proposal tools. The remote transport in
   `composition/remote-mcp.ts` dispatches read tools through guarded SDK requests and

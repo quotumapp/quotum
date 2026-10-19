@@ -141,6 +141,8 @@ describe("loadEnv", () => {
 			workerId: "worker-a",
 			workerPollIntervalMs: 2500,
 			projectionSyncMaxAttempts: 7,
+			eventDeliveryMaxAttempts: 12,
+			eventRetentionDays: 30,
 			storeEventReplayMaxAttempts: 8,
 			storeEventReplayPollIntervalMs: 3500,
 			subscriptionReconciliationPollIntervalMs: 4500,
@@ -176,6 +178,8 @@ describe("loadEnv", () => {
 		expect(env.workerId).toMatch(/^billing-worker-/);
 		expect(env.workerPollIntervalMs).toBe(5000);
 		expect(env.projectionSyncMaxAttempts).toBe(10);
+		expect(env.eventDeliveryMaxAttempts).toBe(12);
+		expect(env.eventRetentionDays).toBe(30);
 		expect(env.storeEventReplayMaxAttempts).toBe(10);
 		expect(env.storeEventReplayPollIntervalMs).toBe(5000);
 		expect(env.subscriptionReconciliationPollIntervalMs).toBe(60000);

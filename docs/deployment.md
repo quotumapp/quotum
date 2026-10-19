@@ -568,6 +568,9 @@ Defaults in parentheses.
 - `BILLING_WORKER_ID` (generated).
 - `BILLING_WORKER_POLL_INTERVAL_MS` (`5000`).
 - `BILLING_PROJECTION_SYNC_MAX_ATTEMPTS` (`10`).
+- `BILLING_EVENT_DELIVERY_MAX_ATTEMPTS` (`12`, about 34 hours of retries) and
+  `BILLING_EVENT_RETENTION_DAYS` (`30`, also the replay window) for
+  [outbound webhooks](webhooks.md).
 - `BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS` (`10`),
   `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` (`5000`), which also paces Stripe App event
   processing when Apps OAuth is configured.
@@ -704,7 +707,8 @@ exception causes the event to be dropped. No raw exception object is changed by 
 Deploy a new active key while retaining the old key in the paired
 `QUOTUM_SECRETS_PREVIOUS_KEY_ID`/`QUOTUM_SECRETS_PREVIOUS_KEY_BASE64` settings. Run
 `quotum connections rotate-secrets` against the target database and verify every envelope now uses
-the active key before retiring the previous runtime key. Keep keys needed by retained backups in
+the active key before retiring the previous runtime key. The command re-seals the signing secrets of
+[webhook endpoints](webhooks.md) with the same keys, and reports both counts. Keep keys needed by retained backups in
 recovery secret storage. Rotation is restartable; missing or wrong keys fail closed.
 
 ## Authentication

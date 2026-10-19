@@ -8,6 +8,9 @@ import {
 describe("integration catalog fixtures", () => {
 	it("uses public billing tables in dependency reset order", () => {
 		expect(publicBillingTableResetOrder).toEqual([
+			"webhook_deliveries",
+			"domain_events",
+			"webhook_endpoints",
 			"customer_erasure_tombstones",
 			"customer_erasures",
 			"paddle_checkout_reservations",

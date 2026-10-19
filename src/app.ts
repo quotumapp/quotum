@@ -32,6 +32,7 @@ import type {
 	RequestObserver,
 } from "./app/types";
 import { registerUsageReceiptRoutes } from "./app/usage-receipt-routes";
+import { registerWebhookEndpointRoutes } from "./app/webhook-endpoint-routes";
 import { registerWebhookRoutes } from "./app/webhook-routes";
 import { EntitlementService } from "./billing/entitlements";
 import {
@@ -42,9 +43,11 @@ import {
 } from "./billing/errors";
 import { MeteringService } from "./billing/metering";
 import { PostgresProjectInstanceContextResolver } from "./composition/project-instance-persistence";
+import { lazyWebhookSecretSealer } from "./composition/webhook-secrets";
 import { AdminBillingRepository } from "./db/admin-repository";
 import { checkPostgresHealth } from "./db/client";
 import { BillingRepository } from "./db/repository";
+import { WebhookEndpointService } from "./events/service";
 import { registerOperationalRoutes } from "./http/operational-routes";
 import {
 	createFixedWindowRateLimiter,
@@ -120,6 +123,7 @@ export function createApp({
 	balanceAdjustmentService,
 	providerCustomerUnlinkService,
 	customerErasureService,
+	webhookEndpointService,
 	catalogControlPlane,
 	catalogBindings,
 	billingInsightsService,
@@ -657,6 +661,19 @@ export function createApp({
 		app,
 		operatorApiKey: env.operatorApiKey,
 		service: customerErasureService ?? getRepository().customerErasures,
+		billingLogger,
+		registerPostAuthGuard,
+	});
+	registerWebhookEndpointRoutes({
+		app,
+		operatorApiKey: env.operatorApiKey,
+		service:
+			webhookEndpointService ??
+			new WebhookEndpointService({
+				store: getRepository().webhookEndpoints,
+				sealer: lazyWebhookSecretSealer(),
+				allowInsecureHttp: env.projectionReceivers?.allowInsecureHttp ?? false,
+			}),
 		billingLogger,
 		registerPostAuthGuard,
 	});

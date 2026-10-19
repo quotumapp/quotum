@@ -35,6 +35,7 @@ export const customerErasureDispositions = {
 	checkout_requests: { kind: "delete" },
 	client_idempotency_claims: { kind: "delete" },
 	projection_sync_jobs: { kind: "delete" },
+	domain_events: { kind: "delete" },
 	entitlements: { kind: "delete" },
 	entities: { kind: "rewrite" },
 	plan_grants: { kind: "rewrite" },
@@ -161,6 +162,7 @@ const digestOfId = drizzleSql`encode(sha256(convert_to(target.id::text, 'UTF8'))
 
 export const deleteBatches: CustomerErasureBatch[] = [
 	deleteBatch("projection_sync_jobs", ofCustomer),
+	deleteBatch("domain_events", ofCustomer),
 	deleteBatch("checkout_requests", ofCustomer),
 	deleteBatch("payment_setup_sessions", ofCustomer),
 	deleteBatch("client_idempotency_claims", ofCustomer),

@@ -51,6 +51,7 @@ export const customerErasureBlockerKinds = [
 	"auto_topup_job",
 	"usage_invoice",
 	"projection_delivery",
+	"webhook_delivery",
 ] as const;
 
 export type CustomerErasureBlockerKind = (typeof customerErasureBlockerKinds)[number];

@@ -27,6 +27,8 @@ admin routes. Each billing topic has its own guide:
   credit and administrative debits.
 - [Provider capability errors and reads](provider-capabilities.md): capability errors, the
   capability and available-actions reads, and environment readiness details.
+- [Outbound webhooks](webhooks.md): endpoints, event types, signed deliveries, retries, replay and
+  secret rotation.
 
 ## Requests and responses
 
@@ -241,6 +243,9 @@ Operator routes:
   /v1/admin/customer-erasures/:erasureId` reads the receipt. The billing account id travels in the
   body, because the id is what an erasure forgets; see
   [Customer erasure](operations.md#customer-erasure).
+- Webhook endpoints under `/v1/admin/webhook-endpoints`, their deliveries under
+  `/v1/admin/webhook-deliveries` and `GET /v1/admin/webhook-event-types`; see
+  [Outbound webhooks](webhooks.md).
 - `POST /v1/admin/store-events/:eventId/replay`: an event of another project, or none, answers
   `404 NOT_FOUND`; one already processed, or leased by a worker that is still live, answers
   `409 STORE_EVENT_NOT_REPLAYABLE`.
