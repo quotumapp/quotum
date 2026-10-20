@@ -604,7 +604,7 @@ describe("promotion routes", () => {
 		const noKey = await revoke(operatorHeaders);
 		const revoked = await revoke({ ...operatorHeaders, "idempotency-key": "revoke-1" });
 
-		expect(noOperator.status).toBe(401);
+		expect(noOperator.status).toBe(403);
 		expect(noActor.status).toBe(400);
 		expect(noKey.status).toBe(400);
 		expect(revoked.status).toBe(200);

@@ -149,7 +149,7 @@ describe("operator provider operation reconciliation", () => {
 				},
 				403,
 			],
-			[{ authorization: "Bearer full", "x-billing-actor": "tester" }, 401],
+			[{ authorization: "Bearer full", "x-billing-actor": "tester" }, 403],
 			[{ authorization: "Bearer full", "x-billing-operator-key": "operator-secret-key" }, 400],
 		] as const)
 			expect((await testRequest(service, path, { method: "POST", headers })).status).toBe(status);

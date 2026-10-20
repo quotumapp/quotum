@@ -609,10 +609,12 @@ export function operatorApiKeyGuard(
 				);
 			}
 
+			// The project credential was accepted, so a missing or wrong operator key is a 403: a 401
+			// would carry a Bearer challenge for the credential that already passed.
 			if (
 				!constantTimeEquals(request.headers.get("x-billing-operator-key") ?? "", operatorApiKey)
 			) {
-				throw new BillingError("Invalid billing operator key", "UNAUTHORIZED", 401);
+				throw new BillingError("Invalid billing operator key", "BILLING_OPERATOR_KEY_INVALID", 403);
 			}
 		},
 	};

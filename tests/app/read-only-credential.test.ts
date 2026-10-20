@@ -211,7 +211,7 @@ describe("read-only project credentials", () => {
 		// recording service. The read-only refusal and unhandled failures are not among them.
 		const pastTheGate = [
 			"400 INVALID_REQUEST",
-			"401 UNAUTHORIZED",
+			"403 BILLING_OPERATOR_KEY_INVALID",
 			"404 NOT_FOUND",
 			"501 BILLING_PROVIDER_NOT_CONFIGURED",
 			"503 BILLING_PROVIDER_NOT_CONFIGURED",

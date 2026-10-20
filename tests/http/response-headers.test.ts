@@ -168,7 +168,7 @@ describe("staff response headers", () => {
 			testRequest(admin, "/v1/admin/metrics", {
 				headers: { authorization: "Bearer secret", "x-billing-operator-key": "wrong" },
 			});
-		expect((await read()).status).toBe(401);
+		expect((await read()).status).toBe(403);
 		const adminLimited = await read();
 		expect(adminLimited.status).toBe(429);
 		expect(adminLimited.headers.get("www-authenticate")).toBeNull();

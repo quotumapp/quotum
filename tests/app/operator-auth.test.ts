@@ -67,10 +67,10 @@ const env: BillingEnv = {
 	},
 };
 
-const unauthorized = {
+const invalidOperatorKey = {
 	success: false,
 	error: {
-		code: "UNAUTHORIZED",
+		code: "BILLING_OPERATOR_KEY_INVALID",
 		message: "Invalid billing operator key",
 		requestId: expect.any(String),
 	},
@@ -118,7 +118,7 @@ function requestHeaders(verb: string, operatorKey?: string): Record<string, stri
 }
 
 describe("operator-key contracts", () => {
-	it("returns 401 for missing, wrong, and same-length wrong operator keys", async () => {
+	it("returns 403 without a challenge for missing, wrong, and same-length wrong operator keys", async () => {
 		const routes = operatorKeyRoutes(await generateOpenApi("0.0.0-test"));
 		expect(routes.length).toBeGreaterThan(0);
 		const app = withOpenApiAssertions(operatorTestApp());
@@ -131,8 +131,10 @@ describe("operator-key contracts", () => {
 					headers: requestHeaders(verb, operatorKey),
 					body: verb === "GET" ? undefined : "{}",
 				});
-				expect(response.status, `${verb} ${requestPath}`).toBe(401);
-				expect(await response.json()).toEqual(unauthorized);
+				expect(response.status, `${verb} ${requestPath}`).toBe(403);
+				// The project credential passed, so a Bearer challenge would point at the wrong header.
+				expect(response.headers.get("www-authenticate"), `${verb} ${requestPath}`).toBeNull();
+				expect(await response.json()).toEqual(invalidOperatorKey);
 			}
 		}
 	});
@@ -152,7 +154,7 @@ describe("operator-key contracts", () => {
 					headers: requestHeaders(verb, "wrong-operator-key"),
 					body: verb === "GET" ? undefined : "{}",
 				});
-			expect((await send()).status, `${verb} ${requestPath}`).toBe(401);
+			expect((await send()).status, `${verb} ${requestPath}`).toBe(403);
 			const limited = await send();
 			expect(limited.status, `${verb} ${requestPath}`).toBe(429);
 			expect(await limited.json()).toEqual({
@@ -201,7 +203,7 @@ describe("operator-key contracts", () => {
 				}),
 			);
 			const text = await response.text();
-			if (response.status === 401 && text.includes(unauthorized.error.message))
+			if (response.status === 403 && text.includes(invalidOperatorKey.error.code))
 				guarded.add(`${verb} ${route.path.replace(/:([A-Za-z][A-Za-z0-9]*)/g, "{$1}")}`);
 		}
 
@@ -232,7 +234,7 @@ describe("operator-key contracts", () => {
 						body: verb === "GET" ? undefined : "{}",
 					}),
 				);
-				expect([401, 404], `${verb} ${variant.url}`).toContain(response.status);
+				expect([403, 404], `${verb} ${variant.url}`).toContain(response.status);
 			}
 		}
 	});

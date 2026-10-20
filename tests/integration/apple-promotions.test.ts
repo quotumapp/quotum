@@ -440,7 +440,7 @@ localDescribe("Apple subscription promotions", () => {
 			offerIdentifier: "native20",
 		});
 		expect((await testRequest(app, path, { method: "POST", headers: backend, body })).status).toBe(
-			401,
+			403,
 		);
 		const linked = await testRequest(app, path, { method: "POST", headers: operator, body });
 		expect(linked.status).toBe(200);

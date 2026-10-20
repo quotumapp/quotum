@@ -877,11 +877,11 @@ describe("billing app", () => {
 				method: "POST",
 				headers: { authorization: "Bearer secret" },
 			});
-			expect(missing.status).toBe(401);
+			expect(missing.status).toBe(403);
 			expect(await missing.json()).toEqual({
 				success: false,
 				error: {
-					code: "UNAUTHORIZED",
+					code: "BILLING_OPERATOR_KEY_INVALID",
 					message: "Invalid billing operator key",
 					requestId: expect.any(String),
 				},
@@ -893,11 +893,11 @@ describe("billing app", () => {
 					"x-billing-operator-key": "operator-secret-kez",
 				},
 			});
-			expect(sameLengthWrong.status).toBe(401);
+			expect(sameLengthWrong.status).toBe(403);
 			expect(await sameLengthWrong.json()).toEqual({
 				success: false,
 				error: {
-					code: "UNAUTHORIZED",
+					code: "BILLING_OPERATOR_KEY_INVALID",
 					message: "Invalid billing operator key",
 					requestId: expect.any(String),
 				},
@@ -3448,7 +3448,7 @@ describe("billing app", () => {
 		const missingOperator = await testRequest(app, "/v1/admin/metrics", {
 			headers: { authorization: "Bearer secret" },
 		});
-		expect(missingOperator.status).toBe(401);
+		expect(missingOperator.status).toBe(403);
 		for (const path of ["/metrics", "/v1/admin/metrics"]) {
 			const response = await testRequest(app, path, {
 				headers:

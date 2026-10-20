@@ -150,7 +150,7 @@ describe("provider customer unlink routes", () => {
 		});
 		const unlinked = await post({ ...operatorHeaders, "idempotency-key": "unlink-1" });
 
-		expect(noOperator.status).toBe(401);
+		expect(noOperator.status).toBe(403);
 		expect(noActor.status).toBe(400);
 		expect(noKey.status).toBe(400);
 		expect(readOnly.status).toBe(403);
@@ -297,7 +297,7 @@ describe("provider customer unlink routes", () => {
 			headers: operatorHeaders,
 		});
 
-		expect(noOperator.status).toBe(401);
+		expect(noOperator.status).toBe(403);
 		expect(readOnly.status).toBe(403);
 		expect(await listed.json()).toEqual({
 			success: true,

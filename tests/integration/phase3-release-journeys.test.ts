@@ -535,7 +535,7 @@ localDescribe("Phase 3 release journeys", () => {
 		};
 		expect(
 			(await postJson(fixture.app, "/v1/admin/contracts/preview", auth, contractIntent)).status,
-		).toBe(401);
+		).toBe(403);
 		const operator = operatorHeaders(auth);
 		const previewResponse = await postJson(
 			fixture.app,
