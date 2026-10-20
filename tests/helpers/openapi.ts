@@ -15,6 +15,25 @@ const entries = Object.entries(specification.paths ?? {}).sort(
 	([a], [b]) => (a.match(/\{/g)?.length ?? 0) - (b.match(/\{/g)?.length ?? 0),
 );
 
+interface ResponseEntry {
+	$ref?: string;
+	content?: Record<string, unknown>;
+}
+
+interface RequestBodyHolder {
+	requestBody?: { $ref?: string };
+}
+
+/** The object a `#/...` reference names, reached by walking the specification. */
+function lookup(reference: string): ResponseEntry | undefined {
+	let current: unknown = specification;
+	for (const segment of reference.slice(2).split("/"))
+		current = (current as Record<string, unknown> | undefined)?.[
+			segment.replaceAll("~1", "/").replaceAll("~0", "~")
+		];
+	return current as ResponseEntry | undefined;
+}
+
 export interface OpenApiAssertionOptions {
 	allowUndocumented?: boolean;
 	requestBody?: unknown;
@@ -34,9 +53,9 @@ export async function assertOpenApiResponse(
 	if (!entry) return; // Negative route tests intentionally exercise paths outside the contract.
 	const [template, item] = entry;
 	const methodKey = method.toLowerCase();
-	const operation = (
-		item as Record<string, { responses: Record<string, { content?: Record<string, unknown> }> }>
-	)[methodKey];
+	const operation = (item as Record<string, { responses: Record<string, ResponseEntry> }>)[
+		methodKey
+	];
 	if (!operation) {
 		if (options.allowUndocumented === true) return;
 		if (response.status === 404 || response.status === 405) return;
@@ -46,8 +65,18 @@ export async function assertOpenApiResponse(
 		).toBeDefined();
 		return;
 	}
-	const declared = operation.responses[String(response.status)] ?? operation.responses.default;
-	expect(declared, `${method} ${template}: undocumented ${response.status}`).toBeDefined();
+	const responseKey = operation.responses[String(response.status)]
+		? String(response.status)
+		: "default";
+	const declaredEntry = operation.responses[responseKey];
+	expect(declaredEntry, `${method} ${template}: undocumented ${response.status}`).toBeDefined();
+	// Shared responses (the error envelopes) live in components; validate against that location.
+	const declared = declaredEntry?.$ref === undefined ? declaredEntry : lookup(declaredEntry.$ref);
+	const location =
+		declaredEntry?.$ref === undefined
+			? `quotum#/paths/${template.replaceAll("~", "~0").replaceAll("/", "~1")}/${methodKey}/responses/${responseKey}`
+			: `quotum${declaredEntry.$ref}`;
+	expect(declared, `${method} ${template}: dangling ${declaredEntry?.$ref}`).toBeDefined();
 	if (
 		response.status >= 200 &&
 		response.status < 300 &&
@@ -61,7 +90,7 @@ export async function assertOpenApiResponse(
 		declared.content[media],
 		`${method} ${template}: undocumented media ${media}`,
 	).toBeDefined();
-	const pointer = `quotum#/paths/${template.replaceAll("~", "~0").replaceAll("/", "~1")}/${methodKey}/responses/${operation.responses[String(response.status)] ? response.status : "default"}/content/${media.replaceAll("/", "~1")}/schema`;
+	const pointer = `${location}/content/${media.replaceAll("/", "~1")}/schema`;
 	const validate = ajv.getSchema(pointer) ?? ajv.compile({ $ref: pointer });
 	const body =
 		media === "application/json" ? await response.clone().json() : await response.clone().text();
@@ -125,8 +154,15 @@ function assertRequestBody(
 	method: string,
 	options: OpenApiAssertionOptions,
 ): void {
-	const pointer = `quotum#/paths/${template.replaceAll("~", "~0").replaceAll("/", "~1")}/${method}/requestBody/content/application~1json/schema`;
-	const validate = ajv.getSchema(pointer);
+	const operation = (
+		specification.paths?.[template] as Record<string, RequestBodyHolder> | undefined
+	)?.[method];
+	// A body several operations share lives in components; validate against that location.
+	const location =
+		operation?.requestBody?.$ref === undefined
+			? `quotum#/paths/${template.replaceAll("~", "~0").replaceAll("/", "~1")}/${method}/requestBody`
+			: `quotum${operation.requestBody.$ref}`;
+	const validate = ajv.getSchema(`${location}/content/application~1json/schema`);
 	if (validate === undefined) {
 		return;
 	}

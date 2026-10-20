@@ -130,6 +130,11 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
   `quotum-ui` imports), then merges hand-written paths for Better Auth
   (`src/composition/auth-openapi.ts`) and the remote MCP and OAuth endpoints
   (`src/composition/remote-mcp-openapi.ts`); update those files when you change those routes.
+  `scripts/openapi.ts` then runs the document through `shareRepeatedComponents`
+  (`src/composition/openapi-shared.ts`), which moves the standard error responses, parameters used
+  by several operations and large request bodies the merchant copies share with `/v1` into
+  `components`. `generateOpenApi` keeps the expanded form that route tests inspect; anything that
+  reads the committed file must follow `$ref` for `responses`, `parameters` and `requestBody`.
   CI publishes an `oasdiff breaking` report against the base revision.
 - `contracts/v1/errors.json` inventories every error-code literal in `src/` outside `src/mcp` and
   `src/testing`, so adding or renaming a code fails `openapi:check` until you regenerate, even

@@ -37,6 +37,43 @@ describe("OpenAPI assertions", () => {
 		).rejects.toThrow("undocumented method (200)");
 	});
 
+	it("validates an error response against the shared error envelope", async () => {
+		const json = { "content-type": "application/json" };
+		const envelope = { success: false, error: { code: "INVALID_REQUEST", message: "Bad input." } };
+		const path = "/v1/billing-accounts/user_1/entitlements";
+		await expect(
+			assertOpenApiResponse(
+				"GET",
+				path,
+				new Response(JSON.stringify(envelope), { status: 400, headers: json }),
+			),
+		).resolves.toBeUndefined();
+		await expect(
+			assertOpenApiResponse(
+				"GET",
+				path,
+				new Response(JSON.stringify({ message: "not an envelope" }), {
+					status: 400,
+					headers: json,
+				}),
+			),
+		).rejects.toThrow("400");
+	});
+
+	it("validates a request body that operations share through components", async () => {
+		await expect(
+			assertOpenApiResponse(
+				"POST",
+				"/v1/admin/catalog/publish",
+				new Response(JSON.stringify({ success: true, data: {} }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				}),
+				{ requestBody: "not an object" },
+			),
+		).rejects.toThrow("POST /v1/admin/catalog/publish request body");
+	});
+
 	it("validates 2xx mutation request bodies", async () => {
 		const app = withOpenApiAssertions({
 			handle: async () =>

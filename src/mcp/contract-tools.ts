@@ -42,7 +42,7 @@ export function registerContractTools(
 		{
 			title: "One /v1 API operation",
 			description:
-				"The full OpenAPI operation for an operationId: parameters, required headers, request body and every response, plus each referenced component schema. Use this instead of reading the whole contract.",
+				"The full OpenAPI operation for an operationId: parameters, required headers, request body and every response, plus each component they reference (schemas, shared error responses and parameters), keyed by `$ref`. Use this instead of reading the whole contract.",
 			inputSchema: z.object({ operationId: z.string().min(1).max(200) }),
 			annotations: readOnly,
 		},

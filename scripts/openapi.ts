@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { generateOpenApi } from "../src/composition/openapi";
+import { shareRepeatedComponents } from "../src/composition/openapi-shared";
 import {
 	providerCapabilityContract,
 	renderProviderCapabilityBlock,
@@ -52,10 +53,11 @@ async function main(check: boolean): Promise<void> {
 	const root = resolve(import.meta.dir, "..");
 	const packageJson = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
 	const output = resolve(root, "contracts/v1/openapi.json");
-	await syncGeneratedFile(output, artifactJson(await generateOpenApi(packageJson.version)), {
-		check,
-		stale: "OpenAPI is stale. Run bun run openapi:generate.",
-	});
+	await syncGeneratedFile(
+		output,
+		artifactJson(shareRepeatedComponents(await generateOpenApi(packageJson.version))),
+		{ check, stale: "OpenAPI is stale. Run bun run openapi:generate." },
+	);
 	logger.info(check ? "OpenAPI snapshot is current." : `Generated ${output}`);
 
 	await syncGeneratedFile(
