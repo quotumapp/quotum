@@ -142,6 +142,12 @@ delivery is `failed`.
 An endpoint whose every delivery has failed for 72 hours is disabled with `disabledReason`
 `failing`. Enabling it again clears that state and resumes its pending deliveries.
 
+Each attempt counts in `billing_event_delivery_total{result,code}` on `/metrics`. `result` is
+`succeeded` or `failed`; `code` is `HTTP_<status>` for the receiver's answer and `NETWORK` when it
+gave none (a refused connection, a timeout, a destination Quotum would not send to, or a local
+failure). Like every billing series it carries no project, endpoint or event label, so it counts
+the replica's attempts across all projects; the delivery list names the failing endpoint.
+
 ```http
 GET  /v1/admin/webhook-deliveries?endpointId=&status=&eventType=&billingAccountId=&limit=&cursor=
 POST /v1/admin/webhook-deliveries/:deliveryId/retry
