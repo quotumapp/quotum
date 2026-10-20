@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, setSystemTime } from "bun:test";
 import type { OpenAPIObject } from "openapi3-ts/oas31";
 import { createApp as createBillingApp } from "../../src/app";
 import { EntitlementService } from "../../src/billing/entitlements";
@@ -143,29 +143,38 @@ describe("operator-key contracts", () => {
 		const routes = operatorKeyRoutes(await generateOpenApi("0.0.0-test"));
 		expect(routes.length).toBeGreaterThan(0);
 		const limitedEnv = { ...env, rateLimit: { ...env.rateLimit, adminLimit: 1 } };
-		for (const { path, method } of routes) {
-			// The limiter keys on the route pattern, so each route gets a fresh app and budget.
-			const app = withOpenApiAssertions(operatorTestApp(limitedEnv));
-			const requestPath = fillPath(path);
-			const verb = method.toUpperCase();
-			const send = () =>
-				testRequest(app, requestPath, {
-					method: verb,
-					headers: requestHeaders(verb, "wrong-operator-key"),
-					body: verb === "GET" ? undefined : "{}",
+		// The limiter counts in fixed windows aligned to the wall clock, so a pair of requests that
+		// straddles a window boundary sees a renewed budget and the second one is not limited. Hold
+		// the clock five seconds into a window while the routes run.
+		const windowMs = env.rateLimit.windowMs;
+		setSystemTime(Math.floor(Date.UTC(2026, 0, 1) / windowMs) * windowMs + 5_000);
+		try {
+			for (const { path, method } of routes) {
+				// The limiter keys on the route pattern, so each route gets a fresh app and budget.
+				const app = withOpenApiAssertions(operatorTestApp(limitedEnv));
+				const requestPath = fillPath(path);
+				const verb = method.toUpperCase();
+				const send = () =>
+					testRequest(app, requestPath, {
+						method: verb,
+						headers: requestHeaders(verb, "wrong-operator-key"),
+						body: verb === "GET" ? undefined : "{}",
+					});
+				expect((await send()).status, `${verb} ${requestPath}`).toBe(403);
+				const limited = await send();
+				expect(limited.status, `${verb} ${requestPath}`).toBe(429);
+				expect(await limited.json()).toEqual({
+					success: false,
+					error: {
+						code: "RATE_LIMITED",
+						message: "Too many requests",
+						requestId: expect.any(String),
+						retryAfter: expect.any(Number),
+					},
 				});
-			expect((await send()).status, `${verb} ${requestPath}`).toBe(403);
-			const limited = await send();
-			expect(limited.status, `${verb} ${requestPath}`).toBe(429);
-			expect(await limited.json()).toEqual({
-				success: false,
-				error: {
-					code: "RATE_LIMITED",
-					message: "Too many requests",
-					requestId: expect.any(String),
-					retryAfter: expect.any(Number),
-				},
-			});
+			}
+		} finally {
+			setSystemTime();
 		}
 	});
 
