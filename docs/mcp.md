@@ -296,7 +296,7 @@ the server never follows a cursor on its own.
 | `get_provider_capabilities` | Operations each connected provider supports in this environment |
 | `get_available_actions` | Commercial actions available for an account, with capability reasons |
 
-| `find_api_operations`, `get_api_operation` | The generated `/v1` contract: search operations, then one operation with every schema it references. They read `contracts/v1` next to the server and never call the API |
+| `find_api_operations`, `get_api_operation` | The generated `/v1` contract: search operations, then one operation with every component it references. They read `contracts/v1` next to the server and never call the API |
 
 The error inventory, the provider capability table and the
 [projection delivery contract](providers.md#delivery-contract) are also served as resources

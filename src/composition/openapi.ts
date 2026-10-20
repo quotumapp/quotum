@@ -27,6 +27,7 @@ import { errorSchema, OPERATION_DOC, type OperationDoc } from "../shared/http";
 import { generateAuthOpenApi } from "./auth-openapi";
 import { connectionEventDetail } from "./connection-events";
 import { rewriteStaffOperationsForMerchantBilling } from "./merchant-openapi";
+import { STANDARD_ERROR_STATUSES, standardErrorResponse } from "./openapi-shared";
 import { remoteMcpOpenApi } from "./remote-mcp-openapi";
 import { stripeAppEventDetail } from "./stripe-app-events";
 
@@ -109,7 +110,6 @@ type JsonSchema = Record<string, unknown>;
 type SchemaIo = "input" | "output";
 
 const COMPONENT_REF = "#/components/schemas/";
-const STANDARD_ERROR_STATUSES = [400, 401, 403, 404, 409, 410, 413, 415, 422, 429, 500, 501, 503];
 /** Wildcard mounts that forward to Better Auth and the merchant billing proxy; documented separately. */
 const DELEGATED_ROUTES = new Set(["/api/auth/*", "/api/billing/*"]);
 
@@ -394,11 +394,7 @@ function operationObject(renderer: SchemaRenderer, route: DocumentedRoute): Oper
 	];
 	const responses: Record<string, unknown> = {};
 	if (route.path.startsWith("/v1/") || route.path.startsWith("/api/"))
-		for (const status of STANDARD_ERROR_STATUSES)
-			responses[status] = {
-				description: `Request failed (${status}); see the error code and request ID.`,
-				content: { "application/json": { schema: { $ref: `${COMPONENT_REF}QuotumError` } } },
-			};
+		for (const status of STANDARD_ERROR_STATUSES) responses[status] = standardErrorResponse(status);
 	for (const [status, schema] of Object.entries(doc.responses))
 		responses[status] = {
 			description: Number(status) < 400 ? "Successful response" : "Error response",
