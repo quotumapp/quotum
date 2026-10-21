@@ -1839,8 +1839,8 @@ describe("organization-scoped remote MCP", () => {
 			requestHash: proposal.requestHash,
 		});
 		expect(
-			await f.sql`SELECT p.platform_project_id,e.external_id FROM entities e JOIN projects p ON p.id=e.project_id WHERE e.external_id='team-a'`,
-		).toHaveLength(1);
+			await f.sql`SELECT lp.key AS project_key,p.environment,e.external_id FROM entities e JOIN projects p ON p.id=e.project_id JOIN platform_projects lp ON lp.id=p.platform_project_id WHERE e.external_id='team-a'`,
+		).toEqual([{ project_key: "example", environment: "sandbox", external_id: "team-a" }]);
 		expect((await f.mcpChanges.get(grant.id, secondProposal.id)).status).toBe("pending");
 		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE platform_project_id IN (SELECT id FROM platform_projects WHERE key='second')`;
 		expect((await browser.request(`/api/platform/mcp/changes/${secondProposal.id}`)).status).toBe(
