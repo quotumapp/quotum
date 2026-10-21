@@ -24,6 +24,8 @@ const f = merchantFixture({ mcp: { origin, writesEnabled: true } });
 const remote = createRemoteMcpApp({ auth: f.auth, store: f.store, port: f.billingPort });
 beforeEach(() => f.reset());
 afterAll(() => f.sql.close());
+const organizationScope = { organizationSlug: "acme" };
+const sandboxTarget = { projectKey: "example", environment: "sandbox" as const };
 const email = "owner@example.com";
 const redirect = "http://localhost:8788/callback";
 const clientId = "quotum-claude-code";
@@ -130,15 +132,15 @@ async function authorize(
 	consentScope?: string,
 ) {
 	const pending = await signIn(browser, write);
-	const context = await browser.json<{ principal: { email: string }; environments: unknown[] }>(
+	const context = await browser.json<{ principal: { email: string }; organizations: unknown[] }>(
 		"/api/platform/oauth/context",
 		{ oauth_query: pending.query },
 	);
 	expect(context.principal.email).toBe(email);
-	expect(context.environments.length).toBeGreaterThanOrEqual(1);
+	expect(context.organizations.length).toBeGreaterThanOrEqual(1);
 	await browser.json("/api/platform/oauth/selection", {
 		oauth_query: pending.query,
-		scope,
+		scope: { organizationSlug: scope.organizationSlug },
 	});
 	const continued = await browser.native("/api/auth/oauth2/continue", {
 		oauth_query: pending.query,
@@ -339,7 +341,7 @@ describe("remote MCP browser authorization", () => {
 			async function (this: McpAuthorizations, grant) {
 				// The provider persisted the refresh token and built the JWT before this hook.
 				expect(await f.sql`SELECT id FROM platform_auth_oauth_refresh_tokens`).toHaveLength(1);
-				await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE id=${grant.project_instance_id}`;
+				await f.sql`UPDATE platform_organizations SET status='suspended' WHERE id=${grant.organization_id}`;
 				return original.call(this, grant);
 			},
 		);
@@ -381,10 +383,10 @@ describe("remote MCP browser authorization", () => {
 		const response = await rpc(tokens.access_token);
 		expect(response.status, await response.clone().text()).toBe(200);
 		const result = await response.json();
-		expect(result.result.tools).toHaveLength(19);
+		expect(result.result.tools).toHaveLength(20);
 		const read = await rpc(tokens.access_token, "tools/call", {
 			name: "get_project_stats",
-			arguments: {},
+			arguments: { ...sandboxTarget },
 		});
 		expect(read.status).toBe(200);
 		expect((await read.json()).result.isError).not.toBe(true);
@@ -397,7 +399,7 @@ describe("remote MCP browser authorization", () => {
 		expect((await rpc(next.access_token)).status).toBe(200);
 		const listed = await browser.json<{ connections: { id: string }[] }>(
 			"/api/platform/mcp/connections/list",
-			{ scope: merchantTestScope },
+			{ scope: organizationScope },
 		);
 		expect(listed.connections).toHaveLength(1);
 		expect(
@@ -415,10 +417,10 @@ describe("remote MCP browser authorization", () => {
 		const next = await refreshed.json();
 		const listed = await browser.json<{ connections: { id: string }[] }>(
 			"/api/platform/mcp/connections/list",
-			{ scope: merchantTestScope },
+			{ scope: organizationScope },
 		);
 		await browser.json("/api/platform/mcp/connections/revoke", {
-			scope: merchantTestScope,
+			scope: organizationScope,
 			id: listed.connections[0]?.id,
 		});
 		expect((await rpc(tokens.access_token)).status).toBe(401);
@@ -440,7 +442,7 @@ describe("remote MCP browser authorization", () => {
 		expect((await browser.request("/api/platform/session/exchange", {})).status).toBe(401);
 		await browser.json("/api/platform/oauth/selection", {
 			oauth_query: pending.query,
-			scope: merchantTestScope,
+			scope: organizationScope,
 		});
 		const other = new URLSearchParams(pending.query);
 		other.set("state", "another-tab");
@@ -453,7 +455,7 @@ describe("remote MCP browser authorization", () => {
 			(
 				await browser.request("/api/platform/oauth/selection", {
 					oauth_query: pending.query,
-					scope: merchantTestScope,
+					scope: organizationScope,
 				})
 			).status,
 		).toBe(401);
@@ -548,7 +550,7 @@ describe("remote MCP browser authorization", () => {
 		).toBe(403);
 		expect((await token({ grant_type: "client_credentials" })).status).toBe(400);
 	});
-	it("contains rotated-token replay and public token revocation to one environment", async () => {
+	it("contains rotated-token replay and public token revocation to one connection", async () => {
 		const browser = await owner();
 		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
 		const sandbox = await redeem(browser);
@@ -718,7 +720,14 @@ describe("remote MCP browser authorization", () => {
 			(await token({ grant_type: "refresh_token", refresh_token: "x".repeat(16 * 1024) })).status,
 		).toBe(413);
 		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE environment='sandbox'`;
-		expect((await rpc(tokens.access_token)).status).toBe(403);
+		expect((await rpc(tokens.access_token)).status).toBe(200);
+		const unavailable = await (
+			await rpc(tokens.access_token, "tools/call", {
+				name: "get_catalog",
+				arguments: { ...sandboxTarget },
+			})
+		).json();
+		expect(unavailable.result.isError).toBe(true);
 		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='sandbox'`;
 		await browser.json("/api/auth/request-password-reset", {
 			email,
@@ -758,7 +767,10 @@ describe("remote MCP browser authorization", () => {
 		const tokens = await redeem(browser);
 		const call = async (name: string, args: Record<string, unknown>) => {
 			const reply = await (
-				await rpc(tokens.access_token, "tools/call", { name, arguments: args })
+				await rpc(tokens.access_token, "tools/call", {
+					name,
+					arguments: { ...sandboxTarget, ...args },
+				})
 			).json();
 			return reply.result as { isError?: boolean; content: { text: string }[] };
 		};
@@ -922,7 +934,7 @@ describe("MCP browser-approved writes", () => {
 			expect(JSON.stringify(reply.result), name).not.toContain("BILLING_API_UNAVAILABLE");
 		}
 		await expect(
-			f.mcpChanges.prepare(grant.id, {
+			f.mcpChanges.prepare(grant.id, sandboxTarget, {
 				requestKey: "entity-nul",
 				reason: "Allocate credits",
 				action: "entities.write",
@@ -947,7 +959,7 @@ describe("MCP browser-approved writes", () => {
 			parameters: ["customer-a"],
 			body: { externalId: "team-a", kind: "team" },
 		};
-		await expect(f.mcpChanges.prepare(grant.id, input)).rejects.toMatchObject({
+		await expect(f.mcpChanges.prepare(grant.id, sandboxTarget, input)).rejects.toMatchObject({
 			code: "BILLING_CHANGE_PREVIEW_FAILED",
 			status: 404,
 		});
@@ -967,6 +979,7 @@ describe("MCP browser-approved writes", () => {
 			await rpc(tokens.access_token, "tools/call", {
 				name: "prepare_billing_change",
 				arguments: {
+					...sandboxTarget,
 					requestKey: input.requestKey,
 					reason: input.reason,
 					change: { action: input.action, parameters: input.parameters, body: input.body },
@@ -989,15 +1002,15 @@ describe("MCP browser-approved writes", () => {
 			scope: "object",
 			scopes: "array",
 		});
-		const change = await f.mcpChanges.prepare(grant.id, input);
+		const change = await f.mcpChanges.prepare(grant.id, sandboxTarget, input);
 		expect(JSON.parse(prepared.result.content[0].text).id).toBe(change.id);
 		expect(await f.sql`SELECT id FROM entities`).toHaveLength(0);
 		expect(await f.sql`SELECT * FROM billing_administration_receipts`).toHaveLength(0);
 		expect(change.status).toBe("pending");
-		expect((await f.mcpChanges.prepare(grant.id, input)).id).toBe(change.id);
-		await expect(f.mcpChanges.prepare(grant.id, { ...input, reason: "Changed" })).rejects.toThrow(
-			"new request key",
-		);
+		expect((await f.mcpChanges.prepare(grant.id, sandboxTarget, input)).id).toBe(change.id);
+		await expect(
+			f.mcpChanges.prepare(grant.id, sandboxTarget, { ...input, reason: "Changed" }),
+		).rejects.toThrow("new request key");
 		const reviewed = await browser.json<{ status: string; body?: unknown }>(
 			`/api/platform/mcp/changes/${change.id}`,
 		);
@@ -1074,7 +1087,7 @@ describe("MCP browser-approved writes", () => {
 			parameters: ["customer-a"],
 			body: { externalId: "team-a", kind: "team" },
 		};
-		const change = await f.mcpChanges.prepare(grant.id, input);
+		const change = await f.mcpChanges.prepare(grant.id, sandboxTarget, input);
 		let release = () => {};
 		const gate = new Promise<void>((resolve) => {
 			release = resolve;
@@ -1095,7 +1108,7 @@ describe("MCP browser-approved writes", () => {
 				(error: unknown) => ({ ok: false as const, error }),
 			);
 		const proposal = settle(
-			f.mcpChanges.prepare(grant.id, {
+			f.mcpChanges.prepare(grant.id, sandboxTarget, {
 				...input,
 				requestKey: "entity-b",
 				body: { externalId: "team-b", kind: "team" },
@@ -1146,7 +1159,7 @@ describe("MCP browser-approved writes", () => {
 		const [grant] = await f.sql<
 			{ id: string }[]
 		>`SELECT id FROM platform_mcp_authorizations WHERE scopes ? 'quotum.billing.write' AND approved_at IS NOT NULL`;
-		const change = await f.mcpChanges.prepare(grant.id, {
+		const change = await f.mcpChanges.prepare(grant.id, sandboxTarget, {
 			requestKey: "entity-a",
 			reason: "Team setup",
 			action: "entities.write",
@@ -1247,7 +1260,9 @@ describe("MCP browser-approved writes", () => {
 		const [read] = await f.sql<
 			{ id: string }[]
 		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
-		await expect(f.mcpChanges.capabilities(read.id)).rejects.toThrow("write consent");
+		await expect(f.mcpChanges.capabilities(read.id, sandboxTarget)).rejects.toThrow(
+			"write consent",
+		);
 		await redeem(browser, merchantTestScope, true);
 		const [grant] = await f.sql<
 			{ id: string }[]
@@ -1259,7 +1274,7 @@ describe("MCP browser-approved writes", () => {
 			parameters: ["customer-a"],
 			body: { externalId: "team-a", kind: "team" },
 		};
-		const cancelled = await f.mcpChanges.prepare(grant.id, input);
+		const cancelled = await f.mcpChanges.prepare(grant.id, sandboxTarget, input);
 		expect((await f.mcpChanges.cancel(grant.id, cancelled.id)).status).toBe("cancelled");
 		expect(
 			(
@@ -1269,7 +1284,10 @@ describe("MCP browser-approved writes", () => {
 				)
 			).status,
 		).toBe("cancelled");
-		const expired = await f.mcpChanges.prepare(grant.id, { ...input, requestKey: "expiry" });
+		const expired = await f.mcpChanges.prepare(grant.id, sandboxTarget, {
+			...input,
+			requestKey: "expiry",
+		});
 		f.advance(900001);
 		expect((await f.mcpChanges.get(grant.id, expired.id)).status).toBe("expired");
 		const receipts = await f.sql`SELECT * FROM billing_administration_receipts`;
@@ -1280,7 +1298,7 @@ describe("MCP browser-approved writes", () => {
 		await createBillingAccount();
 		await redeem(browser, merchantTestScope, true);
 		const [grant] = await f.sql<
-			{ id: string; project_instance_id: string; principal_id: string }[]
+			{ id: string; principal_id: string }[]
 		>`SELECT * FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
 		const input = {
 			requestKey: "stale",
@@ -1289,12 +1307,13 @@ describe("MCP browser-approved writes", () => {
 			parameters: ["customer-a"],
 			body: { externalId: "team-a", kind: "team" },
 		};
-		const change = await f.mcpChanges.prepare(grant.id, input);
+		const change = await f.mcpChanges.prepare(grant.id, sandboxTarget, input);
 		await f.billingPort.dispatch({
 			operation: "entities.write",
 			parameters: ["customer-a"],
 			body: { externalId: "team-b", kind: "team" },
-			projectInstanceId: grant.project_instance_id,
+			projectInstanceId: (await new McpAuthorizations(f.store).target(grant.id, sandboxTarget))
+				.context.projectInstanceId,
 			actor: `merchant:${grant.principal_id}`,
 			query: {},
 			idempotencyKey: "other",
@@ -1311,7 +1330,7 @@ describe("MCP browser-approved writes", () => {
 		config.writesEnabled = false;
 		try {
 			await expect(
-				f.mcpChanges.prepare(grant.id, { ...input, requestKey: "disabled" }),
+				f.mcpChanges.prepare(grant.id, sandboxTarget, { ...input, requestKey: "disabled" }),
 			).rejects.toThrow("disabled");
 		} finally {
 			config.writesEnabled = true;
@@ -1327,13 +1346,17 @@ describe("MCP browser-approved writes", () => {
 		const [grant] = await f.sql<
 			{ id: string }[]
 		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
-		const change = await f.mcpChanges.prepare(grant.id, {
-			requestKey: "production",
-			reason: "Team setup",
-			action: "entities.write",
-			parameters: ["customer-a"],
-			body: { externalId: "team-a", kind: "team" },
-		});
+		const change = await f.mcpChanges.prepare(
+			grant.id,
+			{ ...sandboxTarget, environment: "production" },
+			{
+				requestKey: "production",
+				reason: "Team setup",
+				action: "entities.write",
+				parameters: ["customer-a"],
+				body: { externalId: "team-a", kind: "team" },
+			},
+		);
 		expect(change.stepUp?.action).toBe("operations.write");
 		const denied = await browser.request(`/api/platform/mcp/changes/${change.id}/approve`, {
 			requestHash: change.requestHash,
@@ -1349,9 +1372,9 @@ describe("MCP browser-approved writes", () => {
 	it("reads fixed target snapshots without crossing project or customer scope", async () => {
 		const browser = await owner();
 		await redeem(browser, merchantTestScope, true);
-		const [grant] = await f.sql<
-			{ project_instance_id: string }[]
-		>`SELECT project_instance_id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const [instance] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM projects WHERE environment='sandbox'`;
 		const uuid = "11111111-1111-4111-8111-111111111111";
 		for (const [action, parameters, body] of [
 			["debits.create", ["missing"], { allocations: [{ allocationId: "1", quantity: "1" }] }],
@@ -1363,12 +1386,7 @@ describe("MCP browser-approved writes", () => {
 			["projections.retry", [uuid], {}],
 		] as const)
 			expect(
-				await f.repository.administrationTarget(
-					grant.project_instance_id,
-					action,
-					[...parameters],
-					body,
-				),
+				await f.repository.administrationTarget(instance.id, action, [...parameters], body),
 			).toEqual([]);
 	});
 });
@@ -1392,10 +1410,12 @@ describe("MCP consent scopes", () => {
 		>`SELECT id,scopes FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
 		expect(grant.scopes).toEqual(["quotum.read", "offline_access"]);
 		expect(await toolNames(tokens.access_token)).not.toContain("prepare_billing_change");
-		await expect(f.mcpChanges.capabilities(grant.id)).rejects.toThrow("write consent");
+		await expect(f.mcpChanges.capabilities(grant.id, sandboxTarget)).rejects.toThrow(
+			"write consent",
+		);
 		const listed = await browser.json<{ connections: { scopes: string[] }[] }>(
 			"/api/platform/mcp/connections/list",
-			{ scope: merchantTestScope },
+			{ scope: organizationScope },
 		);
 		expect(listed.connections.map((connection) => connection.scopes)).toEqual([
 			["quotum.read", "offline_access"],
@@ -1442,16 +1462,16 @@ describe("MCP consent scopes", () => {
 		const browser = await owner();
 		const pending = await signIn(browser, true);
 		const context = () =>
-			browser.json<{ environments: { canPropose: boolean }[] }>("/api/platform/oauth/context", {
+			browser.json<{ organizations: { canPropose: boolean }[] }>("/api/platform/oauth/context", {
 				oauth_query: pending.query,
 			});
 		const asOwner = await context();
-		expect(asOwner.environments.length).toBeGreaterThan(0);
-		expect(asOwner.environments.every((environment) => environment.canPropose)).toBe(true);
+		expect(asOwner.organizations.length).toBeGreaterThan(0);
+		expect(asOwner.organizations.every((environment) => environment.canPropose)).toBe(true);
 		await f.sql`UPDATE platform_memberships SET role='Viewer'`;
 		const asViewer = await context();
-		expect(asViewer.environments.length).toBeGreaterThan(0);
-		expect(asViewer.environments.some((environment) => environment.canPropose)).toBe(false);
+		expect(asViewer.organizations.length).toBeGreaterThan(0);
+		expect(asViewer.organizations.some((environment) => environment.canPropose)).toBe(false);
 		await expect(authorize(browser, merchantTestScope, undefined, true)).rejects.toThrow(
 			"Your role cannot connect with change proposals",
 		);
@@ -1471,7 +1491,7 @@ describe("MCP consent scopes", () => {
 		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
 		await f.sql`UPDATE platform_memberships SET role='Viewer'`;
 		await expect(
-			f.mcpChanges.prepare(grant.id, {
+			f.mcpChanges.prepare(grant.id, sandboxTarget, {
 				requestKey: "entity-a",
 				reason: "Team setup",
 				action: "entities.write",
@@ -1479,7 +1499,7 @@ describe("MCP consent scopes", () => {
 				body: { externalId: "team-a", kind: "team" },
 			}),
 		).rejects.toMatchObject({ code: "FORBIDDEN", status: 403 });
-		const actions = await f.mcpChanges.capabilities(grant.id);
+		const actions = await f.mcpChanges.capabilities(grant.id, sandboxTarget);
 		expect(actions.length).toBeGreaterThan(0);
 		expect(actions.some((action) => action.available)).toBe(false);
 		expect(await f.sql`SELECT id FROM platform_mcp_changes`).toHaveLength(0);
@@ -1508,7 +1528,9 @@ describe("MCP environments that are not activated yet", () => {
 		},
 	};
 	const callTool = async (accessToken: string, name: string) => {
-		const reply = await (await rpc(accessToken, "tools/call", { name, arguments: {} })).json();
+		const reply = await (
+			await rpc(accessToken, "tools/call", { name, arguments: { ...production } })
+		).json();
 		return reply.result as { isError?: boolean; content: { text: string }[] };
 	};
 	const approvedGrant = async () => {
@@ -1518,14 +1540,15 @@ describe("MCP environments that are not activated yet", () => {
 		return grant;
 	};
 
-	it("offers the consent screen an inactive production, marked as not activated", async () => {
+	it("discovers inactive production through the organization connection", async () => {
 		const browser = await owner();
-		const pending = await signIn(browser);
-		const context = await browser.json<{
-			environments: { scope: MerchantScope; status: string }[];
-		}>("/api/platform/oauth/context", { oauth_query: pending.query });
+		await redeem(browser);
+		const grant = await approvedGrant();
+		const result = await new McpAuthorizations(f.store).projects(grant.id);
 		expect(
-			context.environments.map(({ scope, status }) => [scope.environment, status]).sort(),
+			result.projects[0]?.environments
+				.map(({ environment, status }) => [environment, status])
+				.sort(),
 		).toEqual([
 			["production", "inactive"],
 			["sandbox", "active"],
@@ -1544,7 +1567,7 @@ describe("MCP environments that are not activated yet", () => {
 		});
 		const listed = await browser.json<{ connections: unknown[] }>(
 			"/api/platform/mcp/connections/list",
-			{ scope: production },
+			{ scope: organizationScope },
 		);
 		expect(listed.connections).toHaveLength(1);
 		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
@@ -1556,7 +1579,7 @@ describe("MCP environments that are not activated yet", () => {
 		await createBillingAccount("production");
 		await redeem(browser, production, true);
 		const grant = await approvedGrant();
-		const actions = await f.mcpChanges.capabilities(grant.id);
+		const actions = await f.mcpChanges.capabilities(grant.id, production);
 		expect(actions.filter((action) => action.available).map((action) => action.action)).toEqual([
 			"catalog.publish",
 		]);
@@ -1571,16 +1594,16 @@ describe("MCP environments that are not activated yet", () => {
 			body: { externalId: "team-a", kind: "team" },
 		};
 		await expect(
-			f.mcpChanges.prepare(grant.id, { ...entity, requestKey: "entity-early" }),
+			f.mcpChanges.prepare(grant.id, production, { ...entity, requestKey: "entity-early" }),
 		).rejects.toMatchObject({ code: "ENVIRONMENT_INACTIVE", status: 409 });
 		await expect(
-			f.mcpChanges.inspect(grant.id, {
+			f.mcpChanges.inspect(grant.id, production, {
 				resource: "entities",
 				parameters: ["customer-a"],
 				query: {},
 			}),
 		).rejects.toMatchObject({ code: "ENVIRONMENT_INACTIVE", status: 409 });
-		const change = await f.mcpChanges.prepare(grant.id, {
+		const change = await f.mcpChanges.prepare(grant.id, production, {
 			requestKey: "catalog-first",
 			reason: "First production catalog",
 			action: "catalog.publish",
@@ -1616,17 +1639,294 @@ describe("MCP environments that are not activated yet", () => {
 		).toEqual([{ status: "published" }]);
 
 		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
-		const widened = await f.mcpChanges.capabilities(grant.id);
+		const widened = await f.mcpChanges.capabilities(grant.id, production);
 		expect(widened.find((action) => action.action === "entities.write")?.available).toBe(true);
-		const prepared = await f.mcpChanges.prepare(grant.id, { ...entity, requestKey: "entity-late" });
+		const prepared = await f.mcpChanges.prepare(grant.id, production, {
+			...entity,
+			requestKey: "entity-late",
+		});
 		expect(prepared.status).toBe("pending");
 	});
 
-	it("refuses a grant once its environment is suspended instead of merely not activated", async () => {
+	it("refuses a suspended target while retaining access to other environments", async () => {
 		const browser = await owner();
 		const tokens = await redeem(browser, production);
 		expect((await rpc(tokens.access_token)).status).toBe(200);
 		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE environment='production'`;
-		expect((await rpc(tokens.access_token)).status).toBe(403);
+		expect((await rpc(tokens.access_token)).status).toBe(200);
+		expect((await callTool(tokens.access_token, "get_catalog")).isError).toBe(true);
+		const sandbox = await (
+			await rpc(tokens.access_token, "tools/call", {
+				name: "get_catalog",
+				arguments: sandboxTarget,
+			})
+		).json();
+		expect(sandbox.result.isError).not.toBe(true);
+	});
+});
+
+describe("organization-scoped remote MCP", () => {
+	it("discovers new projects and resolves concurrent reads only inside the consented organization", async () => {
+		const browser = await owner();
+		const tokens = await redeem(browser);
+		const [grant] = await f.sql<
+			{ id: string; organization_id: string; principal_id: string }[]
+		>`SELECT * FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const grants = new McpAuthorizations(f.store);
+		expect(claimsOf(tokens.access_token)["https://quotum.dev/organization"]).toBe(
+			grant.organization_id,
+		);
+		expect(claimsOf(tokens.access_token)["https://quotum.dev/project_instance"]).toBeUndefined();
+		await browser.json("/api/platform/projects", {
+			organizationSlug: "acme",
+			key: "second",
+			name: "Second Project",
+		});
+		const [other] = await f.sql<
+			{ id: string }[]
+		>`INSERT INTO platform_organizations(slug,name) VALUES('other','Other') RETURNING id`;
+		await f.sql`INSERT INTO platform_memberships(organization_id,principal_id,role) VALUES(${other.id},${grant.principal_id},'Owner')`;
+		for (const key of ["example", "foreign"]) {
+			const [project] = await f.sql<
+				{ id: string }[]
+			>`INSERT INTO platform_projects(organization_id,key,name) VALUES(${other.id},${key},${key}) RETURNING id`;
+			await f.sql.instances.create({
+				platformProjectId: project.id,
+				key: `other_${key}`,
+				name: key,
+				environment: "sandbox",
+				lifecycleStatus: "active",
+				internalProject: false,
+			});
+		}
+		const discovery = await (
+			await rpc(tokens.access_token, "tools/call", { name: "list_projects", arguments: {} })
+		).json();
+		const data = JSON.parse(discovery.result.content[0].text);
+		expect(data.organizationSlug).toBe("acme");
+		expect(data.projects.map((project: { projectKey: string }) => project.projectKey)).toEqual([
+			"example",
+			"second",
+		]);
+		const targets = [
+			sandboxTarget,
+			{ ...sandboxTarget, environment: "production" as const },
+			{ projectKey: "second", environment: "sandbox" as const },
+		];
+		const calls = spyOn(f.billingPort, "dispatch");
+		try {
+			const responses = await Promise.all(
+				targets.map((target) =>
+					rpc(tokens.access_token, "tools/call", { name: "get_catalog", arguments: target }),
+				),
+			);
+			for (const response of responses)
+				expect((await response.json()).result.isError).not.toBe(true);
+			const expected = await Promise.all(
+				targets.map(
+					async (target) => (await grants.target(grant.id, target)).context.projectInstanceId,
+				),
+			);
+			expect(calls.mock.calls.map(([call]) => call.projectInstanceId).sort()).toEqual(
+				expected.sort(),
+			);
+			const before = calls.mock.calls.length;
+			const refused = await (
+				await rpc(tokens.access_token, "tools/call", {
+					name: "get_catalog",
+					arguments: { projectKey: "foreign", environment: "sandbox" },
+				})
+			).json();
+			expect(JSON.parse(refused.result.content[0].text).error.code).toBe("CONTEXT_UNAVAILABLE");
+			expect(calls.mock.calls.length).toBe(before);
+			const missing = await (
+				await rpc(tokens.access_token, "tools/call", { name: "get_catalog", arguments: {} })
+			).json();
+			expect(missing.result.isError).toBe(true);
+			expect(calls.mock.calls.length).toBe(before);
+		} finally {
+			calls.mockRestore();
+		}
+		// Another org's membership does not let this connection list or revoke under that org.
+		expect(
+			(
+				await browser.request("/api/platform/mcp/connections/revoke", {
+					scope: { organizationSlug: "other" },
+					id: grant.id,
+				})
+			).status,
+		).toBe(404);
+		expect((await rpc(tokens.access_token)).status).toBe(200);
+		const pending = await signIn(browser);
+		await browser.json("/api/platform/oauth/selection", {
+			oauth_query: pending.query,
+			scope: organizationScope,
+		});
+		expect(
+			(
+				await browser.request("/api/platform/oauth/selection", {
+					oauth_query: pending.query,
+					scope: { organizationSlug: "other" },
+				})
+			).status,
+		).toBe(409);
+		// Even a grant changed to another organization the person belongs to cannot match the old JWT.
+		await f.sql`UPDATE platform_mcp_authorizations SET organization_id=${other.id} WHERE id=${grant.id}`;
+		expect((await rpc(tokens.access_token)).status).toBe(401);
+	});
+
+	it("connects an organization without projects and sees projects provisioned later", async () => {
+		const browser = await owner();
+		const [empty] = await f.sql<
+			{ id: string }[]
+		>`INSERT INTO platform_organizations(slug,name) VALUES('empty','Empty') RETURNING id`;
+		await f.sql`INSERT INTO platform_memberships(organization_id,principal_id,role) SELECT ${empty.id},id,'Owner' FROM platform_principals`;
+		const tokens = await redeem(browser, { ...merchantTestScope, organizationSlug: "empty" });
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const grants = new McpAuthorizations(f.store);
+		expect((await grants.projects(grant.id)).projects).toEqual([]);
+		await browser.json("/api/platform/projects", {
+			organizationSlug: "empty",
+			key: "later",
+			name: "Later",
+		});
+		expect((await grants.projects(grant.id)).projects[0]?.projectKey).toBe("later");
+		expect((await rpc(tokens.access_token)).status).toBe(200);
+	});
+
+	it("binds request keys, replacements and approval to the proposal's saved instance", async () => {
+		const browser = await owner();
+		await createBillingAccount();
+		await browser.json("/api/platform/projects", {
+			organizationSlug: "acme",
+			key: "second",
+			name: "Second Project",
+		});
+		await f.sql`INSERT INTO customers(project_id,billing_account_id) SELECT p.id,'customer-a' FROM projects p JOIN platform_projects lp ON lp.id=p.platform_project_id WHERE lp.key='second' AND p.environment='sandbox'`;
+		await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const second = { projectKey: "second", environment: "sandbox" as const };
+		const input = {
+			requestKey: "same-key",
+			reason: "Add a team",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		};
+		const proposal = await f.mcpChanges.prepare(grant.id, sandboxTarget, input);
+		await expect(f.mcpChanges.prepare(grant.id, second, input)).rejects.toMatchObject({
+			code: "IDEMPOTENCY_CONFLICT",
+		});
+		await expect(
+			f.mcpChanges.prepare(grant.id, second, {
+				...input,
+				requestKey: "replace",
+				replacesChangeId: proposal.id,
+			}),
+		).rejects.toMatchObject({ code: "ACTION_REJECTED" });
+		const secondProposal = await f.mcpChanges.prepare(grant.id, second, {
+			...input,
+			requestKey: "second-key",
+		});
+		expect((await f.mcpChanges.list(grant.id)).map((item) => item.scope.projectKey).sort()).toEqual(
+			["example", "second"],
+		);
+		await browser.json(`/api/platform/mcp/changes/${proposal.id}/approve`, {
+			requestHash: proposal.requestHash,
+		});
+		expect(
+			await f.sql`SELECT p.platform_project_id,e.external_id FROM entities e JOIN projects p ON p.id=e.project_id WHERE e.external_id='team-a'`,
+		).toHaveLength(1);
+		expect((await f.mcpChanges.get(grant.id, secondProposal.id)).status).toBe("pending");
+		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE platform_project_id IN (SELECT id FROM platform_projects WHERE key='second')`;
+		expect((await browser.request(`/api/platform/mcp/changes/${secondProposal.id}`)).status).toBe(
+			404,
+		);
+	});
+});
+
+describe("organization MCP upgrade", () => {
+	it("runs the documented restore transition without expanding legacy consent or losing proposals", async () => {
+		const browser = await owner();
+		await createBillingAccount();
+		const tokens = await redeem(browser, merchantTestScope, true);
+		const [grant] = await f.sql<
+			{ id: string }[]
+		>`SELECT id FROM platform_mcp_authorizations WHERE approved_at IS NOT NULL`;
+		const proposal = await f.mcpChanges.prepare(grant.id, sandboxTarget, {
+			requestKey: "before-upgrade",
+			reason: "A pending legacy proposal",
+			action: "entities.write",
+			parameters: ["customer-a"],
+			body: { externalId: "team-a", kind: "team" },
+		});
+		const rotated = await token({
+			grant_type: "refresh_token",
+			refresh_token: tokens.refresh_token,
+		});
+		expect(rotated.status).toBe(200);
+		const latest = await rotated.json();
+		const pending = await authorize(browser);
+		const guide = await Bun.file(
+			new URL("../../docs/upgrade-transitions.md", import.meta.url),
+		).text();
+		const transition =
+			guide.split("## Organization-scoped remote MCP\n")[1]?.split("\n## ")[0] ?? "";
+		const statements = [...transition.matchAll(/```sql\n([\s\S]*?)```/gu)].map(
+			(match) => match[1] ?? "",
+		);
+		expect(statements).toHaveLength(2);
+		const access = await new McpAuthorizations(f.store).target(grant.id, sandboxTarget);
+		await f.client.unsafe(statements[0] ?? "");
+		try {
+			await f.sql`UPDATE platform_mcp_authorizations SET project_instance_id=${access.context.projectInstanceId}`;
+			const reserved = await f.client.reserve();
+			try {
+				await reserved.unsafe(statements[1] ?? "");
+			} catch (error) {
+				await reserved`ROLLBACK`;
+				throw error;
+			} finally {
+				reserved.release();
+			}
+			expect(
+				await f.sql`SELECT id FROM platform_mcp_authorizations WHERE revoked_at IS NULL`,
+			).toHaveLength(0);
+			expect(
+				await f.sql`SELECT id FROM platform_auth_oauth_refresh_tokens WHERE revoked IS NULL OR rotation_replay_response IS NOT NULL OR rotation_replay_expires_at IS NOT NULL`,
+			).toHaveLength(0);
+			expect(
+				await f.sql`SELECT id,status FROM platform_mcp_changes WHERE id=${proposal.id}`,
+			).toEqual([{ id: proposal.id, status: "cancelled" }]);
+			expect(await revocationReasons()).toEqual(["scope_changed", "scope_changed"]);
+			expect((await rpc(latest.access_token)).status).toBe(401);
+			expect(
+				(await token({ grant_type: "refresh_token", refresh_token: tokens.refresh_token })).status,
+			).toBe(400);
+			expect(
+				(await token({ grant_type: "refresh_token", refresh_token: latest.refresh_token })).status,
+			).toBe(400);
+			expect(
+				(
+					await token({
+						grant_type: "authorization_code",
+						code: pending.code,
+						code_verifier: pending.verifier,
+						redirect_uri: redirect,
+					})
+				).status,
+			).toBe(400);
+			const reconnected = await redeem(browser);
+			expect((await rpc(reconnected.access_token)).status).toBe(200);
+			expect((await rpc(tokens.access_token)).status).toBe(401);
+		} finally {
+			await f.client.unsafe(
+				"ALTER TABLE platform_mcp_authorizations DROP COLUMN IF EXISTS project_instance_id",
+			);
+		}
 	});
 });

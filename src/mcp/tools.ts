@@ -2,12 +2,19 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { BillingClient, UsageOperationKind } from "../sdk/index";
 import { billingProviders } from "../shared/provider-capabilities";
-import { type DiagnosticLog, describeError, omitKeys, runTool } from "./results";
+import { type DiagnosticLog, describeError, omitKeys, runTool, type ToolResult } from "./results";
 
-export interface QuotumToolDependencies {
-	client: BillingClient;
-	log: DiagnosticLog;
+import { type McpTarget, mcpTargetSchema } from "./target";
+
+export interface McpOrganizationTools {
+	listProjects(): Promise<unknown>;
+	client(target: McpTarget): Promise<BillingClient>;
 }
+
+export type QuotumToolDependencies = { log: DiagnosticLog } & (
+	| { client: BillingClient; organization?: never }
+	| { client?: never; organization: McpOrganizationTools }
+);
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const operationKinds = ["consume", "reserve", "confirm", "release", "correct"] as const;
@@ -36,8 +43,49 @@ const page = {
 };
 const dateTime = z.string().min(1).describe("ISO 8601 date-time");
 
-export function registerQuotumTools(server: McpServer, { client, log }: QuotumToolDependencies) {
-	server.registerTool(
+export function registerQuotumTools(
+	server: McpServer,
+	{ client, organization, log }: QuotumToolDependencies,
+) {
+	function register<Shape extends z.ZodRawShape>(
+		name: string,
+		config: {
+			title: string;
+			description: string;
+			inputSchema: z.ZodObject<Shape>;
+			annotations: typeof readOnly;
+		},
+		handler: (input: z.output<z.ZodObject<Shape>>, client: BillingClient) => Promise<ToolResult>,
+	) {
+		const inputSchema: z.ZodObject = organization
+			? config.inputSchema.extend(mcpTargetSchema.shape)
+			: config.inputSchema;
+		server.registerTool(name, { ...config, inputSchema }, async (input) => {
+			try {
+				const scopedClient = organization
+					? await organization.client(mcpTargetSchema.parse(input))
+					: client;
+				return await handler(config.inputSchema.parse(input), scopedClient);
+			} catch (error) {
+				return runTool(async () => {
+					throw error;
+				}, log);
+			}
+		});
+	}
+	if (organization)
+		server.registerTool(
+			"list_projects",
+			{
+				title: "Organization projects and environments",
+				description:
+					"List this authorized organization's projects, their projectKey and available sandbox and production environments. Call this before choosing a target; newly created projects appear automatically.",
+				inputSchema: z.object({}),
+				annotations: readOnly,
+			},
+			() => runTool(() => organization.listProjects(), log),
+		);
+	register(
 		"get_project_stats",
 		{
 			title: "Project health summary",
@@ -50,14 +98,14 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		(input) =>
+		(input, client) =>
 			runTool(
 				async () => omitKeys(await client.admin.statsSummary(input), providerPayloadKeys),
 				log,
 			),
 	);
 
-	server.registerTool(
+	register(
 		"find_customer",
 		{
 			title: "Find a customer",
@@ -70,7 +118,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		({ query, limit, cursor, includeEmail }) =>
+		({ query, limit, cursor, includeEmail }, client) =>
 			runTool(
 				async () =>
 					withoutContact(
@@ -81,7 +129,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			),
 	);
 
-	server.registerTool(
+	register(
 		"get_customer_overview",
 		{
 			title: "Customer overview",
@@ -90,7 +138,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			inputSchema: z.object({ billingAccountId, includeEmail: z.boolean().default(false) }),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, includeEmail }) =>
+		({ billingAccountId: account, includeEmail }, client) =>
 			runTool(async () => {
 				const [customer, summary, controls] = await Promise.allSettled([
 					client.admin.customer(account),
@@ -109,7 +157,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}, log),
 	);
 
-	server.registerTool(
+	register(
 		"get_controls",
 		{
 			title: "Effective controls",
@@ -118,11 +166,11 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			inputSchema: z.object({ billingAccountId, entityId: z.string().min(1).optional() }),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, entityId }) =>
+		({ billingAccountId: account, entityId }, client) =>
 			runTool(() => client.accounts.controls(account, entityId), log),
 	);
 
-	server.registerTool(
+	register(
 		"get_balance",
 		{
 			title: "Feature balance",
@@ -136,14 +184,14 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, featureKey, entityId, includeBreakdown }) =>
+		({ billingAccountId: account, featureKey, entityId, includeBreakdown }, client) =>
 			runTool(async () => {
 				const balance = await client.usage.balance(account, featureKey, entityId);
 				return includeBreakdown ? balance : omitKeys(balance, new Set(["breakdown"]));
 			}, log),
 	);
 
-	server.registerTool(
+	register(
 		"check_usage",
 		{
 			title: "Would this usage be allowed?",
@@ -161,10 +209,10 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		(input) => runTool(() => client.usage.check(input), log),
+		(input, client) => runTool(() => client.usage.check(input), log),
 	);
 
-	server.registerTool(
+	register(
 		"get_usage_operation",
 		{
 			title: "Look up a usage operation",
@@ -183,7 +231,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, operationId, operation, entityId }) =>
+		({ billingAccountId: account, operationId, operation, entityId }, client) =>
 			runTool(async () => {
 				const lookup = (kind: UsageOperationKind) =>
 					client.usage.getOperation({
@@ -207,7 +255,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}, log),
 	);
 
-	server.registerTool(
+	register(
 		"list_usage_events",
 		{
 			title: "Usage events",
@@ -225,14 +273,14 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, includeMetadata, ...query }) =>
+		({ billingAccountId: account, includeMetadata, ...query }, client) =>
 			runTool(async () => {
 				const events = await client.usage.events(account, query);
 				return includeMetadata ? events : omitKeys(events, new Set(["metadata"]));
 			}, log),
 	);
 
-	server.registerTool(
+	register(
 		"list_invoices",
 		{
 			title: "Invoices",
@@ -245,11 +293,11 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, ...query }) =>
+		({ billingAccountId: account, ...query }, client) =>
 			runTool(() => client.invoices.list(account, query), log),
 	);
 
-	server.registerTool(
+	register(
 		"get_invoice",
 		{
 			title: "One invoice",
@@ -261,14 +309,14 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account, invoiceId }) =>
+		({ billingAccountId: account, invoiceId }, client) =>
 			runTool(
 				async () => omitKeys(await client.invoices.get(account, invoiceId), invoiceLinkKeys),
 				log,
 			),
 	);
 
-	server.registerTool(
+	register(
 		"list_projection_jobs",
 		{
 			title: "Projection delivery jobs",
@@ -283,14 +331,14 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		(query) =>
+		(query, client) =>
 			runTool(
 				async () => omitKeys(await client.admin.projectionJobs(query), providerPayloadKeys),
 				log,
 			),
 	);
 
-	server.registerTool(
+	register(
 		"list_store_events",
 		{
 			title: "Provider events",
@@ -309,14 +357,14 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		(query) =>
+		(query, client) =>
 			runTool(
 				async () => omitKeys(await client.admin.storeEvents(query), providerPayloadKeys),
 				log,
 			),
 	);
 
-	server.registerTool(
+	register(
 		"get_store_event",
 		{
 			title: "One provider event",
@@ -325,14 +373,14 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			inputSchema: z.object({ eventId: z.string().min(1) }),
 			annotations: readOnly,
 		},
-		({ eventId }) =>
+		({ eventId }, client) =>
 			runTool(
 				async () => omitKeys(await client.admin.storeEvent(eventId), providerPayloadKeys),
 				log,
 			),
 	);
 
-	server.registerTool(
+	register(
 		"get_catalog",
 		{
 			title: "Published catalog",
@@ -343,7 +391,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}),
 			annotations: readOnly,
 		},
-		({ sections }) =>
+		({ sections }, client) =>
 			runTool(async () => {
 				const published = await client.catalog.status();
 				if (sections === undefined || published.catalog === null) return published;
@@ -357,7 +405,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			}, log),
 	);
 
-	server.registerTool(
+	register(
 		"get_stripe_catalog",
 		{
 			title: "Stripe purchasable catalog",
@@ -366,10 +414,10 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			inputSchema: z.object({}),
 			annotations: readOnly,
 		},
-		() => runTool(() => client.catalog.get(), log),
+		(_input, client) => runTool(() => client.catalog.get(), log),
 	);
 
-	server.registerTool(
+	register(
 		"get_provider_capabilities",
 		{
 			title: "Provider capabilities",
@@ -378,10 +426,10 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			inputSchema: z.object({}),
 			annotations: readOnly,
 		},
-		() => runTool(() => client.providers.capabilities(), log),
+		(_input, client) => runTool(() => client.providers.capabilities(), log),
 	);
 
-	server.registerTool(
+	register(
 		"get_available_actions",
 		{
 			title: "Available commercial actions",
@@ -390,7 +438,7 @@ export function registerQuotumTools(server: McpServer, { client, log }: QuotumTo
 			inputSchema: z.object({ billingAccountId }),
 			annotations: readOnly,
 		},
-		({ billingAccountId: account }) =>
+		({ billingAccountId: account }, client) =>
 			runTool(() => client.commercial.availableActions(account), log),
 	);
 }

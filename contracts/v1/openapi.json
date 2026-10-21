@@ -47871,7 +47871,18 @@
                 "additionalProperties": false,
                 "properties": {
                   "scope": {
-                    "$ref": "#/components/schemas/MerchantScope"
+                    "additionalProperties": false,
+                    "properties": {
+                      "organizationSlug": {
+                        "maxLength": 100,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "organizationSlug"
+                    ],
+                    "type": "object"
                   }
                 },
                 "required": [
@@ -48039,7 +48050,18 @@
                     "type": "string"
                   },
                   "scope": {
-                    "$ref": "#/components/schemas/MerchantScope"
+                    "additionalProperties": false,
+                    "properties": {
+                      "organizationSlug": {
+                        "maxLength": 100,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "organizationSlug"
+                    ],
+                    "type": "object"
                   }
                 },
                 "required": [
@@ -48199,7 +48221,7 @@
                           ],
                           "type": "object"
                         },
-                        "environments": {
+                        "organizations": {
                           "items": {
                             "properties": {
                               "canPropose": {
@@ -48208,25 +48230,24 @@
                               "organizationName": {
                                 "type": "string"
                               },
-                              "projectName": {
-                                "type": "string"
-                              },
                               "scope": {
-                                "$ref": "#/components/schemas/MerchantScope"
-                              },
-                              "status": {
-                                "enum": [
-                                  "active",
-                                  "inactive"
+                                "additionalProperties": false,
+                                "properties": {
+                                  "organizationSlug": {
+                                    "maxLength": 100,
+                                    "minLength": 1,
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "organizationSlug"
                                 ],
-                                "type": "string"
+                                "type": "object"
                               }
                             },
                             "required": [
                               "scope",
                               "organizationName",
-                              "projectName",
-                              "status",
                               "canPropose"
                             ],
                             "type": "object"
@@ -48260,13 +48281,20 @@
                           "type": "array"
                         },
                         "selection": {
-                          "anyOf": [
-                            {
-                              "$ref": "#/components/schemas/MerchantScope"
-                            },
-                            {
-                              "type": "null"
+                          "additionalProperties": false,
+                          "properties": {
+                            "organizationSlug": {
+                              "maxLength": 100,
+                              "minLength": 1,
+                              "type": "string"
                             }
+                          },
+                          "required": [
+                            "organizationSlug"
+                          ],
+                          "type": [
+                            "object",
+                            "null"
                           ]
                         }
                       },
@@ -48274,7 +48302,7 @@
                         "principal",
                         "client",
                         "scopes",
-                        "environments",
+                        "organizations",
                         "selection"
                       ],
                       "type": "object"
@@ -48350,7 +48378,7 @@
     },
     "/api/platform/oauth/selection": {
       "post": {
-        "operationId": "selectMcpEnvironment",
+        "operationId": "selectMcpOrganization",
         "parameters": [
           {
             "$ref": "#/components/parameters/HeaderXCSRFToken"
@@ -48377,7 +48405,18 @@
                     "type": "string"
                   },
                   "scope": {
-                    "$ref": "#/components/schemas/MerchantScope"
+                    "additionalProperties": false,
+                    "properties": {
+                      "organizationSlug": {
+                        "maxLength": 100,
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "organizationSlug"
+                    ],
+                    "type": "object"
                   }
                 },
                 "required": [
@@ -48398,13 +48437,13 @@
                   "properties": {
                     "data": {
                       "properties": {
-                        "projectInstanceId": {
+                        "organizationId": {
                           "format": "uuid",
                           "type": "string"
                         }
                       },
                       "required": [
-                        "projectInstanceId"
+                        "organizationId"
                       ],
                       "type": "object"
                     },
@@ -51045,7 +51084,7 @@
     },
     "/mcp": {
       "post": {
-        "description": "Stateless Streamable HTTP MCP. Existing read-only tools run for the authorization's fixed project environment. 256 KiB body limit. No persistent session or server event stream.",
+        "description": "Stateless Streamable HTTP MCP. Authorization is organization-scoped. Billing tools require explicit projectKey and environment arguments; list_projects discovers available targets. 256 KiB body limit. No persistent session or server event stream.",
         "operationId": "callRemoteMcp",
         "parameters": [
           {

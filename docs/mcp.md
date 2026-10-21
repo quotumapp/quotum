@@ -3,8 +3,8 @@
 - Document kind: Current behavior
 
 `src/mcp/` is a [Model Context Protocol](https://modelcontextprotocol.io) server for
-coding agents such as Claude Code, Codex and Cursor. It answers questions about one project instance, a
-sandbox or, with a read-only key, production: why a consume is denied, what an idempotency key
+coding agents such as Claude Code, Codex and Cursor. Remote connections answer questions across one organization; stdio uses one sandbox or, with a
+read-only key, production instance: why a consume is denied, what an idempotency key
 resolved to, why a product backend is not receiving `billing_state_v1`, and what the catalog
 contains.
 
@@ -24,12 +24,13 @@ matching merchant UI and BFF before enabling it; [deployment](deployment.md#remo
 the public routes and schema ordering.
 
 Add `https://api.example.com/mcp` to a coding client. Authorization opens the merchant application,
-requires a fresh password plus authenticator code, or Google sign-in, then asks for one organization,
-project, and environment and explicit consent to the requested scopes. A client that requests change
+requires a fresh password plus authenticator code, or Google sign-in, then asks for one organization
+and explicit consent to the requested scopes. A client that requests change
 proposals can still be connected read-only: the consent page shows **Propose changes** as a separate
 choice, and leaving it unticked drops only `quotum.billing.write`. A role that cannot approve any
 change, such as Viewer, can only connect read-only. An existing console session does not
-skip sign-in. Sandbox and production require separate authorizations. The displayed identity is
+skip sign-in. The connection includes all current and future projects and environments in that
+organization. The displayed identity is
 the fresh sign-in identity, which may differ from the console identity.
 
 Public clients `quotum-claude-code` and `quotum-cursor` are pre-registered with loopback callback
@@ -44,21 +45,22 @@ authorization requests and fetched client metadata, including metadata without a
 
 The server uses authorization code with PKCE S256 and the `/mcp` resource indicator. It issues
 1-hour bearer access tokens and rotating refresh tokens. Authorization expires 30 days after
-environment selection regardless of refreshes. DPoP, client secrets, client credentials grants,
+organization selection regardless of refreshes. DPoP, client secrets, client credentials grants,
 and direct MCP execution of mutations are not supported.
 
-In **Developer setup → MCP connections**, view and revoke your connections for the selected
-environment; each shows whether it is read-only or can propose changes. Revocation immediately invalidates access tokens, refresh tokens, and cached refresh
+In **Organization → MCP connections**, view and revoke your connections for the selected
+organization; each shows whether it is read-only or can propose changes. Revocation immediately invalidates access tokens, refresh tokens, and cached refresh
 responses for that immutable authorization; reconnecting never revives an older authorization.
 Authorization-code replay, including concurrent redemption, revokes the affected authorization.
 Password reset and principal/membership suspension revoke affected authorizations. Every tool
-request and refresh rechecks current principal, membership, environment, and grant access.
+request and refresh rechecks current principal, organization membership and grant access. Each billing call also checks its explicit target.
 
 A refresh token that was already rotated, presented after its 30-second replay window, also revokes
 the authorization. Each revocation writes an `mcp.revoked` audit event whose `reason` says why a
 client had to sign in again: `user` (Disconnect in the console), `client` (the client's own
 `/oauth/revoke`), `code_replay`, `refresh_replay`, `issuance_failed`, `password_reset` or
-`second_factor_reset` (an operator reset the person's authenticator).
+`second_factor_reset` (an operator reset the person's authenticator), or `scope_changed` (the
+organization-scope upgrade requires fresh consent).
 
 Discovery lives on the API origin at `/.well-known/oauth-authorization-server` and
 `/.well-known/oauth-protected-resource/mcp`. The authorization endpoint is on the UI origin, so the
@@ -75,7 +77,7 @@ path `404`; neither is reported as an outage. The sign-in library's own rate lim
 `429 RATE_LIMITED` with `Retry-After`, as `{error, error_description}` on `/oauth/token` and in the
 merchant error envelope on `/api/auth/*`.
 An auth proof belongs to one OAuth request and cannot be exchanged for a console session or
-step-up grant. Environment selection and consent require a proof issued within five minutes.
+step-up grant. Organization selection and consent require a proof issued within five minutes.
 An accepted authorization code has its own five-minute redemption window. The transient session
 is retained through that window without extending browser proof freshness, then removed after
 issuance, including an issuance rejected by the final access check. Refresh credentials survive
@@ -93,12 +95,36 @@ the remote MCP and OAuth endpoints; staff, merchant and health routes use their 
 The transport is stateless,
 with current MCP messages and the SDK's older-protocol fallback; it keeps no cross-request session.
 
+## Choose a project and environment
+
+Remote authorization binds one organization, not an active environment. Start with `list_projects`:
+it returns that organization's project keys and available sandbox/production environments, with
+`active` or `inactive` status. An organization with no projects can connect; projects provisioned
+later appear without reconnecting. Internal and suspended environments are unavailable.
+
+Every environment-specific read, `get_mcp_capabilities`, `get_billing_configuration` and
+`prepare_billing_change` requires explicit top-level `projectKey` and `environment` arguments:
+
+```json
+{"projectKey":"my-app","environment":"production","sections":["plans"]}
+```
+
+That is a `get_catalog` input. No tool changes a shared active environment, so parallel calls can
+address different projects safely. Organization authority comes from consent; tool arguments cannot
+select another organization. The contract tools and `list_projects` need no target. Proposal get
+and cancel tools use the saved proposal's ID; `list_billing_changes` returns the latest 25 proposals
+across the connection, each with its own scope. Stdio keeps its existing single-instance arguments.
+
+A suspended environment refuses calls targeting it while the connection keeps working elsewhere.
+Disconnecting the connection ends access across the organization. Existing environment-level
+connections must reconnect after the [organization cutover](upgrade-transitions.md#organization-scoped-remote-mcp).
+
 ## Connect to production before it is activated
 
-A new organization's production environment is `inactive` until it is
-[activated](deployment.md#activate-a-production-environment). The consent page lists it with
-`status: "inactive"` and a connection can target it, so an agent can author the catalog that
-activation requires. Until then the connection:
+A project's production environment is `inactive` until it is
+[activated](deployment.md#activate-a-production-environment). The `list_projects` tool lists it with
+`status: "inactive"` and a call can target it, so an agent can author the catalog that
+activation requires. Until then calls targeting that environment:
 
 - reads the published catalog (`get_catalog`) and can propose `catalog.publish`, which the
   connected merchant approves in the browser with the production step-up of any production change;
@@ -133,7 +159,7 @@ chosen `scope` with the consent; it must be the requested scopes or those minus
 token response and access tokens carry them, and the change tools exist only when the grant and the
 token both include the write scope. A role without any capability that a proposed change needs
 (`operations.write`, `operations.recover` or catalog publication) is refused the write scope with
-`FORBIDDEN`; `canPropose` on each environment in the authorization context tells the page which
+`FORBIDDEN`; `canPropose` on each organization in the authorization context tells the page which
 roles that is. The role is checked again when a change is prepared and approved, so a member who
 loses the role keeps a connection that can read but can no longer prepare or approve changes.
 
@@ -157,6 +183,8 @@ For example, for an existing account, prepare an entity with:
 
 ```json
 {
+  "projectKey": "my-app",
+  "environment": "sandbox",
   "requestKey": "create-team-a-1",
   "reason": "Track Team A usage separately",
   "change": {
@@ -194,7 +222,8 @@ catalog, which would push a result toward the size cap. A console built against 
 
 Proposals expire after at most 15 minutes, capped by domain preview expiry. They are immutable:
 use a new request key and `replacesChangeId` to replace a pending proposal. Reusing a key with changed
-input conflicts. Approval compares the recorded state and domain preview preconditions; stale
+input or another target conflicts. Replacement is allowed only within the original instance. The
+resolved instance is included in the proposal hash; approval and recovery always use that saved target. Approval compares the recorded state and domain preview preconditions; stale
 proposals require a new preview. Database-only execution stores its receipt in the mutation's
 transaction; repeated approval does not dispatch twice. Commercial execution retains its domain
 idempotency key and can recover a saved result. An uncertain external outcome stays `needs_review`;

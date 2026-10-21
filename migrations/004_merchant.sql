@@ -489,7 +489,6 @@ CREATE TABLE platform_mcp_authorizations (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 	principal_id uuid NOT NULL REFERENCES platform_principals(id) ON DELETE CASCADE,
 	organization_id uuid NOT NULL REFERENCES platform_organizations(id) ON DELETE CASCADE,
-	project_instance_id uuid NOT NULL,
 	client_id text NOT NULL,
 	client_name text NOT NULL,
 	scopes jsonb NOT NULL DEFAULT '["quotum.read","offline_access"]'::jsonb,
@@ -501,7 +500,7 @@ CREATE TABLE platform_mcp_authorizations (
 	revoked_at timestamptz,
 	CHECK (expires_at > created_at)
 );
-CREATE INDEX platform_mcp_authorizations_owner_idx ON platform_mcp_authorizations(principal_id, project_instance_id);
+CREATE INDEX platform_mcp_authorizations_owner_idx ON platform_mcp_authorizations(principal_id, organization_id);
 CREATE INDEX platform_mcp_authorizations_expiry_idx ON platform_mcp_authorizations(expires_at);
 CREATE INDEX platform_mcp_authorizations_revoked_idx ON platform_mcp_authorizations(revoked_at) WHERE revoked_at IS NOT NULL;
 

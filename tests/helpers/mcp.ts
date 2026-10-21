@@ -5,6 +5,7 @@ import type { McpChangeTools } from "../../src/mcp/change-tools";
 import { createContractStore } from "../../src/mcp/contracts";
 import { createGuardedFetch } from "../../src/mcp/guarded-fetch";
 import { createQuotumMcpServer } from "../../src/mcp/server";
+import type { McpOrganizationTools } from "../../src/mcp/tools";
 import { BillingClient } from "../../src/sdk";
 
 export const mcpTestBaseUrl = "https://billing.example.com";
@@ -24,7 +25,7 @@ export interface McpTestConnection {
 /** A real MCP client and server linked in memory, over the guarded fetch and a stub billing API. */
 export async function connectMcp(
 	respond: McpTestResponder,
-	options: { changes?: McpChangeTools } = {},
+	options: { changes?: McpChangeTools; organization?: McpOrganizationTools } = {},
 ): Promise<McpTestConnection> {
 	const calls: Request[] = [];
 	const logs: string[] = [];
@@ -41,7 +42,7 @@ export async function connectMcp(
 		}),
 	});
 	const server = createQuotumMcpServer({
-		client: billing,
+		...(options.organization ? { organization: options.organization } : { client: billing }),
 		version: "0.0.0-test",
 		log: (line) => logs.push(line),
 		contracts,

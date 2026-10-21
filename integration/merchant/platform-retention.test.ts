@@ -77,8 +77,8 @@ async function authorization(
 	input: { createdAt: Date; expiresAt: Date; revokedAt?: Date | null },
 ): Promise<string> {
 	const [row] = await sql<{ id: string }[]>`
-		INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,created_at,expires_at,revoked_at)
-		VALUES(${who.principalId},${who.organizationId},gen_random_uuid(),'quotum-claude-code',${label},${input.createdAt},${input.expiresAt},${input.revokedAt ?? null})
+		INSERT INTO platform_mcp_authorizations(principal_id,organization_id,client_id,client_name,created_at,expires_at,revoked_at)
+		VALUES(${who.principalId},${who.organizationId},'quotum-claude-code',${label},${input.createdAt},${input.expiresAt},${input.revokedAt ?? null})
 		RETURNING id`;
 	if (!row) throw new Error("Seed failed");
 	return row.id;
@@ -400,12 +400,12 @@ describe("platform retention plans", () => {
 			SELECT ${who.sessionId}, ${who.organizationId}, '{}'::jsonb, 'grant-' || n, 'target', '/',
 				${live}::timestamptz, CASE WHEN n % 2 = 0 THEN ${recent}::timestamptz END
 			FROM generate_series(1, 300) n`;
-		await sql`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,created_at,expires_at,revoked_at)
-			SELECT ${who.principalId}, ${who.organizationId}, gen_random_uuid(), 'quotum-claude-code', 'grant-' || n,
+		await sql`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,client_id,client_name,created_at,expires_at,revoked_at)
+			SELECT ${who.principalId}, ${who.organizationId}, 'quotum-claude-code', 'grant-' || n,
 				${recent}::timestamptz, ${live}::timestamptz, CASE WHEN n % 2 = 0 THEN ${recent}::timestamptz END
 			FROM generate_series(1, 300) n`;
 		await sql`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,status,created_at,expires_at)
-			SELECT a.id, a.principal_id, a.project_instance_id, 'change-' || a.client_name, 'hash', 'catalog.publish', '[]'::jsonb, '{}'::jsonb,
+			SELECT a.id, a.principal_id, gen_random_uuid(), 'change-' || a.client_name, 'hash', 'catalog.publish', '[]'::jsonb, '{}'::jsonb,
 				'Retention test', '{}'::jsonb, 'catalog.publish', 'catalog.publish', false, '{}'::jsonb, 'completed',
 				${recent}::timestamptz, ${live}::timestamptz
 			FROM platform_mcp_authorizations a`;

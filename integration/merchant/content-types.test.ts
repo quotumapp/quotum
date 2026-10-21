@@ -34,7 +34,9 @@ describe("merchant and OAuth media types", () => {
 							"x-csrf-token": browser.cookies.get(CSRF_COOKIE) ?? "",
 							"idempotency-key": crypto.randomUUID(),
 						},
-						body: JSON.stringify({ scope: merchantTestScope }),
+						body: JSON.stringify({
+							scope: { organizationSlug: merchantTestScope.organizationSlug },
+						}),
 					}),
 				)
 			).status;

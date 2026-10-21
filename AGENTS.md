@@ -212,7 +212,9 @@ entrypoint (`bun run mcp`). Read tools send API requests through `createGuardedF
 remote transport (`QUOTUM_MCP_ENABLED`, `QUOTUM_MCP_PUBLIC_ORIGIN`) is
 `src/composition/remote-mcp.ts`: it serves `/mcp` and the OAuth endpoints in the API process,
 verifies grants issued by `src/platform/mcp/`, and dispatches the same guarded requests through
-`MerchantBillingPort` (`src/composition/mcp-port-fetch.ts`) without a project key. A new read tool
+`MerchantBillingPort` (`src/composition/mcp-port-fetch.ts`) without a project key. Remote grants authorize one organization; environment-specific tools require
+explicit `projectKey` and `environment`, resolved within that organization on every call. Proposals
+retain their own immutable instance target. A new read tool
 needs its route in `allowedRequests` (`tests/mcp/inventory.test.ts` pins tools against the
 allowlist), a `/v1` route that opts into read-only credentials
 (`tests/mcp/contract-allowlist.test.ts`), and a `merchantBillingOperations` entry handled by

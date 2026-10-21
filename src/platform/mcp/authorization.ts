@@ -6,12 +6,13 @@ import type { MerchantStore } from "../store";
 
 export const MCP_WRITE_SCOPE = "quotum.billing.write";
 export const MCP_SCOPES = ["quotum.read", "offline_access"];
-export const MCP_INSTANCE_CLAIM = "https://quotum.dev/project_instance";
+export const MCP_ORGANIZATION_CLAIM = "https://quotum.dev/organization";
 export const MCP_GRANT_CLAIM = "https://quotum.dev/mcp_authorization";
 export const MCP_GRANT_MS = 30 * 24 * 60 * 60_000;
 
 /** Why a grant ended; recorded in the metadata of its `mcp.revoked` audit event. */
 export type McpRevokeReason =
+	| "scope_changed"
 	| "user"
 	| "client"
 	| "code_replay"
@@ -20,11 +21,19 @@ export type McpRevokeReason =
 	| "password_reset"
 	| "second_factor_reset";
 
+export interface McpOrganizationScope {
+	organizationSlug: string;
+}
+
+export interface McpTarget {
+	projectKey: string;
+	environment: "sandbox" | "production";
+}
+
 export interface McpGrant {
 	id: string;
 	principal_id: string;
 	organization_id: string;
-	project_instance_id: string;
 	client_id: string;
 	client_name: string;
 	scopes: string[];
@@ -77,7 +86,7 @@ export function consentedScopes(
 }
 
 /**
- * Whether a grant may target this environment. An `inactive` environment (a production not yet
+ * Whether a remote call may target this environment. An `inactive` environment (a production not yet
  * activated) is usable so an agent can author its catalog; the tools it reaches there are limited
  * to the catalog (see `allowedOnInactiveEnvironment`). Suspended, deactivating and deactivated
  * environments stay refused.
@@ -171,38 +180,25 @@ export class McpAuthorizations {
 		if (!client)
 			throw new MerchantError("INVALID_REQUEST", "Restart authorization in your AI client.");
 		const memberships = await this.store.memberships(principal.id);
-		const projects = await this.store.sql.instances.forPrincipal(principal.id);
-		const environments = projects.flatMap((project) => {
-			const membership = memberships.find((m) => m.organizationSlug === project.organizationSlug);
-			if (!membership?.capabilities.includes("billing.read")) return [];
-			return project.instances.flatMap((instance) =>
-				environmentUsable(instance)
-					? [
-							{
-								scope: {
-									kind: "merchant" as const,
-									organizationSlug: project.organizationSlug,
-									projectKey: project.key,
-									environment: instance.environment,
-								},
-								organizationName: membership.organizationName,
-								projectName: project.name,
-								status: environmentStatus(instance),
-								canPropose: canProposeBillingChanges(membership.role),
-								instanceId: instance.id,
-							},
-						]
-					: [],
-			);
-		});
+		const organizations = memberships
+			.filter((membership) => membership.capabilities.includes("billing.read"))
+			.map((membership) => ({
+				scope: { organizationSlug: membership.organizationSlug },
+				organizationName: membership.organizationName,
+				canPropose: canProposeBillingChanges(membership.role),
+			}));
 		const selected = await this.selection(sessionId);
+		const organization = memberships.find(
+			(membership) => membership.organizationId === selected?.organization_id,
+		);
 		return {
 			principal,
 			client,
 			scopes: this.requestedScopes(query),
-			environments: environments.map(({ instanceId: _, ...value }) => value),
+			organizations,
 			selection:
-				environments.find((e) => e.instanceId === selected?.project_instance_id)?.scope ?? null,
+				organizations.find((item) => item.scope.organizationSlug === organization?.organizationSlug)
+					?.scope ?? null,
 		};
 	}
 
@@ -224,51 +220,83 @@ export class McpAuthorizations {
 		return scopes;
 	}
 
-	async select(sessionId: string, query: string, scope: MerchantScope) {
+	async select(sessionId: string, query: string, scope: McpOrganizationScope) {
 		return this.store.sql.begin(async (tx) => {
 			const principal = await this.proof(sessionId, query, tx);
-			const access = await this.authorizeScope(principal.id, scope);
+			const access = await this.authorizeOrganization(principal.id, scope);
 			const clientId = new URLSearchParams(query).get("client_id") ?? "";
 			const [client] = await tx<
 				{ name: string }[]
 			>`SELECT COALESCE(name,client_id) AS name FROM platform_auth_oauth_clients WHERE client_id=${clientId} AND disabled IS NOT TRUE`;
 			if (!client)
 				throw new MerchantError("INVALID_REQUEST", "Restart authorization in your AI client.");
-			await tx`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,project_instance_id,client_id,client_name,scopes,proof_session_id,created_at,expires_at) VALUES(${principal.id},${access.organizationId},${access.projectInstanceId},${clientId},${client.name},${JSON.stringify(this.requestedScopes(query))}::text::jsonb,${sessionId},${this.store.now()},${new Date(this.store.now().getTime() + MCP_GRANT_MS)}) ON CONFLICT(proof_session_id) DO NOTHING`;
+			await tx`INSERT INTO platform_mcp_authorizations(principal_id,organization_id,client_id,client_name,scopes,proof_session_id,created_at,expires_at) VALUES(${principal.id},${access.organizationId},${clientId},${client.name},${JSON.stringify(this.requestedScopes(query))}::text::jsonb,${sessionId},${this.store.now()},${new Date(this.store.now().getTime() + MCP_GRANT_MS)}) ON CONFLICT(proof_session_id) DO NOTHING`;
 			const [grant] = await tx<
 				McpGrant[]
 			>`SELECT * FROM platform_mcp_authorizations WHERE proof_session_id=${sessionId}`;
-			if (
-				!grant ||
-				grant.project_instance_id !== access.projectInstanceId ||
-				grant.client_id !== clientId
-			)
+			if (!grant || grant.organization_id !== access.organizationId || grant.client_id !== clientId)
 				throw new MerchantError(
 					"AUTHORIZATION_IN_PROGRESS",
-					"This sign-in already selected an environment. Start again.",
+					"This sign-in already selected an organization. Start again.",
 					409,
 				);
-			return { projectInstanceId: grant.project_instance_id };
+			return { organizationId: grant.organization_id };
 		});
 	}
 
-	async authorizeScope(principalId: string, scope: MerchantScope) {
+	async authorizeOrganization(principalId: string, scope: McpOrganizationScope) {
 		const member = await this.store.membership(this.store.sql, principalId, scope.organizationSlug);
 		requireCapability(member.role, "billing.read");
-		const projects = await this.store.sql.instances.forPrincipal(principalId);
+		return { principalId, organizationId: member.organization_id, member };
+	}
+
+	/** Resolve a call's explicit target only inside its browser-authorized organization. */
+	async target(authorizationId: string, target: McpTarget) {
+		const grant = await this.byId(authorizationId);
+		const projects = await this.store.sql.instances.forPrincipal(grant.principal_id);
 		const project = projects.find(
-			(p) => p.key === scope.projectKey && p.organizationSlug === scope.organizationSlug,
+			(item) => item.organizationSlug === grant.organizationSlug && item.key === target.projectKey,
 		);
 		const instance = project?.instances.find(
-			(i) => i.environment === scope.environment && environmentUsable(i),
+			(item) => item.environment === target.environment && environmentUsable(item),
 		);
-		if (!instance)
+		if (!project || !instance)
 			throw new MerchantError(
 				"CONTEXT_UNAVAILABLE",
 				"The selected environment is unavailable.",
 				404,
 			);
-		return { principalId, organizationId: member.organization_id, projectInstanceId: instance.id };
+		const scope: MerchantScope = {
+			kind: "merchant",
+			organizationSlug: grant.organizationSlug,
+			projectKey: project.key,
+			environment: target.environment,
+		};
+		return {
+			grant,
+			member: grant.member,
+			scope,
+			environmentStatus: environmentStatus(instance),
+			context: { projectInstanceId: instance.id, actor: `merchant:${grant.principal_id}` },
+		};
+	}
+
+	async projects(authorizationId: string) {
+		const grant = await this.byId(authorizationId);
+		const projects = await this.store.sql.instances.forPrincipal(grant.principal_id);
+		return {
+			organizationSlug: grant.organizationSlug,
+			projects: projects
+				.filter((item) => item.organizationSlug === grant.organizationSlug)
+				.map((project) => ({
+					projectKey: project.key,
+					name: project.name,
+					environments: project.instances.filter(environmentUsable).map((instance) => ({
+						environment: instance.environment,
+						status: environmentStatus(instance),
+					})),
+				})),
+		};
 	}
 
 	async validate(grant: McpGrant | undefined, approved = true) {
@@ -287,26 +315,23 @@ export class McpAuthorizations {
 			{ auth_user_id: string }[]
 		>`SELECT p.auth_user_id FROM platform_principals p JOIN platform_auth_oauth_clients c ON c.client_id=${grant.client_id} WHERE p.id=${grant.principal_id} AND p.status='active' AND c.disabled IS NOT TRUE`;
 		if (!principal) throw new MerchantError("FORBIDDEN", "This account cannot access Quotum.", 403);
-		const projects = await this.store.sql.instances.forPrincipal(grant.principal_id);
-		const project = projects.find((p) =>
-			p.instances.some((i) => i.id === grant.project_instance_id),
-		);
-		const instance = project?.instances.find((i) => i.id === grant.project_instance_id);
-		if (!project || !instance || !environmentUsable(instance))
-			throw new MerchantError("CONTEXT_UNAVAILABLE", "The environment is unavailable.", 403);
+		const [organization] = await this.store.sql<
+			{ slug: string }[]
+		>`SELECT slug FROM platform_organizations WHERE id=${grant.organization_id} AND status='active'`;
+		if (!organization)
+			throw new MerchantError("FORBIDDEN", "The organization is unavailable.", 403);
 		const member = await this.store.membership(
 			this.store.sql,
 			grant.principal_id,
-			project.organizationSlug,
+			organization.slug,
 		);
 		requireCapability(member.role, "billing.read");
-		if (member.organization_id !== grant.organization_id)
-			throw new MerchantError("FORBIDDEN", "The environment is unavailable.", 403);
 		return {
 			...grant,
 			scopes: grantScopes(grant.scopes),
 			userId: principal.auth_user_id,
-			environmentStatus: environmentStatus(instance),
+			organizationSlug: organization.slug,
+			member,
 		};
 	}
 
@@ -325,7 +350,7 @@ export class McpAuthorizations {
 	}
 
 	/**
-	 * The scopes a consent may grant this sign-in's selected environment, or an error. The grant row
+	 * The scopes a consent may grant this sign-in's selected organization, or an error. The grant row
 	 * holds what the client requested; only a role that can propose may keep the proposal scope.
 	 */
 	async consentScopes(
@@ -460,17 +485,17 @@ export class McpAuthorizations {
 					grant.organization_id,
 					"mcp.authorized",
 					grant.id,
-					{ clientId: grant.client_id, projectInstanceId: grant.project_instance_id },
+					{ clientId: grant.client_id, organizationId: grant.organization_id },
 				);
 		});
 		return this.byId(grant.id);
 	}
 
-	async list(principalId: string, scope: MerchantScope) {
-		const access = await this.authorizeScope(principalId, scope);
+	async list(principalId: string, scope: McpOrganizationScope) {
+		const access = await this.authorizeOrganization(principalId, scope);
 		const rows = await this.store.sql<
 			McpGrant[]
-		>`SELECT * FROM platform_mcp_authorizations WHERE principal_id=${principalId} AND project_instance_id=${access.projectInstanceId} AND approved_at IS NOT NULL AND revoked_at IS NULL AND expires_at>${this.store.now()} ORDER BY created_at DESC`;
+		>`SELECT * FROM platform_mcp_authorizations WHERE principal_id=${principalId} AND organization_id=${access.organizationId} AND approved_at IS NOT NULL AND revoked_at IS NULL AND expires_at>${this.store.now()} ORDER BY created_at DESC`;
 		return {
 			connections: rows.map((r) => ({
 				id: r.id,
@@ -484,19 +509,19 @@ export class McpAuthorizations {
 		};
 	}
 
-	async revoke(id: string, principalId: string, reason: McpRevokeReason, instanceId?: string) {
+	async revoke(id: string, principalId: string, reason: McpRevokeReason, organizationId?: string) {
 		return this.store.sql.begin(async (tx) => {
 			const [row] = await tx<
 				McpGrant[]
 			>`SELECT * FROM platform_mcp_authorizations WHERE id=${id} AND principal_id=${principalId} FOR UPDATE`;
-			if (!row || (instanceId && row.project_instance_id !== instanceId))
+			if (!row || (organizationId && row.organization_id !== organizationId))
 				throw new MerchantError("NOT_FOUND", "Connection not found.", 404);
 			if (row.revoked_at) return { revoked: false };
 			await tx`UPDATE platform_mcp_authorizations SET revoked_at=${this.store.now()} WHERE id=${id}`;
 			await tx`UPDATE platform_auth_oauth_refresh_tokens SET revoked=${this.store.now()},rotation_replay_response=NULL,rotation_replay_expires_at=NULL WHERE authorization_code_id=${row.code_hash}`;
 			await this.store.audit(tx, principalId, row.organization_id, "mcp.revoked", id, {
 				clientId: row.client_id,
-				projectInstanceId: row.project_instance_id,
+				organizationId: row.organization_id,
 				reason,
 			});
 			return { revoked: true };
@@ -522,11 +547,8 @@ export async function revokeMcpAuthorizationsForUser(
 	reason: McpRevokeReason,
 ): Promise<void> {
 	const revoked = await tx<
-		Pick<
-			McpGrant,
-			"id" | "principal_id" | "organization_id" | "client_id" | "project_instance_id"
-		>[]
-	>`UPDATE platform_mcp_authorizations SET revoked_at=${now} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${userId}) AND revoked_at IS NULL RETURNING id,principal_id,organization_id,client_id,project_instance_id`;
+		Pick<McpGrant, "id" | "principal_id" | "organization_id" | "client_id">[]
+	>`UPDATE platform_mcp_authorizations SET revoked_at=${now} WHERE principal_id IN (SELECT id FROM platform_principals WHERE auth_user_id=${userId}) AND revoked_at IS NULL RETURNING id,principal_id,organization_id,client_id`;
 	await tx`UPDATE platform_auth_oauth_refresh_tokens SET revoked=${now},rotation_replay_response=NULL,rotation_replay_expires_at=NULL WHERE user_id=${userId}`;
 	for (const grant of revoked)
 		await insertPlatformAuditEvent(tx, {
@@ -536,7 +558,7 @@ export async function revokeMcpAuthorizationsForUser(
 			target: grant.id,
 			metadata: {
 				clientId: grant.client_id,
-				projectInstanceId: grant.project_instance_id,
+				organizationId: grant.organization_id,
 				reason,
 			},
 		});

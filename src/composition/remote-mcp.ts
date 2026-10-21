@@ -9,11 +9,12 @@ import { createContractStore } from "../mcp/contracts";
 import { createGuardedFetch } from "../mcp/guarded-fetch";
 import { omitKeys } from "../mcp/results";
 import { createQuotumMcpServer } from "../mcp/server";
+import { type McpTarget, mcpTargetSchema } from "../mcp/target";
 import type { MerchantBillingPort } from "../platform/application/billing-port";
 import type { MerchantAuth } from "../platform/auth";
 import {
 	MCP_GRANT_CLAIM,
-	MCP_INSTANCE_CLAIM,
+	MCP_ORGANIZATION_CLAIM,
 	MCP_SCOPES,
 	MCP_WRITE_SCOPE,
 	McpAuthorizations,
@@ -181,7 +182,7 @@ export function createRemoteMcpApp(options: {
 			}
 			if (
 				grant.userId !== claims.sub ||
-				grant.project_instance_id !== claims[MCP_INSTANCE_CLAIM] ||
+				grant.organization_id !== claims[MCP_ORGANIZATION_CLAIM] ||
 				grant.client_id !== (claims.client_id ?? claims.azp)
 			)
 				return challenge();
@@ -202,30 +203,51 @@ export function createRemoteMcpApp(options: {
 					.includes(MCP_WRITE_SCOPE)
 					? new McpChanges(store, port.changes)
 					: undefined;
-			const client = new BillingClient({
-				baseUrl: "http://billing.internal",
-				fetch: createGuardedFetch({
-					baseUrl: "http://billing.internal",
-					fetch: createMcpPortFetch({
-						port,
-						projectInstanceId: grant.project_instance_id,
-						principalId: grant.principal_id,
-						environmentStatus: grant.environmentStatus,
-					}),
-				}),
-			});
+			const scopedClient = async (target: McpTarget) => {
+				try {
+					const access = await grants.target(grant.id, target);
+					return new BillingClient({
+						baseUrl: "http://billing.internal",
+						fetch: createGuardedFetch({
+							baseUrl: "http://billing.internal",
+							fetch: createMcpPortFetch({
+								port,
+								projectInstanceId: access.context.projectInstanceId,
+								principalId: grant.principal_id,
+								environmentStatus: access.environmentStatus,
+							}),
+						}),
+					});
+				} catch (error) {
+					if (error instanceof MerchantError)
+						throw new BillingApiError(error.message, error.code, error.status);
+					throw error;
+				}
+			};
+			const proposalSchema = prepareBillingChangeSchema.extend(mcpTargetSchema.shape);
 			const handler = createMcpHandler(() =>
 				createQuotumMcpServer({
-					client,
+					organization: {
+						client: scopedClient,
+						listProjects: () => changeResult(() => grants.projects(grant.id)),
+					},
 					changes: changes
 						? {
-								schema: prepareBillingChangeSchema,
-								inspect: (input) => changeResult(() => changes.inspect(grant.id, input)),
-								capabilities: () => changeResult(() => changes.capabilities(grant.id)),
+								schema: proposalSchema,
+								inspect: ({ resource, parameters, query: filters, ...target }) =>
+									changeResult(() =>
+										changes.inspect(grant.id, mcpTargetSchema.parse(target), {
+											resource,
+											parameters,
+											query: filters,
+										}),
+									),
+								capabilities: (input) =>
+									changeResult(() => changes.capabilities(grant.id, mcpTargetSchema.parse(input))),
 								prepare: async (value) => {
-									const input = prepareBillingChangeSchema.parse(value);
+									const input = proposalSchema.parse(value);
 									return changeResult(() =>
-										changes.prepare(grant.id, {
+										changes.prepare(grant.id, mcpTargetSchema.parse(input), {
 											...input.change,
 											requestKey: input.requestKey,
 											reason: input.reason,
@@ -297,7 +319,7 @@ export function createRemoteMcpApp(options: {
 								if (
 									grant.client_id === clientId &&
 									grant.userId === claims.sub &&
-									grant.project_instance_id === claims[MCP_INSTANCE_CLAIM]
+									grant.organization_id === claims[MCP_ORGANIZATION_CLAIM]
 								)
 									await grants.revoke(grant.id, grant.principal_id, "client");
 							} catch (error) {

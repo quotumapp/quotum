@@ -113,7 +113,7 @@ describe("Google OAuth using signed local provider tokens", () => {
 		]);
 		await browser.json("/api/platform/oauth/selection", {
 			oauth_query: selection.search.slice(1),
-			scope: merchantTestScope,
+			scope: { organizationSlug: merchantTestScope.organizationSlug },
 		});
 		const continued = await browser.json<{ url: string }>(
 			"/api/auth/oauth2/continue",
