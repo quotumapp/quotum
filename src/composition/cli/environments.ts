@@ -1,5 +1,4 @@
 import { setEnvironmentSuspension } from "../../platform/operator-topology";
-import { renderPlatformCredentialOutput } from "../../platform-bootstrap";
 import {
 	CliUsageError,
 	type CommandOutput,
@@ -12,8 +11,6 @@ import {
 	openOperatorInstances,
 	operatorActor,
 	parseArguments,
-	requestKey,
-	reserveSecretFile,
 	runOperatorCommand,
 	statedReason,
 } from "./operator-context";
@@ -57,69 +54,6 @@ async function environmentsCommand(
 					: new CommandReport(readinessReport(target, readiness), 2, notReadyNotice);
 			});
 		}
-		case "activate": {
-			const { positionals, options } = parseArguments(
-				args,
-				["credentials-out", "request-key", "actor", "member-override-reason"],
-				1,
-			);
-			const credentialsOut = options.get("credentials-out");
-			if (credentialsOut === undefined)
-				throw new CliUsageError("--credentials-out <new-file> is required.");
-			const key = requestKey(options);
-			const actor = operatorActor(options, env);
-			const reason = memberOverrideReason(options);
-			return await withContext(env, dependencies, async (context) => {
-				const target = await context.target(positionals[0] ?? "");
-				if (target.environment !== "production")
-					throw new CliUsageError(
-						`${target.instanceKey} is a ${target.environment} environment; only production is activated.`,
-					);
-				const gate = context.gate(target, actor, { memberOverrideReason: reason });
-				const file = await reserveSecretFile(credentialsOut);
-				try {
-					// An active environment answers the same way whatever its readiness is now.
-					const readiness = await context.lifecycle.readiness(gate, context.billing);
-					if (!readiness.ready && readiness.lifecycleStatus !== "active") {
-						await file.discard();
-						return new CommandReport(
-							{ requestKey: key, ...readinessReport(target, readiness), activated: false },
-							2,
-							notReadyNotice,
-						);
-					}
-					// The key is written inside the activation's transaction, so a file that cannot be
-					// written rolls the activation back instead of leaving a live key nobody holds.
-					const { credentialDisclosed } = await context.lifecycle.activate(
-						gate,
-						context.billing,
-						key,
-						{
-							fingerprint: null,
-							deliver: (token) =>
-								file.write(
-									renderPlatformCredentialOutput([
-										{ projectInstanceKey: target.instanceKey, token, access: "full" },
-									]),
-								),
-						},
-					);
-					// A replay or an already-active environment returns no key.
-					if (!credentialDisclosed) await file.discard();
-					return {
-						requestKey: key,
-						instance: target.instanceKey,
-						environment: target.environment,
-						active: true,
-						credentialDisclosed,
-						credentialsOut: credentialDisclosed ? file.path : null,
-					};
-				} catch (error) {
-					await file.discard();
-					throw error;
-				}
-			});
-		}
 		case "suspend":
 		case "resume": {
 			const suspended = subcommand === "suspend";
@@ -142,7 +76,6 @@ async function environmentsCommand(
 					reason,
 					operator,
 					memberOverrideReason: override,
-					enforceProductionLimit: database.merchantEnabled,
 				});
 			} finally {
 				await database.close();
@@ -158,9 +91,9 @@ async function environmentsCommand(
 }
 
 const notReadyNotice =
-	"Not ready: resolve the blockers, refresh any stale connection validation, and run the command again.";
+	"Setup findings are informational; environment access and credential issuance remain available.";
 
-/** What an operator needs to unblock an environment; never any connection settings or secrets. */
+/** Informational environment setup diagnostics; never any connection settings or secrets. */
 function readinessReport(target: OperatorTarget, readiness: Readiness) {
 	return {
 		instance: target.instanceKey,

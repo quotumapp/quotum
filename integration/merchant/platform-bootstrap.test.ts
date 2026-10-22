@@ -283,3 +283,44 @@ function only<T>(rows: readonly T[]): T {
 	if (row === undefined || rows.length !== 1) throw new Error("Expected exactly one row");
 	return row;
 }
+
+describe("production availability upgrade", () => {
+	it("applies the documented atomic transition once and preserves other states and keys", async () => {
+		await run(laterManifest());
+		await f.sql`UPDATE projects SET lifecycle_status='inactive' WHERE key='alpha'`;
+		await f.sql`INSERT INTO projects(platform_project_id,key,name,environment,lifecycle_status,internal_project) SELECT id,key||'-production',name,'production',CASE WHEN key='beta' THEN 'suspended' ELSE 'deactivated' END,false FROM platform_projects WHERE key IN ('beta','gamma')`;
+
+		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE key='alpha-sandbox'`;
+		await f.sql`UPDATE projects SET lifecycle_status='deactivating' WHERE key='beta-sandbox'`;
+		await f.sql`UPDATE projects SET lifecycle_status='deactivated' WHERE key='gamma-sandbox'`;
+		await f.sql`UPDATE platform_organizations SET status='suspended' WHERE slug='labs'`;
+		const credentials =
+			await f.sql`SELECT id,revoked_at FROM platform_project_api_credentials ORDER BY id`;
+		const docs = await Bun.file(
+			new URL("../../docs/upgrade-transitions.md", import.meta.url),
+		).text();
+		const statement = docs
+			.split("## Production active from creation\n")[1]
+			?.split("```sql\n")[1]
+			?.split("```")[0];
+		if (!statement) throw new Error("Production upgrade SQL is missing");
+		for (let attempt = 0; attempt < 2; attempt++) await f.client.unsafe(statement);
+		expect(await f.sql`SELECT key,lifecycle_status FROM projects ORDER BY key`).toEqual([
+			{ key: "alpha", lifecycle_status: "active" },
+			{ key: "alpha-sandbox", lifecycle_status: "suspended" },
+			{ key: "beta-production", lifecycle_status: "suspended" },
+			{ key: "beta-sandbox", lifecycle_status: "deactivating" },
+			{ key: "gamma-production", lifecycle_status: "deactivated" },
+			{ key: "gamma-sandbox", lifecycle_status: "deactivated" },
+		]);
+		expect(await f.sql`SELECT status FROM platform_organizations WHERE slug='labs'`).toEqual([
+			{ status: "suspended" },
+		]);
+		expect(
+			await f.sql`SELECT id,revoked_at FROM platform_project_api_credentials ORDER BY id`,
+		).toEqual(credentials);
+		expect(
+			await f.sql`SELECT metadata->>'operator' AS operator,metadata->>'reason' AS reason FROM platform_audit_events WHERE action='environment.activated'`,
+		).toEqual([{ operator: "you@example.com", reason: "production_active_by_default" }]);
+	});
+});

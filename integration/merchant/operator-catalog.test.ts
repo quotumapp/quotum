@@ -121,8 +121,8 @@ const publishedRevision = async () =>
 	)[0]?.revision ?? null;
 
 describe("operator catalog commands with --instance", () => {
-	it("reads, previews and publishes to an inactive environment without a project key", async () => {
-		await seedOperatorOrganization(f, "inactive");
+	it("reads, previews and publishes to an active environment without a project key", async () => {
+		await seedOperatorOrganization(f);
 		await withScratchDirectory(async (directory) => {
 			const file = await writeCatalog(directory, featuresOnly);
 			const direct = (...args: string[]) => runOperatorCatalog([...args, "--instance", "alpha"]);
@@ -140,7 +140,7 @@ describe("operator catalog commands with --instance", () => {
 			expect(pushed.code).toBe(0);
 			expect(pushed.json).toMatchObject({ revision: 1 });
 			expect(await publishedRevision()).not.toBeNull();
-			expect(await lifecycleStatusOf(f, "alpha")).toBe("inactive");
+			expect(await lifecycleStatusOf(f, "alpha")).toBe("active");
 			// The revision names the operator, as the console's names the member.
 			expect(await f.sql`SELECT created_by FROM catalog_revisions WHERE revision=1`).toEqual([
 				{ created_by: "operator:ops-runbook" },
@@ -155,7 +155,7 @@ describe("operator catalog commands with --instance", () => {
 	});
 
 	it("takes the operator from --actor, and a change must name one", async () => {
-		await seedOperatorOrganization(f, "inactive");
+		await seedOperatorOrganization(f);
 		await withScratchDirectory(async (directory) => {
 			const file = await writeCatalog(directory, featuresOnly);
 			const noOperator = { ...env, QUOTUM_ACTOR: undefined };
@@ -196,7 +196,7 @@ describe("operator catalog commands with --instance", () => {
 	});
 
 	it("adopts a Stripe product through the instance's own connection, then lists it", async () => {
-		await seedOperatorOrganization(f, "inactive");
+		await seedOperatorOrganization(f);
 		await withScratchDirectory(async (directory) => {
 			const binding = await writeAdoption(directory);
 			// Adoption reads the Stripe connection's secret key, so it needs a connection first.
@@ -241,8 +241,8 @@ describe("operator catalog commands with --instance", () => {
 		});
 	});
 
-	it("registers an App Store product on an inactive environment with no connection", async () => {
-		await seedOperatorOrganization(f, "inactive");
+	it("registers an App Store product on an active environment with no connection", async () => {
+		await seedOperatorOrganization(f);
 		await withScratchDirectory(async (directory) => {
 			const file = join(directory, "ios.json");
 			await writeFile(
@@ -279,8 +279,8 @@ describe("operator catalog commands with --instance", () => {
 		});
 	});
 
-	it("prepares an inactive Stripe environment from the CLI and activates it", async () => {
-		await seedOperatorOrganization(f, "inactive");
+	it("prepares an active Stripe environment from the CLI and issues its first key", async () => {
+		await seedOperatorOrganization(f);
 		const resolver = new PostgresProjectInstanceContextResolver(f.client);
 		await withScratchDirectory(async (directory) => {
 			await connectProductionInstance(directory);
@@ -303,18 +303,20 @@ describe("operator catalog commands with --instance", () => {
 			expect(readiness.json).toMatchObject({
 				ready: true,
 				blockers: [],
-				lifecycleStatus: "inactive",
+				lifecycleStatus: "active",
 			});
 
 			const out = join(directory, "production-key.json");
-			const activated = await runOperator(runEnvironmentsCommand, [
-				"activate",
+			const activated = await runOperator(runCredentialsCommand, [
+				"rotate",
 				"alpha",
+				"--access",
+				"full",
 				"--credentials-out",
 				out,
 			]);
 			expect(activated.code).toBe(0);
-			expect(activated.json).toMatchObject({ active: true, credentialDisclosed: true });
+			expect(activated.json).toMatchObject({ credentialDisclosed: true });
 			expect((await stat(out)).mode & 0o777).toBe(0o600);
 			const token = String(JSON.parse(await readFile(out, "utf8")).credentials[0].credential);
 			expect((await resolver.resolveCredential(token)).kind).toBe("resolved");
@@ -326,7 +328,7 @@ describe("operator catalog commands with --instance", () => {
 	});
 
 	it("changes an organization its members manage only with a stated reason", async () => {
-		await seedOperatorOrganization(f, "inactive");
+		await seedOperatorOrganization(f);
 		await new MerchantBrowser(f).signup();
 		await f.sql`
 			INSERT INTO platform_memberships(organization_id, principal_id, role)
@@ -372,7 +374,7 @@ describe("operator catalog commands with --instance", () => {
 	});
 
 	it("rejects an unknown instance", async () => {
-		await seedOperatorOrganization(f, "inactive");
+		await seedOperatorOrganization(f);
 		const unknown = await runOperatorCatalog(["status", "--instance", "missing"]);
 		expect(unknown.code).toBe(1);
 		expect(unknown.stderr).toContain("was not found");

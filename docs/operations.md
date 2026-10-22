@@ -98,18 +98,17 @@ so idempotency is preserved.
 
 Sandbox and production instances receive separate project credentials: `sqpk_<secret>` for
 sandbox, `pqpk_<secret>` for production (see [authentication](deployment.md#authentication)). The
-plaintext is disclosed once: at sandbox provisioning, production activation (in the merchant
-application, or into the `--credentials-out` file of `quotum environments activate`), rotation, or
-into a `platform:bootstrap --credentials-out` file. Replaying the same request returns no credential. A
-lost response cannot be recovered; rotate instead.
+plaintext is disclosed once when requested during onboarding, through environment credential
+issuance or rotation, or into a `platform:bootstrap --credentials-out` file. Both environments are
+active from creation, independently of whether either key has been issued. Replaying the same
+request returns no credential. A lost response cannot be recovered; rotate instead.
 
 Rotate through merchant management: `POST /api/platform/provisioning/{id}/rotate` for onboarding
 sandbox credentials, or `POST /api/platform/environments/credentials/rotate` for either environment.
 Production rotation requires a fresh step-up grant. Without the merchant application, run
 `quotum credentials rotate <instance> --access full --credentials-out <new-file>` with `--actor`;
 an organization whose members manage it also needs `--member-override-reason <why>`. Rotating, or
-revoking a read-only key, refuses an inactive environment with `ENVIRONMENT_INACTIVE`;
-[activate it](deployment.md#activate-a-production-environment) first.
+revoking a read-only key, requires an active environment (`ENVIRONMENT_INACTIVE` otherwise).
 It writes the new key in the platform bootstrap's file format and never prints it. If the file
 cannot be written, nothing is rotated. Rotation revokes the previous credential in the same
 transaction, so the replaced key is rejected from the next request. The database clock dates both
@@ -127,12 +126,13 @@ takes `{ organizationSlug, name, key }` and an `Idempotency-Key` header. The cal
 operation as onboarding, so `GET /api/platform/provisioning/{id}`, `/retry`, `/credential` and
 `/rotate` drive the rest. Two refusals are `409`: `PROJECT_KEY_UNAVAILABLE` when the organization
 already has a project with that key, and `PROJECT_LIMIT_REACHED` when it already holds its
-`platform_organizations.project_limit` projects (default 5, counting every project of the
-organization). An operator raises the limit in the database, for example
-`UPDATE platform_organizations SET project_limit = 10 WHERE slug = 'acme'`. The cap also applies to
-the onboarding draft, but not to `platform:bootstrap`, which is an operator command. Production
-activation stays bounded separately by `production_limit` (default 1 active production environment
-per organization), so a second project's production stays inactive until that limit is raised.
+`QUOTUM_PROJECT_LIMIT` projects (default 5, a positive integer configured on the API process).
+Every logical project counts once, including suspended projects; its two environments share that
+slot. Both start active. The same cap applies during onboarding, and organization locking makes
+concurrent creation respect it. Lowering the setting preserves existing projects but prevents
+another until the organization is below the cap. Operator `platform:bootstrap` remains exempt.
+The legacy database columns `project_limit` and `production_limit` are retained for schema
+compatibility and ignored. There is no separate production quota.
 
 ### Read-only credentials
 

@@ -14,6 +14,43 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Production active from creation
+
+Sandbox and production now start active. The activation endpoint, CLI subcommand, capability and
+step-up action are removed. Deploy the matching console. No migration baseline changes, schema
+restore or migration-ledger edits are required for this transition.
+
+Set `QUOTUM_PROJECT_LIMIT` to the positive per-organization project cap (default `5`) before
+starting the new API. It counts every logical project once, including suspended projects. Existing
+projects above the cap remain available; only additional creation is refused. The retained
+`platform_organizations.project_limit` and `production_limit` columns no longer control quotas.
+Review any previous per-organization overrides when choosing the deployment setting.
+
+Back up the database and stop all old API processes and workers. Run this single atomic statement
+against the existing database, replacing `you@example.com` with the operator's identity. It updates
+only pending production instances and records each change in the same transaction. It preserves
+organization statuses, suspended/deactivating/deactivated instances, catalogs, connections and
+credentials. Repeating it changes nothing and records no additional events.
+
+```sql
+WITH activated AS (
+  UPDATE projects SET lifecycle_status = 'active', updated_at = now()
+  WHERE environment = 'production' AND lifecycle_status = 'inactive'
+  RETURNING id, platform_project_id
+)
+INSERT INTO platform_audit_events (principal_id, organization_id, action, target, metadata)
+SELECT NULL, p.organization_id, 'environment.activated', a.id::text,
+  jsonb_build_object('operator', 'you@example.com', 'reason', 'production_active_by_default')
+FROM activated a JOIN platform_projects p ON p.id = a.platform_project_id;
+```
+
+Update bootstrap manifests to match the resulting `active` production status; new manifests
+cannot declare production `inactive`. Start the new API and console, then verify both environment
+states and issue production credentials on request. No key is automatically issued or replaced by
+the transition. Live providers still require verified event delivery for new work; webhook
+processing and recovery remain available. Readiness findings are informational. Suspension and
+resumption remain the controls for intentional unavailability.
+
 ## Organization-scoped remote MCP
 
 `migrations/004_merchant.sql` removes `platform_mcp_authorizations.project_instance_id` and changes

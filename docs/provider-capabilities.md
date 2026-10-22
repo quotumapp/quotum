@@ -300,11 +300,12 @@ added. A plan with a trial bound only to Stripe lists Apple and Google as `compa
 
 ## Environment readiness
 
-Environment readiness (`POST /api/platform/environments/readiness`) returns `blockerDetails` next
-to `blockers`, whose strings do not change. The gating entries (`gating: true`) mirror `blockers`
-one for one and in order, and add the `connectionKind`, the `provider` for a provider connection,
-and for a `*_VALIDATION_REQUIRED` blocker the `observed` `validatedAt` and `maxAgeSeconds` (900).
-Only gating entries block activation. Non-gating entries follow them and compare the published
+Environment readiness (`POST /api/platform/environments/readiness`) returns informational
+`blockerDetails` next to `blockers`, whose strings do not change. Every detail has `gating: false`;
+these findings do not gate environment access or credential issuance. The first entries mirror
+`blockers` one for one and in order, and add the `connectionKind`, the `provider` for a provider
+connection, and for a `*_VALIDATION_REQUIRED` blocker the `observed` `validatedAt` and
+`maxAgeSeconds` (900). Capability findings follow them and compare the published
 catalog with the environment's connections: one per blocked provider operation, with the capability
 error `code` of the layer that blocks it (see
 [Provider capability errors](#provider-capability-errors)), the `provider`, the `operation`, the
@@ -322,7 +323,7 @@ catalog publish does not look at connections. An excerpt:
 "blockerDetails": [
   {
     "code": "STRIPE_VALIDATION_REQUIRED",
-    "gating": true,
+    "gating": false,
     "connectionKind": "stripe",
     "provider": "stripe",
     "observed": { "validatedAt": "2026-09-18T11:40:00.000Z", "maxAgeSeconds": 900 }

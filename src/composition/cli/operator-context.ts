@@ -353,7 +353,6 @@ export async function openOperatorContext(
 			operatorConnectionGate(actor, target, {
 				allowMemberOrganizations: !merchantEnabled,
 				memberOverrideReason: options?.memberOverrideReason,
-				enforceProductionLimit: merchantEnabled,
 			}),
 		close: () => client.close(),
 	};

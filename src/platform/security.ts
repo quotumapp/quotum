@@ -107,7 +107,6 @@ const allCapabilities: MerchantCapability[] = [
 	"operations.write",
 	"production.manage",
 	"production.connections.manage",
-	"production.activate",
 	"production.credentials.rotate",
 ];
 const roleCapabilities: Record<MerchantRole, readonly MerchantCapability[]> = {

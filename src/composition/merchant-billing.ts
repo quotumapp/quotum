@@ -64,10 +64,9 @@ import type { BillingRepository } from "../db/repository";
 import type { WebhookEndpointServiceLike } from "../events/endpoints";
 import { WebhookEndpointService } from "../events/service";
 import type { BillingAdminOperations } from "../operations/admin";
-import {
-	allowedOnInactiveEnvironment,
-	type MerchantBillingCommand,
-	type MerchantBillingPort,
+import type {
+	MerchantBillingCommand,
+	MerchantBillingPort,
 } from "../platform/application/billing-port";
 import { isTenantTrafficEligible, type ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderCapabilityReads } from "../providers/capability-read-types";
@@ -99,15 +98,7 @@ export function createMerchantBillingPort(input: {
 		});
 	const run = async (command: MerchantBillingCommand) => {
 		const resolved = await resolver.resolveInstanceId(command.projectInstanceId);
-		if (
-			resolved.kind !== "resolved" ||
-			(!isTenantTrafficEligible(resolved.context) &&
-				!(
-					resolved.context.lifecycleStatus === "inactive" &&
-					!resolved.context.internalProject &&
-					allowedOnInactiveEnvironment(command.operation)
-				))
-		)
+		if (resolved.kind !== "resolved" || !isTenantTrafficEligible(resolved.context))
 			throw new BillingError("The selected environment is unavailable", "CONTEXT_UNAVAILABLE", 404);
 		const project = resolved.context;
 		const [id = "", event = ""] = command.parameters;

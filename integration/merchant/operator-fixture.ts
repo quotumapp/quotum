@@ -82,9 +82,11 @@ export async function seedOperatorOrganization(
 	productionStatus: "active" | "inactive" = "active",
 ): Promise<void> {
 	await new PlatformBootstrapService(new BunPlatformUnitOfWork(f.client)).apply(
-		operatorTopology({ lifecycleStatus: productionStatus, issueCredential: false }),
+		operatorTopology({ lifecycleStatus: "active", issueCredential: false }),
 		[],
 	);
+	if (productionStatus === "inactive")
+		await f.sql`UPDATE projects SET lifecycle_status='inactive' WHERE key='alpha'`;
 }
 
 export type OperatorResult = {

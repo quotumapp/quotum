@@ -12,11 +12,7 @@ import {
 	runEnvironmentsCommand,
 } from "../../src/composition/cli/environments";
 import { openOperatorContext } from "../../src/composition/cli/operator-context";
-import {
-	BunPlatformUnitOfWork,
-	PostgresProjectInstanceContextResolver,
-} from "../../src/composition/project-instance-persistence";
-import { PlatformBootstrapService } from "../../src/platform/bootstrap/service";
+import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
 import type { ConnectionValidationPort } from "../../src/platform/connections/ports";
 import {
 	MerchantBrowser,
@@ -27,11 +23,9 @@ import {
 import {
 	connectProductionInstance,
 	operatorEnv as env,
-	lifecycleStatusOf,
 	publishAiCreditsOnProduction,
 	runOperator,
 	seedOperatorOrganization,
-	operatorTopology as topology,
 	withScratchDirectory,
 } from "./operator-fixture";
 
@@ -455,7 +449,8 @@ describe("operator connection commands", () => {
 			expect(help.stdout).toContain("connections draft <instance>");
 			const environmentsHelp = await quotum("environments", "--help");
 			expect(environmentsHelp.code).toBe(0);
-			expect(environmentsHelp.stdout).toContain("environments activate <instance>");
+			expect(environmentsHelp.stdout).toContain("environments readiness <instance>");
+			expect(environmentsHelp.stdout).not.toContain("environments activate");
 			// A fresh process builds its own billing reads; nothing is published, so it is not ready.
 			const readiness = await quotum("environments", "readiness", "alpha-sandbox");
 			expect(readiness.code).toBe(2);
@@ -504,281 +499,74 @@ describe("operator connection commands", () => {
 	});
 });
 
-const connectProduction = connectProductionInstance;
-const publishCatalog = () => publishAiCreditsOnProduction(f);
-const lifecycleOf = (key: string) => lifecycleStatusOf(f, key);
-
-describe("operator environment activation", () => {
-	it("reports what blocks an environment, then activates it into an owner-only file", async () => {
-		await seed("inactive");
-		const resolver = new PostgresProjectInstanceContextResolver(f.client);
+describe("operator environment setup", () => {
+	it("reports incomplete setup without preventing a production key from being issued", async () => {
+		await seed();
+		await f.sql`UPDATE platform_organizations SET production_limit=0 WHERE slug='ops'`;
+		const bare = await environments(["readiness", "alpha"]);
+		expect(bare.code).toBe(2);
+		expect(bare.json).toMatchObject({
+			lifecycleStatus: "active",
+			ready: false,
+			blockers: [
+				"PROVIDER_REQUIRED",
+				"PROJECTION_VALIDATION_REQUIRED",
+				"PUBLISHED_CATALOG_REQUIRED",
+			],
+		});
+		expect(
+			(bare.json.blockerDetails as { gating: boolean }[]).every((detail) => !detail.gating),
+		).toBe(true);
 		await withDirectory(async (directory) => {
 			const out = join(directory, "production.json");
-			const activate = (...extra: string[]) =>
-				environments(["activate", "alpha", "--credentials-out", out, ...extra]);
-
-			const bare = await environments(["readiness", "alpha"]);
-			expect(bare.code).toBe(2);
-			expect(bare.stderr).toContain("Not ready");
-			expect(bare.json).toMatchObject({
-				instance: "alpha",
-				environment: "production",
-				lifecycleStatus: "inactive",
-				ready: false,
-				blockers: [
-					"PROVIDER_REQUIRED",
-					"PROJECTION_VALIDATION_REQUIRED",
-					"PUBLISHED_CATALOG_REQUIRED",
-				],
-				catalogRevisionId: null,
-				connections: [],
-			});
-
-			await connectProduction(directory);
-			const uncataloged = await environments(["readiness", "alpha"]);
-			expect(uncataloged.code).toBe(2);
-			expect(uncataloged.json.blockers).toEqual([
-				"STRIPE_CATALOG_REQUIRED",
-				"PUBLISHED_CATALOG_REQUIRED",
+			const issued = await credentials([
+				"rotate",
+				"alpha",
+				"--access",
+				"full",
+				"--credentials-out",
+				out,
 			]);
-			expect(uncataloged.json.connections).toMatchObject([
-				{ kind: "projection", enabled: true },
-				{ kind: "stripe", enabled: true, eventVerifiedAt: expect.any(String) },
-			]);
-
-			// A blocked activation changes nothing, leaves no file and says what to fix.
-			const blocked = await activate();
-			expect(blocked.code).toBe(2);
-			expect(blocked.json).toMatchObject({
-				activated: false,
-				blockers: ["STRIPE_CATALOG_REQUIRED", "PUBLISHED_CATALOG_REQUIRED"],
-			});
-			await expect(stat(out)).rejects.toMatchObject({ code: "ENOENT" });
-			expect(await lifecycleOf("alpha")).toBe("inactive");
-
-			const revision = await publishCatalog();
+			expect(issued.code).toBe(0);
+			const token = JSON.parse(await readFile(out, "utf8")).credentials[0].credential;
+			expect(token).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
+			expect(issued.stdout).not.toContain(token);
+			expect((await stat(out)).mode & 0o777).toBe(0o600);
+			expect(
+				(await new PostgresProjectInstanceContextResolver(f.client).resolveCredential(token)).kind,
+			).toBe("resolved");
+		});
+	});
+	it("reports verified integrations and a published catalog as setup diagnostics", async () => {
+		await seed();
+		await withDirectory(async (directory) => {
+			await connectProductionInstance(directory);
+			const revision = await publishAiCreditsOnProduction(f);
 			const ready = await environments(["readiness", "alpha"]);
 			expect(ready.code).toBe(0);
-			expect(ready.json).toMatchObject({ ready: true, blockers: [], catalogRevisionId: revision });
-
-			const activated = await activate();
-			expect(activated.code).toBe(0);
-			expect(activated.json).toMatchObject({
-				instance: "alpha",
-				environment: "production",
-				active: true,
-				credentialDisclosed: true,
-				credentialsOut: out,
+			expect(ready.json).toMatchObject({
+				lifecycleStatus: "active",
+				ready: true,
+				blockers: [],
+				catalogRevisionId: revision,
 			});
-			expect((await stat(out)).mode & 0o777).toBe(0o600);
-			const token = String(JSON.parse(await readFile(out, "utf8")).credentials[0].credential);
-			expect(token).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
-			expect(activated.stdout).not.toContain(token);
-			expect((await resolver.resolveCredential(token)).kind).toBe("resolved");
-			expect(await lifecycleOf("alpha")).toBe("active");
-			expect((await credentials(["status", "alpha"])).json).toMatchObject({ full: { live: true } });
-			expect(
-				await f.sql`
-					SELECT principal_id, metadata->>'operator' AS operator,
-						metadata->>'catalogRevisionId' AS revision, metadata->>'memberOverrideReason' AS reason
-					FROM platform_audit_events WHERE action='environment.activated'
-				`,
-			).toEqual([{ principal_id: null, operator: "ops-runbook", revision, reason: null }]);
-
-			// Bootstrap must be told: it refuses the manifest that still says inactive, and a key it
-			// does not declare. The updated manifest is exact and issues no second key.
-			const bootstrap = new PlatformBootstrapService(new BunPlatformUnitOfWork(f.client));
-			await expect(
-				bootstrap.inspect(topology({ lifecycleStatus: "inactive", issueCredential: false })),
-			).rejects.toThrow("lifecycleStatus active in the database but inactive in the manifest");
-			await expect(
-				bootstrap.inspect(topology({ lifecycleStatus: "active", issueCredential: false })),
-			).rejects.toThrow("project credential not declared");
-			await expect(
-				bootstrap.inspect(topology({ lifecycleStatus: "active", issueCredential: true })),
-			).resolves.toMatchObject({ state: "exact", credentialsToIssue: [] });
 		});
 	});
-
-	it("replays a request key and answers an active environment without issuing another key", async () => {
-		await seed("inactive");
-		const resolver = new PostgresProjectInstanceContextResolver(f.client);
-		await withDirectory(async (directory) => {
-			await connectProduction(directory);
-			await publishCatalog();
-			const activate = (file: string, key: string) =>
-				environments([
-					"activate",
-					"alpha",
-					"--credentials-out",
-					join(directory, file),
-					"--request-key",
-					key,
-				]);
-			const first = await activate("first.json", "activate-1");
-			expect(first.json).toMatchObject({ credentialDisclosed: true });
-			const token = String(
-				JSON.parse(await readFile(join(directory, "first.json"), "utf8")).credentials[0].credential,
-			);
-
-			for (const [file, key] of [
-				["replay.json", "activate-1"],
-				["again.json", "activate-2"],
-			] as const) {
-				const repeated = await activate(file, key);
-				expect(repeated.code).toBe(0);
-				expect(repeated.json).toMatchObject({
-					active: true,
-					credentialDisclosed: false,
-					credentialsOut: null,
-				});
-				await expect(stat(join(directory, file))).rejects.toMatchObject({ code: "ENOENT" });
-			}
-			// Neither repeat replaced the key that was issued.
-			expect((await resolver.resolveCredential(token)).kind).toBe("resolved");
-			expect(
-				await f.sql`SELECT 1 FROM platform_audit_events WHERE action='environment.activated'`,
-			).toHaveLength(1);
-		});
+	it("removes the activation subcommand without issuing credentials", async () => {
+		await seed();
+		const result = await environments(["activate", "alpha"]);
+		expect(result.code).toBe(64);
+		expect(result.stderr).toContain("Unknown subcommand");
+		expect(await f.sql`SELECT id FROM platform_project_api_credentials`).toHaveLength(0);
 	});
-
-	it("keeps the environment inactive when the key cannot be delivered", async () => {
-		await seed("inactive");
-		await withDirectory(async (directory) => {
-			await connectProduction(directory);
-			await publishCatalog();
-			// An existing output path is refused before anything changes.
-			const existing = join(directory, "existing.json");
-			await writeFile(existing, "kept");
-			const refused = await environments(["activate", "alpha", "--credentials-out", existing]);
-			expect(refused.code).toBe(1);
-			expect(await readFile(existing, "utf8")).toBe("kept");
-			expect(await lifecycleOf("alpha")).toBe("inactive");
-
-			const context = await openOperatorContext(env, {
-				validator: stubConnectionValidation(),
-				billing: stubEnvironmentBilling(() => f.sql),
-			});
-			try {
-				const gate = context.gate(await context.target("alpha"), "ops-runbook");
-				const activate = (deliver: (token: string) => Promise<void>) =>
-					context.lifecycle.activate(gate, context.billing, "activate-undelivered", {
-						fingerprint: null,
-						deliver,
-					});
-				await expect(
-					activate(async () => {
-						throw new Error("disk full");
-					}),
-				).rejects.toThrow("disk full");
-				// The activation rolled back: still inactive, no key, and nothing for a retry to replay.
-				expect(await lifecycleOf("alpha")).toBe("inactive");
-				expect(await f.sql`SELECT 1 FROM platform_project_api_credentials`).toHaveLength(0);
-				expect(
-					await f.sql`SELECT 1 FROM platform_connection_operations WHERE request_key='activate-undelivered'`,
-				).toHaveLength(0);
-				let delivered = "";
-				await expect(
-					activate(async (token) => {
-						delivered = token;
-					}),
-				).resolves.toMatchObject({ active: true, credentialDisclosed: true });
-				expect(delivered).toStartWith("pqpk_");
-			} finally {
-				await context.close();
-			}
-		});
-	});
-
-	it("applies the production limit only while the merchant platform runs", async () => {
-		await seed("inactive");
-		await f.sql`UPDATE platform_organizations SET production_limit=0 WHERE slug='ops'`;
-		await withDirectory(async (directory) => {
-			await connectProduction(directory);
-			await publishCatalog();
-			const activate = (file: string, settings?: Record<string, string | undefined>) =>
-				environments(["activate", "alpha", "--credentials-out", join(directory, file)], settings);
-			const limited = await activate("limited.json", { ...env, QUOTUM_CONSOLE_ENABLED: "true" });
-			expect(limited.code).toBe(1);
-			expect(limited.stderr).toContain("ACTIVATION_CONFLICT");
-			await expect(stat(join(directory, "limited.json"))).rejects.toMatchObject({ code: "ENOENT" });
-			expect(await lifecycleOf("alpha")).toBe("inactive");
-
-			// A headless deployment has no plan, so the same limit does not hold it back.
-			const headless = await activate("headless.json");
-			expect(headless.code).toBe(0);
-			expect(headless.json).toMatchObject({ active: true, credentialDisclosed: true });
-			expect(await lifecycleOf("alpha")).toBe("active");
-		});
-	});
-
-	it("changes an organization its members manage only with a stated reason", async () => {
-		await seed("inactive");
-		await withDirectory(async (directory) => {
-			await connectProduction(directory);
-			await publishCatalog();
-			await new MerchantBrowser(f).signup();
-			await f.sql`
-				INSERT INTO platform_memberships(organization_id, principal_id, role)
-				SELECT o.id, p.id, 'Owner' FROM platform_organizations o, platform_principals p
-				WHERE o.slug='ops'
-			`;
-			const merchantMode = { ...env, QUOTUM_CONSOLE_ENABLED: "true" };
-			const activate = (file: string, ...extra: string[]) =>
-				environments(
-					["activate", "alpha", "--credentials-out", join(directory, file), ...extra],
-					merchantMode,
-				);
-			// Reading readiness needs no flag.
-			expect((await environments(["readiness", "alpha"], merchantMode)).code).toBe(0);
-
-			const refused = await activate("refused.json");
-			expect(refused.code).toBe(1);
-			expect(refused.stderr).toContain("This organization has members");
-			expect(refused.stderr).toContain("--member-override-reason");
-			await expect(stat(join(directory, "refused.json"))).rejects.toMatchObject({ code: "ENOENT" });
-			expect(await lifecycleOf("alpha")).toBe("inactive");
-
-			const allowed = await activate(
-				"allowed.json",
-				"--member-override-reason",
-				"owner asked us to go live",
-			);
-			expect(allowed.code).toBe(0);
-			expect(await lifecycleOf("alpha")).toBe("active");
-			expect(
-				await f.sql`
-					SELECT metadata->>'operator' AS operator, metadata->>'memberOverrideReason' AS reason
-					FROM platform_audit_events WHERE action='environment.activated'
-				`,
-			).toEqual([{ operator: "ops-runbook", reason: "owner asked us to go live" }]);
-		});
-	});
-
-	it("leaves sandbox to onboarding and rejects an unknown instance", async () => {
-		await seed("inactive");
-		await withDirectory(async (directory) => {
-			const out = join(directory, "sandbox.json");
-			const sandbox = await environments(["activate", "alpha-sandbox", "--credentials-out", out]);
-			expect(sandbox.code).toBe(64);
-			expect(sandbox.stderr).toContain("only production is activated");
-			await expect(stat(out)).rejects.toMatchObject({ code: "ENOENT" });
-			const unknown = await environments(["activate", "missing", "--credentials-out", out]);
-			expect(unknown.code).toBe(1);
-			expect(unknown.stderr).toContain("was not found");
-		});
-	});
-
-	it("reads the published catalog through the operator's own connection", async () => {
-		await seed("inactive");
-		const revision = await publishCatalog();
-		// No injected billing port: the command builds one on its own database connection.
+	it("reads published catalog diagnostics through the operator's own connection", async () => {
+		await seed();
+		const revision = await publishAiCreditsOnProduction(f);
 		const readiness = await environments(["readiness", "alpha"], env, {});
 		expect(readiness.code).toBe(2);
-		expect(readiness.json).toMatchObject({ catalogRevisionId: revision });
-		expect(readiness.json.blockers).toEqual([
-			"PROVIDER_REQUIRED",
-			"PROJECTION_VALIDATION_REQUIRED",
-		]);
+		expect(readiness.json).toMatchObject({
+			catalogRevisionId: revision,
+			lifecycleStatus: "active",
+		});
 	});
 });

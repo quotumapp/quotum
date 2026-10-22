@@ -1506,7 +1506,7 @@ describe("MCP consent scopes", () => {
 	});
 });
 
-describe("MCP environments that are not activated yet", () => {
+describe("MCP environments available from creation", () => {
 	const production = { ...merchantTestScope, environment: "production" as const };
 	const catalog = {
 		expectedRevision: null,
@@ -1540,7 +1540,7 @@ describe("MCP environments that are not activated yet", () => {
 		return grant;
 	};
 
-	it("discovers inactive production through the organization connection", async () => {
+	it("discovers active production through the organization connection", async () => {
 		const browser = await owner();
 		await redeem(browser);
 		const grant = await approvedGrant();
@@ -1550,59 +1550,44 @@ describe("MCP environments that are not activated yet", () => {
 				.map(({ environment, status }) => [environment, status])
 				.sort(),
 		).toEqual([
-			["production", "inactive"],
+			["production", "active"],
 			["sandbox", "active"],
 		]);
 	});
 
-	it("serves the catalog and refuses every other read until the environment is activated", async () => {
+	it("serves production reads before any integrations or keys are configured", async () => {
 		const browser = await owner();
 		const tokens = await redeem(browser, production);
 		expect((await callTool(tokens.access_token, "get_catalog")).isError).not.toBe(true);
-		const refused = await callTool(tokens.access_token, "get_project_stats");
-		expect(refused.isError).toBe(true);
-		expect(JSON.parse(refused.content[0]?.text ?? "{}").error).toMatchObject({
-			code: "ENVIRONMENT_INACTIVE",
-			status: 409,
-		});
-		const listed = await browser.json<{ connections: unknown[] }>(
-			"/api/platform/mcp/connections/list",
-			{ scope: organizationScope },
-		);
-		expect(listed.connections).toHaveLength(1);
-		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
 		expect((await callTool(tokens.access_token, "get_project_stats")).isError).not.toBe(true);
+		expect(await f.sql`SELECT id FROM platform_project_api_credentials`).toHaveLength(0);
+		expect(await f.sql`SELECT id FROM platform_connections`).toHaveLength(0);
 	});
 
-	it("proposes only catalog publication, behind step-up, until the environment is activated", async () => {
+	it("proposes production operations immediately while preserving publication step-up", async () => {
 		const browser = await owner();
 		await createBillingAccount("production");
 		await redeem(browser, production, true);
 		const grant = await approvedGrant();
 		const actions = await f.mcpChanges.capabilities(grant.id, production);
-		expect(actions.filter((action) => action.available).map((action) => action.action)).toEqual([
-			"catalog.publish",
-		]);
-		expect(actions.find((action) => action.action === "entities.write")).toMatchObject({
-			available: false,
-			unavailableReason: "environment_inactive",
-		});
+		expect(actions.find((action) => action.action === "entities.write")?.available).toBe(true);
 		const entity = {
 			reason: "Team setup",
 			action: "entities.write",
 			parameters: ["customer-a"],
 			body: { externalId: "team-a", kind: "team" },
 		};
-		await expect(
-			f.mcpChanges.prepare(grant.id, production, { ...entity, requestKey: "entity-early" }),
-		).rejects.toMatchObject({ code: "ENVIRONMENT_INACTIVE", status: 409 });
+		expect(
+			(await f.mcpChanges.prepare(grant.id, production, { ...entity, requestKey: "entity-early" }))
+				.status,
+		).toBe("pending");
 		await expect(
 			f.mcpChanges.inspect(grant.id, production, {
 				resource: "entities",
 				parameters: ["customer-a"],
 				query: {},
 			}),
-		).rejects.toMatchObject({ code: "ENVIRONMENT_INACTIVE", status: 409 });
+		).resolves.toBeDefined();
 		const change = await f.mcpChanges.prepare(grant.id, production, {
 			requestKey: "catalog-first",
 			reason: "First production catalog",
@@ -1638,7 +1623,6 @@ describe("MCP environments that are not activated yet", () => {
 			await f.sql`SELECT r.status FROM catalog_revisions r JOIN projects p ON p.id=r.project_id WHERE p.environment='production'`,
 		).toEqual([{ status: "published" }]);
 
-		await f.sql`UPDATE projects SET lifecycle_status='active' WHERE environment='production'`;
 		const widened = await f.mcpChanges.capabilities(grant.id, production);
 		expect(widened.find((action) => action.action === "entities.write")?.available).toBe(true);
 		const prepared = await f.mcpChanges.prepare(grant.id, production, {

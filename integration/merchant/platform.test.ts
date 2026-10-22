@@ -30,7 +30,10 @@ import {
 } from "./fixture";
 
 const f = merchantFixture();
-beforeEach(() => f.reset());
+beforeEach(async () => {
+	f.store.config.projectLimit = 5;
+	await f.reset();
+});
 afterAll(() => f.sql.close());
 async function onboard(browser: MerchantBrowser, orgSlug = "acme") {
 	const org = await browser.json<OnboardingDraftView>("/api/platform/onboarding/organization", {
@@ -143,7 +146,7 @@ describe("merchant platform transactions", () => {
 			name: "Example Project",
 			organizationSlug: "acme",
 			environments: [
-				{ environment: "production" as const, active: false },
+				{ environment: "production" as const, active: true },
 				{ environment: "sandbox" as const, active: true },
 			],
 		};
@@ -213,7 +216,7 @@ describe("merchant platform transactions", () => {
 			(
 				await f.sql`SELECT lifecycle_status='active' AS active FROM projects WHERE environment='production'`
 			)[0].active,
-		).toBe(false);
+		).toBe(true);
 		const credential = await browser.json<{ credential: string }>(
 			`/api/platform/provisioning/${operation.id}/credential`,
 			{},
@@ -287,7 +290,7 @@ describe("merchant platform transactions", () => {
 		const session = await browser.json<MerchantSessionView>("/api/platform/session");
 		expect(session.projects.map(({ key }) => key).sort()).toEqual(["example", "second"]);
 		expect(session.projects.find(({ key }) => key === "second")?.environments).toEqual([
-			{ environment: "production", active: false },
+			{ environment: "production", active: true },
 			{ environment: "sandbox", active: true },
 		]);
 		const credential = await browser.json<{ credential: string }>(
@@ -346,10 +349,11 @@ describe("merchant platform transactions", () => {
 			).projectKey,
 		).toBe("example");
 
-		await f.sql`UPDATE platform_organizations SET project_limit=1 WHERE slug='acme'`;
+		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE platform_project_id IN (SELECT p.id FROM platform_projects p JOIN platform_organizations o ON o.id=p.organization_id WHERE o.slug='acme')`;
+		f.store.config.projectLimit = 1;
 		expect(await create("over-the-cap", "third")).toEqual([409, "PROJECT_LIMIT_REACHED"]);
 		expect(await f.sql`SELECT key FROM platform_projects`).toHaveLength(2);
-		await f.sql`UPDATE platform_organizations SET project_limit=2 WHERE slug='acme'`;
+		f.store.config.projectLimit = 2;
 		expect(await create("under-the-cap", "third")).toEqual([200, null]);
 	});
 	it("lets only members who may create projects add one", async () => {
@@ -618,7 +622,7 @@ describe("merchant platform transactions", () => {
 					headers: { ...headers, "x-quotum-environment": "production" },
 				})
 			).status,
-		).toBe(404);
+		).toBe(200);
 	});
 	it("serves the capability reads to organization members in active environments", async () => {
 		const browser = new MerchantBrowser(f);
@@ -670,7 +674,7 @@ describe("merchant platform transactions", () => {
 					})
 				).status,
 				path,
-			).toBe(404);
+			).toBe(200);
 		}
 	});
 	it("allows actionable setup reads without mutation idempotency while denying viewers", async () => {

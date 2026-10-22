@@ -63,15 +63,11 @@ const reads: Array<["GET" | "POST", string, MerchantBillingOperation, string[]]>
 	["POST", "/v1/billing-accounts/account%2Fone/usage/check", "usage.check", ["account/one"]],
 ];
 
-function fixture(
-	respond?: MerchantBillingPort["dispatch"],
-	environmentStatus?: "active" | "inactive",
-) {
+function fixture(respond?: MerchantBillingPort["dispatch"]) {
 	const commands: MerchantBillingCommand[] = [];
 	const portFetch = createMcpPortFetch({
 		projectInstanceId,
 		principalId,
-		environmentStatus,
 		port: {
 			dispatch: async (command) => {
 				commands.push(command);
@@ -105,34 +101,8 @@ describe("MCP billing port transport", () => {
 		expect(commands).toHaveLength(1);
 	});
 
-	it("serves only the catalog on an environment that is not activated yet", async () => {
-		const { commands, fetch } = fixture(undefined, "inactive");
-		for (const [method, path, operation] of reads) {
-			const before = commands.length;
-			const body = method === "POST" ? { featureKey: "tokens", quantity: "2" } : undefined;
-			const response = await fetch(`${baseUrl}${path}`, {
-				method,
-				...(body
-					? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
-					: {}),
-			});
-			if (operation === "catalog") {
-				expect(response.status).toBe(200);
-				expect(commands).toHaveLength(before + 1);
-				continue;
-			}
-			expect({ operation, status: response.status }).toEqual({ operation, status: 409 });
-			expect(await response.json()).toMatchObject({
-				success: false,
-				error: { code: "ENVIRONMENT_INACTIVE" },
-			});
-			expect(commands).toHaveLength(before);
-		}
-		expect(commands.map((command) => command.operation)).toEqual(["catalog"]);
-	});
-
 	it("keeps every read for an active environment", async () => {
-		const { commands, fetch } = fixture(undefined, "active");
+		const { commands, fetch } = fixture();
 		for (const [method, path] of reads) {
 			const body = method === "POST" ? { featureKey: "tokens", quantity: "2" } : undefined;
 			const response = await fetch(`${baseUrl}${path}`, {

@@ -219,7 +219,7 @@ describe("setEnvironmentSuspension", () => {
 		platformProjectId: "project-1",
 		instanceId: "instance-1",
 	};
-	const base = { target, operator, enforceProductionLimit: true };
+	const base = { target, operator };
 
 	it("suspends an active environment and audits the reason", async () => {
 		const db = fakeSql({ organization: acme, instances: [instance()] });
@@ -247,35 +247,22 @@ describe("setEnvironmentSuspension", () => {
 		});
 	});
 
-	it("resumes a suspended environment under the production limit unless the caller waives it", async () => {
+	it("resumes a suspended production independently of a production quota", async () => {
 		const suspended = instance({ lifecycleStatus: "suspended", environment: "production" });
-		const enforced = fakeSql({ organization: acme, instances: [suspended] });
-		await setEnvironmentSuspension(enforced.sql, { ...base, suspended: false });
-		expect(enforced.calls).toEqual([
-			{
-				name: "resume",
-				args: ["instance-1", "organization-1", { enforceProductionLimit: true }],
-			},
-		]);
-		expect(enforced.audit()[0]?.[2]).toBe("environment.resumed");
-
-		const waived = fakeSql({ organization: acme, instances: [suspended] });
-		await setEnvironmentSuspension(waived.sql, {
-			...base,
-			suspended: false,
-			enforceProductionLimit: false,
-		});
-		expect(waived.calls[0]?.args[2]).toEqual({ enforceProductionLimit: false });
+		const db = fakeSql({ organization: acme, instances: [suspended] });
+		await setEnvironmentSuspension(db.sql, { ...base, suspended: false });
+		expect(db.calls).toEqual([{ name: "resume", args: ["instance-1", "organization-1"] }]);
+		expect(db.audit()[0]?.[2]).toBe("environment.resumed");
 	});
 
-	it("says so when the production limit blocks a resume", async () => {
+	it("says so when an environment can no longer be resumed", async () => {
 		const db = fakeSql({
 			organization: acme,
 			instances: [instance({ lifecycleStatus: "suspended", environment: "production" })],
 			moved: false,
 		});
 		await expect(setEnvironmentSuspension(db.sql, { ...base, suspended: false })).rejects.toThrow(
-			"production limit is reached",
+			"could not be resumed",
 		);
 		expect(db.audit()).toHaveLength(0);
 	});

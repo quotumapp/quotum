@@ -102,10 +102,10 @@ interface Readiness {
 	connections: { kind: string; validated_at: string | null }[];
 	fingerprint: string;
 }
-/** Gating details mirror `blockers` in order; capability details follow them without gating. */
+/** Setup details mirror `blockers` in order; none gate environment access. */
 function expectMirroredBlockers(readiness: Readiness) {
 	expect(
-		readiness.blockerDetails.filter((detail) => detail.gating).map((detail) => detail.code),
+		readiness.blockerDetails.slice(0, readiness.blockers.length).map((detail) => detail.code),
 	).toEqual(readiness.blockers);
 	expect(readiness.blockerDetails.slice(readiness.blockers.length)).toEqual([
 		{ ...capabilityDetail, gating: false },
@@ -254,14 +254,14 @@ describe("encrypted merchant connections", () => {
 		expect(readiness.blockers).toContain("PROVIDER_REQUIRED");
 		expectMirroredBlockers(readiness);
 		expect(readiness.blockerDetails).toEqual([
-			{ code: "PROVIDER_REQUIRED", gating: true },
+			{ code: "PROVIDER_REQUIRED", gating: false },
 			{
 				code: "PROJECTION_VALIDATION_REQUIRED",
-				gating: true,
+				gating: false,
 				connectionKind: "projection",
 				observed: { validatedAt: null, maxAgeSeconds: 900 },
 			},
-			{ code: "PUBLISHED_CATALOG_REQUIRED", gating: true },
+			{ code: "PUBLISHED_CATALOG_REQUIRED", gating: false },
 			{ ...capabilityDetail, gating: false },
 		]);
 	});
@@ -392,7 +392,7 @@ async function grant(browser: MerchantBrowser, target: string, action: string) {
 	await f.sql`DELETE FROM platform_rate_limits`;
 	return browser.completeStepUp(challenge.id);
 }
-it("activates only reviewed production readiness and discloses its credential once", async () => {
+it("reports production setup independently of credential issuance and discloses keys once", async () => {
 	const browser = new MerchantBrowser(f);
 	await onboard(browser);
 	const prod = { ...scope, environment: "production" as const };
@@ -437,9 +437,9 @@ it("activates only reviewed production readiness and discloses its credential on
 	expectMirroredBlockers(pending);
 	const stripeSubject = { connectionKind: "stripe", provider: "stripe" } as const;
 	expect(pending.blockerDetails.slice(0, pending.blockers.length)).toEqual([
-		{ code: "STRIPE_EVENT_REQUIRED", gating: true, ...stripeSubject },
-		{ code: "STRIPE_CATALOG_REQUIRED", gating: true, ...stripeSubject },
-		{ code: "PUBLISHED_CATALOG_REQUIRED", gating: true },
+		{ code: "STRIPE_EVENT_REQUIRED", gating: false, ...stripeSubject },
+		{ code: "STRIPE_CATALOG_REQUIRED", gating: false, ...stripeSubject },
+		{ code: "PUBLISHED_CATALOG_REQUIRED", gating: false },
 	]);
 	await f.sql`UPDATE platform_connection_versions v SET event_verified_at=now() FROM platform_connections c WHERE c.active_version_id=v.id AND c.kind='stripe'`;
 	const [instance] = await f.sql<
@@ -500,42 +500,22 @@ it("activates only reviewed production readiness and discloses its credential on
 			})),
 		),
 	);
-	expect(
-		(
-			await browser.request("/api/platform/environments/activate", {
-				scope: prod,
-				fingerprint: "stale",
-			})
-		).status,
-	).toBe(409);
-	const token = await grant(browser, ready.fingerprint, "environment.activate");
+	const token = await grant(browser, "issue-production", "credentials.rotate");
+	// Issuance is independent of deprecated database quotas and readiness fingerprints.
 	await f.sql`UPDATE platform_organizations SET production_limit=0 WHERE slug='acme'`;
-	expect(
-		(
-			await browser.request(
-				"/api/platform/environments/activate",
-				{ scope: prod, fingerprint: ready.fingerprint },
-				{ headers: { "x-quotum-step-up-grant": token }, key: "activate-once" },
-			)
-		).status,
-	).toBe(409);
-	await f.sql`UPDATE platform_organizations SET production_limit=1 WHERE slug='acme'`;
-	// A repeated activation replaces the live key, even with the application clock running behind
-	// the database clock that dated it.
-	await f.sql`INSERT INTO platform_project_api_credentials(project_instance_id,access,secret_verifier) SELECT id,'full',sha256('earlier-activation'::bytea) FROM projects WHERE environment='production'`;
 	f.advance(-60_000);
 	const activated = await browser.json<{ credential: string; credentialDisclosed: boolean }>(
-		"/api/platform/environments/activate",
-		{ scope: prod, fingerprint: ready.fingerprint },
-		{ headers: { "x-quotum-step-up-grant": token }, key: "activate-once" },
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ headers: { "x-quotum-step-up-grant": token }, key: "issue-production" },
 	);
 	f.advance(60_000);
 	expect(activated.credentialDisclosed).toBe(true);
 	expect(activated.credential).toMatch(/^pqpk_[A-Za-z0-9_-]{43}$/u);
 	const replay = await browser.json<Record<string, unknown>>(
-		"/api/platform/environments/activate",
-		{ scope: prod, fingerprint: ready.fingerprint },
-		{ key: "activate-once" },
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ key: "issue-production" },
 	);
 	expect(replay.credentialDisclosed).toBe(false);
 	expect(replay.credential).toBeUndefined();
@@ -662,6 +642,7 @@ it("activates only reviewed production readiness and discloses its credential on
 		{ action: string; access: string | null }[]
 	>`SELECT action, metadata->>'access' AS access FROM platform_audit_events WHERE action LIKE 'credential.%' ORDER BY created_at`;
 	expect(audited.map((event) => `${event.action}:${event.access}`)).toEqual([
+		"credential.issued:full",
 		"credential.rotated:full",
 		"credential.issued:read_only",
 		"credential.rotated:read_only",
@@ -806,13 +787,13 @@ it("activates only reviewed production readiness and discloses its credential on
 	expect(stale.blockerDetails.slice(0, stale.blockers.length)).toEqual([
 		{
 			code: "PROJECTION_VALIDATION_REQUIRED",
-			gating: true,
+			gating: false,
 			connectionKind: "projection",
 			observed: { validatedAt: validatedAt("projection"), maxAgeSeconds: 900 },
 		},
 		{
 			code: "STRIPE_VALIDATION_REQUIRED",
-			gating: true,
+			gating: false,
 			connectionKind: "stripe",
 			provider: "stripe",
 			observed: { validatedAt: validatedAt("stripe"), maxAgeSeconds: 900 },
@@ -828,7 +809,7 @@ it("activates only reviewed production readiness and discloses its credential on
 	expectMirroredBlockers(broken);
 	expect(broken.blockerDetails.slice(0, broken.blockers.length)).toEqual([
 		...stale.blockerDetails.slice(0, stale.blockers.length),
-		{ code: "STRIPE_SECRET_UNAVAILABLE", gating: true, ...stripeSubject },
+		{ code: "STRIPE_SECRET_UNAVAILABLE", gating: false, ...stripeSubject },
 	]);
 });
 it("replaces and withdraws a key while the application clock runs behind the database", async () => {
@@ -859,3 +840,55 @@ function connectionService() {
 	if (!f.connections) throw new Error("Connection test service unavailable");
 	return f.connections;
 }
+
+it("makes production and its first key available before any setup is configured", async () => {
+	const browser = new MerchantBrowser(f);
+	await onboard(browser);
+	const prod = { ...scope, environment: "production" as const };
+	expect(
+		await f.sql`SELECT environment,lifecycle_status FROM projects ORDER BY environment`,
+	).toEqual([
+		{ environment: "production", lifecycle_status: "active" },
+		{ environment: "sandbox", lifecycle_status: "active" },
+	]);
+	const before = await browser.json<Record<string, unknown>>(
+		"/api/platform/environments/credentials/status",
+		{ scope: prod },
+	);
+	expect(before.full).toEqual({ live: false, issuedAt: null });
+	const denied = await browser.request(
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ key: "first-production" },
+	);
+	expect(denied.status).toBe(403);
+	const token = await grant(browser, "first-production", "credentials.rotate");
+	const issued = await browser.json<{ credential: string }>(
+		"/api/platform/environments/credentials/rotate",
+		{ scope: prod },
+		{ headers: { "x-quotum-step-up-grant": token }, key: "first-production" },
+	);
+	const resolved = await new PostgresProjectInstanceContextResolver(f.client).resolveCredential(
+		issued.credential,
+	);
+	expect(resolved).toMatchObject({
+		kind: "resolved",
+		context: { environment: "production", lifecycleStatus: "active" },
+	});
+	expect(await f.sql`SELECT id FROM platform_connections`).toHaveLength(0);
+	const headers = {
+		"x-quotum-organization": "acme",
+		"x-quotum-project": "example",
+		"x-quotum-environment": "production",
+	};
+	const catalog = await browser.request("/api/billing/admin/catalog", undefined, {
+		method: "GET",
+		headers,
+	});
+	expect(catalog.status).toBe(200);
+	const removed = await browser.request("/api/platform/environments/activate", {
+		scope: prod,
+		fingerprint: "old",
+	});
+	expect(removed.status).toBe(404);
+});

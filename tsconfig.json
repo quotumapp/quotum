@@ -4,5 +4,5 @@
 		"skipLibCheck": true,
 		"types": ["bun"]
 	},
-	"exclude": ["node_modules", "local-sandbox"]
+	"exclude": ["node_modules", "coverage", "local-sandbox"]
 }

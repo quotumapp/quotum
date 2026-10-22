@@ -500,11 +500,7 @@ describe("merchant billing port", () => {
 			repository: { getPublishedCatalog: async () => published },
 		});
 
-		// The inactive environment resolves: its catalog stays readable while it awaits activation.
-		expect(
-			await billing.dispatch(command("catalog", { projectInstanceId: inactive.projectInstanceId })),
-		).toEqual({ status: 200, body: { success: true, data: published } });
-		for (const operation of ["providers.capabilities", "account.actions"] as const) {
+		for (const operation of ["catalog", "providers.capabilities", "account.actions"] as const) {
 			expect(
 				await billing.dispatch(
 					command(operation, { projectInstanceId: inactive.projectInstanceId }),

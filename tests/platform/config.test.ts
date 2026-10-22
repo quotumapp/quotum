@@ -171,3 +171,19 @@ it("MCP billing writes require an enabled remote transport and explicit opt-in",
 	).toBe(true);
 	expect(() => loadMerchantConfig({ ...merchantEnv, QUOTUM_MCP_WRITES_ENABLED: "yes" })).toThrow();
 });
+
+describe("organization project limit", () => {
+	it("defaults to five and accepts a configured positive integer", () => {
+		expect(loadMerchantConfig(merchantEnv).projectLimit).toBe(5);
+		expect(loadMerchantConfig({ ...merchantEnv, QUOTUM_PROJECT_LIMIT: " 12 " }).projectLimit).toBe(
+			12,
+		);
+		expect(loadMerchantConfig({ ...merchantEnv, QUOTUM_PROJECT_LIMIT: " " }).projectLimit).toBe(5);
+	});
+	it("rejects invalid, fractional and unsafe limits at startup", () => {
+		for (const value of ["0", "-1", "1.5", "1e2", "NaN", "Infinity", "9007199254740992"])
+			expect(() => loadMerchantConfig({ ...merchantEnv, QUOTUM_PROJECT_LIMIT: value })).toThrow(
+				"QUOTUM_PROJECT_LIMIT must be a positive integer",
+			);
+	});
+});

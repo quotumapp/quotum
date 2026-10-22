@@ -5,7 +5,10 @@ import { PlatformOrganizationRepository } from "../../src/platform/persistence/r
 import { MerchantBrowser, merchantFixture, onboard } from "./fixture";
 
 const f = merchantFixture();
-beforeEach(() => f.reset());
+beforeEach(async () => {
+	f.store.config.projectLimit = 5;
+	await f.reset();
+});
 afterAll(() => f.sql.close());
 
 // The fixture pool is shared by the app and this file, so a blocked request, the transaction
@@ -81,7 +84,7 @@ describe("merchant onboarding races", () => {
 		const second = new MerchantBrowser(f);
 		await f.sql`DELETE FROM platform_rate_limits`;
 		await second.login("owner@example.com");
-		await f.sql`UPDATE platform_organizations SET project_limit=2 WHERE slug='acme'`;
+		f.store.config.projectLimit = 2;
 
 		let pending: Promise<Response>[] = [];
 		// Both requests wait on the organization lock held here, so the cap count is read by whichever

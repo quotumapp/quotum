@@ -5,7 +5,6 @@ import type { MerchantSql } from "../platform/database";
 import * as authSchema from "../platform/persistence/auth-schema";
 import type { PlatformQueryValue } from "../platform/persistence/query-executor";
 import {
-	activateProjectProduction,
 	BunPlatformQueryExecutor,
 	BunProjectInstanceStore,
 	renameProjectInstances,
@@ -32,20 +31,10 @@ export function merchantSql(client: SQL): MerchantSql {
 			forProject: (id: string) => instances.forProject(id),
 			forPrincipal: (id: string) => instances.forPrincipal(id),
 			create: instances.create.bind(instances),
-			activateProduction: (
-				instanceId: string,
-				organizationId: string,
-				catalogRevisionId: string,
-				options?: { enforceProductionLimit?: boolean },
-			) =>
-				activateProjectProduction(client, instanceId, organizationId, catalogRevisionId, options),
 			suspend: (instanceId: string, organizationId: string) =>
 				suspendProjectInstance(client, instanceId, organizationId),
-			resume: (
-				instanceId: string,
-				organizationId: string,
-				options?: { enforceProductionLimit?: boolean },
-			) => resumeProjectInstance(client, instanceId, organizationId, options),
+			resume: (instanceId: string, organizationId: string) =>
+				resumeProjectInstance(client, instanceId, organizationId),
 			renameForProject: (platformProjectId: string, organizationId: string, name: string) =>
 				renameProjectInstances(client, platformProjectId, organizationId, name),
 		},
