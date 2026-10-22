@@ -53,12 +53,16 @@ const authRoute = "/api/auth/request-password-reset";
 describe("merchant request text and URLs", () => {
 	it("lists connections for a valid scope and answers 400, not 503, for text Postgres cannot store", async () => {
 		const send = await signedIn();
-		const valid = await send(list, { body: JSON.stringify({ scope: merchantTestScope }) });
+		const valid = await send(list, {
+			body: JSON.stringify({ scope: { organizationSlug: merchantTestScope.organizationSlug } }),
+		});
 		expect(valid.status).toBe(200);
 		for (const field of ["organizationSlug", "projectKey"] as const) {
 			for (const value of ["\u0000", "\ud800", "acme\u0000", "\u0000".repeat(3)]) {
 				const result = await send(list, {
-					body: JSON.stringify({ scope: { ...merchantTestScope, [field]: value } }),
+					body: JSON.stringify({
+						scope: { organizationSlug: merchantTestScope.organizationSlug, [field]: value },
+					}),
 				});
 				expect({ field, value: JSON.stringify(value), status: result.status }).toEqual({
 					field,
@@ -70,7 +74,11 @@ describe("merchant request text and URLs", () => {
 		}
 		// An oversized slug cannot exist; it is refused or not found, never a service failure.
 		const oversized = await send(list, {
-			body: JSON.stringify({ scope: { ...merchantTestScope, organizationSlug: "x".repeat(1000) } }),
+			body: JSON.stringify({
+				scope: {
+					organizationSlug: "x".repeat(1000),
+				},
+			}),
 		});
 		expect(oversized.status).toBeLessThan(500);
 	});

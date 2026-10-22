@@ -477,7 +477,7 @@ be different. The API validates Host and any Origin header against configured or
 The public API ingress must expose `/mcp`, `/oauth/token`, `/oauth/revoke`, `/oauth/jwks`,
 `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource` and
 `/.well-known/oauth-protected-resource/mcp` without adding the merchant service token or cookies.
-The UI Worker owns `/oauth/authorize`, sign-in, environment selection and consent; it forwards
+The UI Worker owns `/oauth/authorize`, sign-in, organization selection and consent; it forwards
 only the exact browser `/api/auth/oauth2/authorize`, `/continue`, `/consent` and platform MCP routes
 in its allowlist. Keep arbitrary `/api/auth/*` routes inaccessible through the Worker.
 
@@ -499,11 +499,16 @@ must reconnect requesting `quotum.billing.write`; existing grants remain read-on
 the writes flag to block proposals/approvals while retaining read access and outcome inspection.
 
 The consent page can narrow a write request to read-only, and the authorization context reports
-`canPropose` per environment, so deploy the API before the UI that reads it. Sign-in proofs last five
-minutes and no longer bind the requested scope, so an authorization that began on the previous API
-version fails at its next step and restarts from the client. No migration is involved.
+`canPropose` per organization, so deploy the API before the UI that reads it. Sign-in proofs last five
+minutes. Pending authorization flows from the environment-scoped API must restart from the client
+after the organization cutover below.
 
 See [MCP server](mcp.md#connect-in-a-browser) for identity, scope, lifetimes and revocation behavior.
+
+The organization-scoped MCP cutover removes the grant's instance binding in `004_merchant.sql`.
+Follow [the restore and reconnect procedure](upgrade-transitions.md#organization-scoped-remote-mcp)
+with remote MCP disabled, then deploy the matching console and reconnect clients. Grants are never
+expanded from environment access without new consent. No new environment variables are required.
 
 ### Stripe Apps OAuth
 

@@ -1,16 +1,19 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { type DiagnosticLog, runTool } from "./results";
+import { type McpTarget, mcpTargetSchema } from "./target";
 
 /** Injected by the remote composition; stdio never receives mutation authority. */
 export interface McpChangeTools {
 	schema: z.ZodObject;
-	capabilities(): Promise<unknown>;
-	inspect(input: {
-		resource: string;
-		parameters: string[];
-		query: Record<string, string>;
-	}): Promise<unknown>;
+	capabilities(target: McpTarget): Promise<unknown>;
+	inspect(
+		input: {
+			resource: string;
+			parameters: string[];
+			query: Record<string, string>;
+		} & McpTarget,
+	): Promise<unknown>;
 	prepare(input: unknown): Promise<unknown>;
 	get(id: string): Promise<unknown>;
 	list(): Promise<unknown>;
@@ -43,7 +46,8 @@ export function registerChangeTools(server: McpServer, port: McpChangeTools, log
 					parameters: z.array(z.string().min(1).max(200)).max(1),
 					query: z.record(z.string().max(100), z.string().max(500)).default({}),
 				})
-				.strict(),
+				.strict()
+				.extend(mcpTargetSchema.shape),
 			annotations: { readOnlyHint: true },
 		},
 		(input) => runTool(() => port.inspect(input), log),
@@ -53,10 +57,10 @@ export function registerChangeTools(server: McpServer, port: McpChangeTools, log
 		{
 			description:
 				"Billing operations available to this connection and their approval requirements.",
-			inputSchema: z.object({}),
+			inputSchema: mcpTargetSchema,
 			annotations: { readOnlyHint: true },
 		},
-		() => runTool(() => port.capabilities(), log),
+		(input) => runTool(() => port.capabilities(input), log),
 	);
 	server.registerTool(
 		"prepare_billing_change",

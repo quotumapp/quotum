@@ -9,8 +9,9 @@ import { McpAuthorizations } from "./authorization";
 import type { McpChanges } from "./changes";
 
 const queryBody = z.strictObject({ oauth_query: z.string().min(1).max(8192) });
-const selectionBody = queryBody.extend({ scope: MerchantScopeSchema });
-const scopeBody = z.strictObject({ scope: MerchantScopeSchema });
+const organizationScope = z.strictObject({ organizationSlug: z.string().min(1).max(100) });
+const selectionBody = queryBody.extend({ scope: organizationScope });
+const scopeBody = z.strictObject({ scope: organizationScope });
 const revokeBody = scopeBody.extend({ id: z.uuid() });
 const success = (data: z.ZodType) => z.object({ success: z.literal(true), data });
 const route = (operationId: string, path: string, body: z.ZodType, response: z.ZodType) => ({
@@ -131,17 +132,14 @@ export function registerMcpRoutes(
 				principal: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
 				client: z.object({ id: z.string(), name: z.string() }),
 				scopes: z.array(z.string()),
-				environments: z.array(
+				organizations: z.array(
 					z.object({
-						scope: MerchantScopeSchema,
+						scope: organizationScope,
 						organizationName: z.string(),
-						projectName: z.string(),
-						/** `inactive` is a production not yet activated: only its catalog is reachable. */
-						status: z.enum(["active", "inactive"]),
 						canPropose: z.boolean(),
 					}),
 				),
-				selection: MerchantScopeSchema.nullable(),
+				selection: organizationScope.nullable(),
 			}),
 		),
 	);
@@ -155,10 +153,10 @@ export function registerMcpRoutes(
 			};
 		},
 		route(
-			"selectMcpEnvironment",
+			"selectMcpOrganization",
 			"/api/platform/oauth/selection",
 			selectionBody,
-			z.object({ projectInstanceId: z.uuid() }),
+			z.object({ organizationId: z.uuid() }),
 		),
 	);
 	app.post(
@@ -194,11 +192,11 @@ export function registerMcpRoutes(
 		async ({ request, body }) => {
 			const identity = await store.authenticate(request);
 			const input = revokeBody.parse(body);
-			const access = await grants.authorizeScope(identity.principalId, input.scope);
+			const access = await grants.authorizeOrganization(identity.principalId, input.scope);
 			// A replay only ever affects this immutable grant, including after reconnecting.
 			return {
 				success: true,
-				data: await grants.revoke(input.id, identity.principalId, "user", access.projectInstanceId),
+				data: await grants.revoke(input.id, identity.principalId, "user", access.organizationId),
 			};
 		},
 		route(

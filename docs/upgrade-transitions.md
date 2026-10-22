@@ -14,6 +14,67 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Organization-scoped remote MCP
+
+`migrations/004_merchant.sql` removes `platform_mcp_authorizations.project_instance_id` and changes
+its owner index to `(principal_id, organization_id)`. Proposal rows keep their instance, scope and
+receipts. Organization-wide access requires fresh consent: every old connection must reconnect.
+Stdio credentials and `/v1` are unchanged. No new environment variables are required.
+
+Finish or reconcile any `applying`/`needs_review` MCP execution before stopping the old service.
+Follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity), with
+`QUOTUM_MCP_ENABLED=false` until the matching API and console are deployed. Before the data-only
+restore, temporarily accept the old dump's grant column:
+
+```sql
+ALTER TABLE platform_mcp_authorizations ADD COLUMN project_instance_id uuid;
+```
+
+After restoring, while traffic and workers are still stopped, run the following transaction. It
+retains grant/proposal history, records why live grants ended, cancels unapproved proposals and
+invalidates both issued credentials and pending authorization proofs. Previously revoked legacy
+grants are cleaned too. Do not run this against a service accepting new authorizations.
+
+```sql
+BEGIN;
+WITH ended AS (
+  UPDATE platform_mcp_authorizations SET revoked_at = now()
+  WHERE project_instance_id IS NOT NULL AND revoked_at IS NULL
+  RETURNING id, principal_id, organization_id, client_id
+)
+INSERT INTO platform_audit_events(principal_id, organization_id, action, target, metadata)
+SELECT principal_id, organization_id, 'mcp.revoked', id::text,
+  jsonb_build_object('clientId', client_id, 'organizationId', organization_id, 'reason', 'scope_changed')
+FROM ended;
+UPDATE platform_auth_oauth_refresh_tokens
+SET revoked = COALESCE(revoked, now()), rotation_replay_response = NULL,
+  rotation_replay_expires_at = NULL
+WHERE authorization_code_id IN (
+  SELECT code_hash FROM platform_mcp_authorizations WHERE project_instance_id IS NOT NULL
+);
+DELETE FROM platform_auth_oauth_access_tokens WHERE authorization_code_id IN (
+  SELECT code_hash FROM platform_mcp_authorizations WHERE project_instance_id IS NOT NULL
+);
+DELETE FROM platform_auth_verifications WHERE identifier IN (
+  SELECT code_hash FROM platform_mcp_authorizations WHERE project_instance_id IS NOT NULL
+);
+DELETE FROM platform_auth_sessions WHERE id IN (
+  SELECT proof_session_id FROM platform_mcp_authorizations WHERE project_instance_id IS NOT NULL
+);
+UPDATE platform_mcp_changes SET status = 'cancelled'
+WHERE status = 'pending' AND authorization_id IN (
+  SELECT id FROM platform_mcp_authorizations WHERE project_instance_id IS NOT NULL
+);
+ALTER TABLE platform_mcp_authorizations DROP COLUMN project_instance_id;
+COMMIT;
+```
+
+Confirm no legacy grant remains live and all old refresh replay responses are empty. Deploy the
+console with the new organization consent and `/mcp?organization=<slug>` settings page before
+re-enabling remote MCP. Reconnect and verify `list_projects`, sandbox and production catalog reads,
+and any enabled browser approval flow. Old tokens must fail even after reconnecting. Rollback
+requires the pre-upgrade backup and old binaries; the old image refuses the new migration ledger.
+
 ## Outbound webhooks
 
 The billing core baseline adds `webhook_endpoints`, `domain_events` and `webhook_deliveries` with

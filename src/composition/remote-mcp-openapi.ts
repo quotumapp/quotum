@@ -149,7 +149,7 @@ export function remoteMcpOpenApi(): PathsObject {
 				tags: ["mcp"],
 				security: [{ mcpBearer: [] }],
 				description:
-					"Stateless Streamable HTTP MCP. Existing read-only tools run for the authorization's fixed project environment. 256 KiB body limit. No persistent session or server event stream.",
+					"Stateless Streamable HTTP MCP. Authorization is organization-scoped. Billing tools require explicit projectKey and environment arguments; list_projects discovers available targets. 256 KiB body limit. No persistent session or server event stream.",
 				requestBody: { required: true, content: json(object) },
 				parameters: [
 					{ in: "header", name: "MCP-Protocol-Version", schema: string },

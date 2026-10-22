@@ -416,6 +416,7 @@
         "src/platform/connections/operator-gate.ts",
         "src/platform/connections/service.ts",
         "src/platform/mcp/authorization.ts",
+        "src/platform/mcp/changes.ts",
         "src/platform/step-up.ts"
       ]
     },

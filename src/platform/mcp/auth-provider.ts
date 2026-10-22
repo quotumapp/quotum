@@ -10,7 +10,7 @@ import type { MerchantStore } from "../store";
 import {
 	authorizationFingerprint,
 	MCP_GRANT_CLAIM,
-	MCP_INSTANCE_CLAIM,
+	MCP_ORGANIZATION_CLAIM,
 	MCP_SCOPES,
 	MCP_WRITE_SCOPE,
 	McpAuthorizations,
@@ -47,8 +47,8 @@ export function createMcpAuthProvider(store: MerchantStore) {
 			shouldRedirect: async ({ session }) => (await binding.selection(session.id)) === null,
 			consentReferenceId: async ({ session }) => {
 				const selected = await binding.selection(session.id);
-				if (!selected) throw invalid("Choose an environment before approving access.");
-				return selected.project_instance_id;
+				if (!selected) throw invalid("Choose an organization before approving access.");
+				return selected.organization_id;
 			},
 		},
 		extensions: [
@@ -66,12 +66,12 @@ export function createMcpAuthProvider(store: MerchantStore) {
 								!grant ||
 								grant.client_id !== client.clientId ||
 								grant.userId !== user?.id ||
-								grant.project_instance_id !== referenceId ||
+								grant.organization_id !== referenceId ||
 								scopes.some((scope) => !grant.scopes.includes(scope))
 							)
 								throw invalid();
 							return {
-								[MCP_INSTANCE_CLAIM]: grant.project_instance_id,
+								[MCP_ORGANIZATION_CLAIM]: grant.organization_id,
 								[MCP_GRANT_CLAIM]: grant.id,
 							};
 						} catch (error) {

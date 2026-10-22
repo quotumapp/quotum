@@ -10,7 +10,7 @@ import type { MerchantSql } from "../database";
 import { digest, IDLE_MS, MerchantError, requireCapability } from "../security";
 import { canonicalJson, consumeStepUpGrant, mutationTarget } from "../step-up";
 import type { MerchantIdentity, MerchantStore } from "../store";
-import { environmentStatus, MCP_WRITE_SCOPE, McpAuthorizations } from "./authorization";
+import { MCP_WRITE_SCOPE, McpAuthorizations, type McpGrant, type McpTarget } from "./authorization";
 
 interface ChangeRow {
 	id: string;
@@ -45,53 +45,44 @@ export class McpChanges {
 		readonly store: MerchantStore,
 		readonly port: BillingChangesPort,
 	) {}
-	private async access(authorizationId: string, write = true) {
-		const grant = await new McpAuthorizations(this.store).byId(authorizationId);
+	private requireGrant(grant: Pick<McpGrant, "scopes">, write: boolean) {
 		if (!grant.scopes.includes(MCP_WRITE_SCOPE))
 			throw new MerchantError("FORBIDDEN", "Reconnect with billing write consent.", 403);
 		if (write && !this.store.config.mcp?.writesEnabled)
 			throw new MerchantError("MCP_WRITES_DISABLED", "MCP writes are disabled.", 403);
-		const projects = await this.store.sql.instances.forPrincipal(grant.principal_id);
-		const project = projects.find((p) =>
-			p.instances.some((i) => i.id === grant.project_instance_id),
-		);
-		const instance = project?.instances.find((i) => i.id === grant.project_instance_id);
-		if (!project || !instance || instance.environment === "internal")
-			throw new MerchantError("FORBIDDEN", "Environment unavailable.", 403);
-		const member = await this.store.membership(
-			this.store.sql,
-			grant.principal_id,
-			project.organizationSlug,
-		);
-		const scope: MerchantScope = {
-			kind: "merchant",
-			organizationSlug: project.organizationSlug,
-			projectKey: project.key,
-			environment: instance.environment,
-		};
-		return {
-			grant,
-			member,
-			scope,
-			environmentStatus: environmentStatus(instance),
-			context: {
-				projectInstanceId: grant.project_instance_id,
-				actor: `merchant:${grant.principal_id}`,
-			},
-		};
 	}
+	private async access(authorizationId: string, target: McpTarget, write = true) {
+		const access = await new McpAuthorizations(this.store).target(authorizationId, target);
+		this.requireGrant(access.grant, write);
+		return access;
+	}
+	private async rowAccess(row: ChangeRow, write = false) {
+		const access = await this.access(row.authorization_id, row.scope, write);
+		if (
+			access.context.projectInstanceId !== row.project_instance_id ||
+			access.scope.organizationSlug !== row.scope.organizationSlug
+		)
+			throw new MerchantError(
+				"CONTEXT_UNAVAILABLE",
+				"The proposal environment is unavailable.",
+				403,
+			);
+		return access;
+	}
+
 	async inspect(
 		authorizationId: string,
+		target: McpTarget,
 		input: { resource: string; parameters: string[]; query: Record<string, string> },
 	) {
-		const access = await this.access(authorizationId, false);
+		const access = await this.access(authorizationId, target, false);
 		requireCapability(access.member.role, "billing.read");
 		// Every configuration resource lives on the customer side, which an inactive environment lacks.
 		if (access.environmentStatus === "inactive") throw inactiveEnvironment();
 		return this.port.inspect(access.context, input);
 	}
-	async capabilities(authorizationId: string) {
-		const access = await this.access(authorizationId, false);
+	async capabilities(authorizationId: string, target: McpTarget) {
+		const access = await this.access(authorizationId, target, false);
 		return this.port.actions.map((action) => {
 			const capability =
 				action.action === "catalog.publish" && access.scope.environment === "production"
@@ -142,6 +133,7 @@ export class McpChanges {
 	}
 	async prepare(
 		authorizationId: string,
+		target: McpTarget,
 		input: BillingChangeInput & { requestKey: string; reason: string; replacesChangeId?: string },
 	) {
 		// Text Postgres cannot store would fail the insert below as a 503, so the proposal is
@@ -151,7 +143,7 @@ export class McpChanges {
 				"INVALID_REQUEST",
 				"Proposal text cannot contain NUL or unpaired surrogate characters.",
 			);
-		const access = await this.access(authorizationId);
+		const access = await this.access(authorizationId, target);
 		const action = this.port.actions.find((a) => a.action === input.action);
 		if (!action) throw new MerchantError("ACTION_REJECTED", "Unsupported billing change.");
 		if (access.environmentStatus === "inactive" && !allowedOnInactiveEnvironment(action.action))
@@ -162,7 +154,11 @@ export class McpChanges {
 				: action.capability;
 		requireCapability(access.member.role, capability);
 		const hash = digest(
-			canonicalJson({ ...input, replacesChangeId: input.replacesChangeId ?? null }),
+			canonicalJson({
+				...input,
+				projectInstanceId: access.context.projectInstanceId,
+				replacesChangeId: input.replacesChangeId ?? null,
+			}),
 		);
 		const [existing] = await this.store.sql<
 			ChangeRow[]
@@ -211,7 +207,7 @@ export class McpChanges {
 			}
 			if (input.replacesChangeId) {
 				const changed =
-					await tx`UPDATE platform_mcp_changes SET status='cancelled' WHERE id=${input.replacesChangeId} AND authorization_id=${authorizationId} AND status='pending' RETURNING id`;
+					await tx`UPDATE platform_mcp_changes SET status='cancelled' WHERE id=${input.replacesChangeId} AND authorization_id=${authorizationId} AND project_instance_id=${access.context.projectInstanceId} AND status='pending' RETURNING id`;
 				if (!changed.length)
 					throw new MerchantError(
 						"ACTION_REJECTED",
@@ -219,7 +215,7 @@ export class McpChanges {
 						409,
 					);
 			}
-			await tx`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,expires_at) VALUES(${authorizationId},${access.grant.principal_id},${access.grant.project_instance_id},${input.requestKey},${hash},${input.action},${JSON.stringify(preview.input.parameters)}::text::jsonb,${JSON.stringify(preview.input.body)}::text::jsonb,${input.reason},${JSON.stringify(preview)}::text::jsonb,${capability},${action.stepUpAction},${access.scope.environment === "production" || action.alwaysSensitive},${JSON.stringify(access.scope)}::text::jsonb,${expiry}) ON CONFLICT(authorization_id,request_key) DO NOTHING`;
+			await tx`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,expires_at) VALUES(${authorizationId},${access.grant.principal_id},${access.context.projectInstanceId},${input.requestKey},${hash},${input.action},${JSON.stringify(preview.input.parameters)}::text::jsonb,${JSON.stringify(preview.input.body)}::text::jsonb,${input.reason},${JSON.stringify(preview)}::text::jsonb,${capability},${action.stepUpAction},${access.scope.environment === "production" || action.alwaysSensitive},${JSON.stringify(access.scope)}::text::jsonb,${expiry}) ON CONFLICT(authorization_id,request_key) DO NOTHING`;
 			const [row] = await tx<
 				ChangeRow[]
 			>`SELECT * FROM platform_mcp_changes WHERE authorization_id=${authorizationId} AND request_key=${input.requestKey}`;
@@ -275,14 +271,16 @@ export class McpChanges {
 		return row;
 	}
 	async get(authorizationId: string, id: string) {
-		await this.access(authorizationId, false);
+		const grant = await new McpAuthorizations(this.store).byId(authorizationId);
+		this.requireGrant(grant, false);
 		const row = await this.row(id);
 		if (row.authorization_id !== authorizationId)
 			throw new MerchantError("NOT_FOUND", "Change not found.", 404);
+		await this.rowAccess(row);
 		return this.view(await this.recover(row));
 	}
 	async list(authorizationId: string) {
-		await this.access(authorizationId, false);
+		this.requireGrant(await new McpAuthorizations(this.store).byId(authorizationId), false);
 		const rows = await this.store.sql<
 			ChangeRow[]
 		>`SELECT * FROM platform_mcp_changes WHERE authorization_id=${authorizationId} ORDER BY created_at DESC,id DESC LIMIT 25`;
@@ -290,7 +288,7 @@ export class McpChanges {
 	}
 	async cancel(authorizationId: string, id: string) {
 		await this.get(authorizationId, id);
-		const access = await this.access(authorizationId, false);
+		const access = await this.rowAccess(await this.row(id));
 		await this.store.sql.begin(async (tx) => {
 			await this.lockProposal(tx, {
 				principalId: access.grant.principal_id,
@@ -315,7 +313,7 @@ export class McpChanges {
 		const row = await this.row(id);
 		if (row.principal_id !== identity.principalId)
 			throw new MerchantError("NOT_FOUND", "Change not found.", 404);
-		const access = await this.access(row.authorization_id, false);
+		const access = await this.rowAccess(row);
 		requireCapability(access.member.role, row.capability);
 		return this.view(await this.recover(row), { body: true });
 	}
@@ -345,7 +343,7 @@ export class McpChanges {
 	) {
 		await this.browserGet(identity, id);
 		const saved = await this.row(id);
-		const access = await this.access(saved.authorization_id, approve);
+		const access = await this.rowAccess(saved, approve);
 		const claimed = await this.store.sql.begin(async (tx) => {
 			await this.lockProposal(tx, {
 				sessionId: identity.sessionId,

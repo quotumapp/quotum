@@ -324,8 +324,6 @@ export async function createMerchantTestRuntime(
 							.strictObject({
 								email: z.email(),
 								organizationSlug: z.string().min(1),
-								projectKey: z.string().min(1),
-								environment: z.enum(["sandbox", "production"]),
 								clientId: z.enum(["quotum-claude-code", "quotum-cursor"]),
 							})
 							.parse(await request.json());
@@ -335,11 +333,8 @@ export async function createMerchantTestRuntime(
 								SELECT g.code_hash FROM platform_mcp_authorizations g
 								JOIN platform_principals principal ON principal.id=g.principal_id
 								JOIN platform_auth_users u ON u.id=principal.auth_user_id
-								JOIN projects i ON i.id=g.project_instance_id
-								JOIN platform_projects p ON p.id=i.platform_project_id
-								JOIN platform_organizations o ON o.id=p.organization_id
+								JOIN platform_organizations o ON o.id=g.organization_id
 								WHERE u.email=${input.email} AND o.slug=${input.organizationSlug}
-								AND p.key=${input.projectKey} AND i.environment=${input.environment}
 								AND g.client_id=${input.clientId} AND g.revoked_at IS NULL
 								ORDER BY g.created_at DESC LIMIT 1
 							) RETURNING id`;
