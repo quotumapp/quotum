@@ -151,8 +151,6 @@ export interface SetEnvironmentSuspensionInput extends OperatorTopologyChange {
 	suspended: boolean;
 	/** Why the environment is suspended or resumed; audited. */
 	reason?: string;
-	/** Whether resuming a production instance counts against the organization's production limit. */
-	enforceProductionLimit: boolean;
 }
 
 export interface SetEnvironmentSuspensionResult {
@@ -201,14 +199,12 @@ export async function setEnvironmentSuspension(
 		});
 		const moved = input.suspended
 			? await tx.instances.suspend(instance.id, organization.id)
-			: await tx.instances.resume(instance.id, organization.id, {
-					enforceProductionLimit: input.enforceProductionLimit,
-				});
+			: await tx.instances.resume(instance.id, organization.id);
 		if (!moved)
 			throw new Error(
 				input.suspended
 					? `Environment ${target.instanceKey} could not be suspended`
-					: `Environment ${target.instanceKey} could not be resumed: the organization's production limit is reached`,
+					: `Environment ${target.instanceKey} could not be resumed`,
 			);
 		await insertPlatformAuditEvent(tx, {
 			principalId: null,

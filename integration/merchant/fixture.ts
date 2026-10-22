@@ -41,6 +41,7 @@ import { createIntegrationBillingEnv } from "../../tests/integration/helpers/loc
 export const password = "Merchant test password 123!";
 export const serviceToken = "merchant-integration-service-token-synthetic";
 export const testConfig: MerchantConfig = {
+	projectLimit: 5,
 	signupEnabled: true,
 	origin: "https://merchant.example.test",
 	publicUrl: "https://quotum.dev",

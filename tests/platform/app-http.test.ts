@@ -8,6 +8,7 @@ import { CSRF_COOKIE } from "../../src/platform/security";
 import { type MerchantIdentity, MerchantStore } from "../../src/platform/store";
 
 const config: MerchantConfig = {
+	projectLimit: 5,
 	signupEnabled: true,
 	origin: "https://merchant.example.test",
 	publicUrl: "https://quotum.example.test",

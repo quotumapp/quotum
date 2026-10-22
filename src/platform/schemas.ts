@@ -27,7 +27,6 @@ export const MerchantCapabilitySchema = z.enum([
 	"operations.write",
 	"production.manage",
 	"production.connections.manage",
-	"production.activate",
 	"production.credentials.rotate",
 ]);
 

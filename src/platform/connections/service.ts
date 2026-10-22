@@ -40,7 +40,6 @@ export class MerchantConnections {
 		return {
 			actor: { kind: "principal", principalId: identity.principalId },
 			environment: scope.environment,
-			enforcesProductionLimit: true,
 			instance: (sql, write) => this.scope(identity, scope, write, sql),
 			lock: (tx, capability) => this.lock(tx, identity, scope, capability),
 			confirm: (tx, action, target) => this.confirm(tx, identity, scope, action, target, grant),
@@ -84,7 +83,7 @@ export class MerchantConnections {
 					(i) =>
 						i.environment === scope.environment &&
 						!i.internalProject &&
-						(i.lifecycleStatus === "active" || i.lifecycleStatus === "inactive"),
+						i.lifecycleStatus === "active",
 				)
 			: null;
 		if (!instance)
@@ -150,17 +149,6 @@ export class MerchantConnections {
 	}
 	async readiness(identity: MerchantIdentity, scope: MerchantScope) {
 		return this.lifecycle.readiness(this.gate(identity, scope), this.billing);
-	}
-	async activate(
-		identity: MerchantIdentity,
-		scope: MerchantScope,
-		key: string,
-		fingerprint: string,
-		grant: string | null,
-	) {
-		return this.lifecycle.activate(this.gate(identity, scope, grant), this.billing, key, {
-			fingerprint,
-		});
 	}
 	/**
 	 * Replaces the instance's live credential of one kind, or issues the first read-only one. The

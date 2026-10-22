@@ -15,11 +15,6 @@ export interface OperatorGateOptions {
 	allowMemberOrganizations: boolean;
 	/** Why the operator changes an organization its members manage; audited with each change. */
 	memberOverrideReason?: string;
-	/**
-	 * Whether activating production counts against the organization's production limit. Where the
-	 * merchant platform runs it is a plan limit; a headless deployment has no plan to enforce.
-	 */
-	enforceProductionLimit: boolean;
 }
 
 /**
@@ -31,7 +26,7 @@ export interface OperatorGateOptions {
 export function operatorConnectionGate(
 	operator: string,
 	target: OperatorConnectionTarget,
-	{ allowMemberOrganizations, memberOverrideReason, enforceProductionLimit }: OperatorGateOptions,
+	{ allowMemberOrganizations, memberOverrideReason }: OperatorGateOptions,
 ): ConnectionGate {
 	const mayChangeMemberOrganizations =
 		allowMemberOrganizations || memberOverrideReason !== undefined;
@@ -42,7 +37,6 @@ export function operatorConnectionGate(
 			...(memberOverrideReason === undefined ? {} : { memberOverrideReason }),
 		},
 		environment: target.environment,
-		enforcesProductionLimit: enforceProductionLimit,
 		async instance(sql, write) {
 			await assertOperableOrganization(sql, target.organizationId, {
 				requireNoMembers: write && !mayChangeMemberOrganizations,
@@ -52,7 +46,7 @@ export function operatorConnectionGate(
 					candidate.id === target.instanceId &&
 					candidate.environment === target.environment &&
 					!candidate.internalProject &&
-					(candidate.lifecycleStatus === "active" || candidate.lifecycleStatus === "inactive"),
+					candidate.lifecycleStatus === "active",
 			);
 			if (!instance)
 				throw new MerchantError("CONTEXT_UNAVAILABLE", "This environment is unavailable.", 404);

@@ -80,7 +80,7 @@ that claims it, and refuses with `409 PADDLE_CUSTOMER_ALREADY_EXISTS` (`details.
 `inactive`, `email_mismatch` or `ambiguous`) when it is held by another account, archived, has
 another email or cannot be singled out; see [Operations](operations.md#provider-write-recovery-foundation) for the
 receipt behaviour.
-There is no Paddle draft-event setup receiver or production activation path in this increment.
+Paddle has no draft-event setup receiver and remains sandbox-only.
 
 Host Paddle.js on the approved `paymentPageUrl`, initialize it with the sandbox client token, and
 configure a default payment link in the Paddle sandbox dashboard. Passing a transaction checkout
@@ -677,25 +677,19 @@ and commit steps as the **Integrations** screens, and audit events name the oper
    - A projection draft takes `--secret-out <new-file>` instead. The generated receiver secret is
      written there, readable only by you. If the file cannot be written, nothing is drafted.
    - A provider draft prints its `setupWebhookPath`.
-3. **Verify events (active production only).** An active production provider must deliver an event
-   first. Point the provider's webhook at the setup path and send an event that exists in the
-   provider account and is at most five minutes old. For Stripe, produce a real event, such as
-   editing a product's metadata with `product.updated` selected on the endpoint. Then commit with
-   `--wait-for-event 10m`, which waits for that event. A refused event answers `400` with a
-   `reason`; see [If a setup event is refused](#if-a-setup-event-is-refused). Sandbox and inactive
-   environments commit without one, but activating an inactive production environment (step 5)
-   needs it, so send the event before you commit there too.
-4. **Commit.** `quotum connections commit <instance> <kind> <draft-id>` validates again and
-   activates the version. Then point the provider's webhook at the regular path
-   `/v1/projects/<instance>/webhooks/<provider>`.
-5. **Activate production (only if it is `inactive`).** Run `quotum environments readiness
-   <instance>` until it exits `0`. It needs a published catalog: publish one with `quotum catalog
-   push <file> --instance <instance>` ([adopt](catalog.md#without-a-project-key---instance) each
-   Stripe product first). A validation older than 15 minutes blocks it, so run `quotum connections
-   validate <instance> <kind> <version-id>` again first, with the `activeVersionId` that `quotum
-   connections list <instance>` shows. Then run `quotum environments activate <instance>
-   --credentials-out <new-file>`, which issues the project key; see
-   [Activate a production environment](deployment.md#activate-a-production-environment).
+3. **Verify events (production only).** Before enabling a live provider, point its webhook at the
+   setup path and send an event that exists in that account and is at most five minutes old. For
+   Stripe, produce a real event, such as editing product metadata with `product.updated` selected
+   on the endpoint. Commit with `--wait-for-event 10m` to wait for it. A refused event answers `400`
+   with a `reason`; see [If a setup event is refused](#if-a-setup-event-is-refused). Sandbox commits
+   without this production event requirement.
+4. **Commit.** `quotum connections commit <instance> <kind> <draft-id>` validates again and enables
+   the version. Point the provider's webhook at `/v1/projects/<instance>/webhooks/<provider>`.
+5. **Issue a key when needed.** Both environments are already active. Run `quotum credentials
+   rotate <instance> --credentials-out <new-file>` independently of connection/catalog setup.
+   `quotum environments readiness <instance>` reports informational findings only. A live provider
+   saved by an older release without event verification remains unavailable for new provider work
+   until verified; recovery and webhook processing continue.
 
 These commands, and `quotum credentials` and `quotum environments`, read `QUOTUM_AUTH_SECRET` even
 in headless mode. It keys their request fingerprints the way it does for the merchant platform.
@@ -952,7 +946,7 @@ Write includes the reads used for those resources. OAuth installs are a separate
 | Coupons | Write | Create and read promotion coupons |
 | Promotion Codes | Write | Create, read and deactivate codes |
 | Charges and Refunds | Write (`refund_write`, optional) | Refund a payment when a caller asks Quotum to; a key without it still validates |
-| Events | Read (`event_read`) | Retrieve the signed setup event with the connection's own key before production activation |
+| Events | Read (`event_read`) | Retrieve the signed setup event with the connection's own key before enabling a production connection |
 
 Validation runs bounded probes and reports all detected failures in `error.details.checks`
 with `check`, `reason`, and, where relevant, `missingPermission` and `httpStatus`.

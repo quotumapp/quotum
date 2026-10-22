@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
-	activateProjectProduction,
 	BunProjectInstanceStore,
 	PostgresProjectInstanceContextResolver,
+	resumeProjectInstance,
 } from "../../src/composition/project-instance-persistence";
 import { generateProjectApiCredential } from "../../src/platform/credentials/project-api-token";
 import { isTenantTrafficEligible } from "../../src/projects/context";
@@ -355,49 +355,21 @@ describe("principal project listing", () => {
 	});
 });
 
-describe("production activation", () => {
-	/** A tagged-template client that records the statement and answers with `rows`. */
-	function recordingClient(rows: { id: string }[]) {
+describe("environment resumption", () => {
+	it("resumes only a suspended instance belonging to the organization without a production quota", async () => {
 		const calls: { text: string; values: unknown[] }[] = [];
 		const client = async (strings: TemplateStringsArray, ...values: unknown[]) => {
 			calls.push({ text: strings.join("?"), values });
-			return rows;
+			return [{ id: "instance-1" }];
 		};
-		return { client: client as never, calls };
-	}
-
-	it("applies the organization's production limit unless the caller waives it", async () => {
-		for (const [options, enforce] of [
-			[undefined, true],
-			[{}, true],
-			[{ enforceProductionLimit: true }, true],
-			[{ enforceProductionLimit: false }, false],
-		] as const) {
-			const { client, calls } = recordingClient([{ id: "instance-1" }]);
-			await expect(
-				activateProjectProduction(client, "instance-1", "organization-1", "7", options),
-			).resolves.toBe(true);
-			expect(calls).toHaveLength(1);
-			// The limit is one predicate that a bound boolean switches off; the rest stays.
-			expect(calls[0]?.text).toContain("NOT ?::boolean OR (SELECT count(*) FROM projects i");
-			expect(calls[0]?.text).toContain("< (SELECT production_limit FROM platform_organizations");
-			expect(calls[0]?.text).toContain("lifecycle_status='inactive'");
-			expect(calls[0]?.values).toEqual([
-				"instance-1",
-				"7",
-				"organization-1",
-				enforce,
-				"organization-1",
-				"organization-1",
-			]);
-		}
+		expect(await resumeProjectInstance(client as never, "instance-1", "organization-1")).toBe(true);
+		expect(calls[0]?.text).toContain("lifecycle_status='suspended'");
+		expect(calls[0]?.text).toContain("internal_project=false");
+		expect(calls[0]?.text).toContain("organization_id=?");
+		expect(calls[0]?.text).not.toContain("production_limit");
+		expect(calls[0]?.values).toEqual(["instance-1", "organization-1"]);
 	});
-
-	it("reports whether exactly one instance was activated", async () => {
-		expect(
-			await activateProjectProduction(recordingClient([]).client, "i", "o", "7", {
-				enforceProductionLimit: false,
-			}),
-		).toBe(false);
+	it("reports an instance that did not move", async () => {
+		expect(await resumeProjectInstance((async () => []) as never, "i", "o")).toBe(false);
 	});
 });

@@ -19,6 +19,12 @@ const instanceSchema = z
 	})
 	.strict()
 	.superRefine((instance, context) => {
+		if (instance.environment === "production" && instance.lifecycleStatus === "inactive")
+			context.addIssue({
+				code: "custom",
+				path: ["lifecycleStatus"],
+				message: "production starts active; use suspended to keep it unavailable",
+			});
 		for (const field of ["issueCredential", "issueReadOnlyCredential"] as const) {
 			if (!instance[field]) continue;
 			if (instance.environment === "internal") {

@@ -45,6 +45,8 @@ function loadEmailConfig(
 
 export interface MerchantConfig {
 	mcp?: { origin: string; writesEnabled?: boolean } | null;
+	/** Maximum logical projects per organization; environments share one project slot. */
+	projectLimit: number;
 	signupEnabled: boolean;
 	origin: string;
 	publicUrl: string;
@@ -122,6 +124,13 @@ export function loadMerchantConfig(
 	env: Record<string, string | undefined> = process.env,
 ): MerchantConfig {
 	rejectRetiredSettings(env);
+	const projectLimit = Number(env.QUOTUM_PROJECT_LIMIT?.trim() || "5");
+	if (
+		!/^\d+$/.test(env.QUOTUM_PROJECT_LIMIT?.trim() || "5") ||
+		!Number.isSafeInteger(projectLimit) ||
+		projectLimit < 1
+	)
+		throw new Error("QUOTUM_PROJECT_LIMIT must be a positive integer");
 	const production = (env.BILLING_ENV ?? "production") === "production";
 	if (production) {
 		for (const name of ["MERCHANT_ORIGIN", "MERCHANT_PUBLIC_URL"] as const) {
@@ -169,6 +178,7 @@ export function loadMerchantConfig(
 			: null;
 	const email = loadEmailConfig(env, testMode);
 	return {
+		projectLimit,
 		mcp,
 		signupEnabled,
 		origin,

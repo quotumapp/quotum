@@ -61,7 +61,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum connections list` / `draft` / `validate` / `commit` / `disable` | [Headless connection setup](providers.md#headless-connection-setup) for Stripe, Apple, Google Play, sandbox Paddle and projections. Changes to an organization with members need `--member-override-reason`. |
 | `quotum credentials status` / `rotate` / `revoke` | Inspect, [rotate](operations.md#project-credentials) or revoke an instance's project API keys. Changes to an organization with members need `--member-override-reason`. |
 | `quotum webhooks endpoints list` / `create` / `update` / `delete` / `rotate-secret` / `test`, `quotum webhooks deliveries list` / `retry` / `replay` | Manage an instance's [outbound webhook endpoints](webhooks.md#operator-cli) without a project key; a signing secret goes only to the new file `--secret-out` names. Changes to an organization with members need `--member-override-reason`. |
-| `quotum environments readiness` / `activate` | Check whether a production environment is ready, or [activate it](#activate-a-production-environment) and issue its first project key. Changes to an organization with members need `--member-override-reason`. |
+| `quotum environments readiness` | Inspect [informational setup checks](#production-availability-and-setup); these do not gate environment access or credential issuance. |
 | `quotum environments suspend <instance> --reason <why>` / `resume <instance>` | [Stop an active environment at once and bring it back](#suspend-and-resume-an-environment). Needs only `POSTGRES_URI`. Changes to an organization with members need `--member-override-reason`. |
 | `quotum audit list [--organization <slug>] [--action <name>] [--since <time>] [--until <time>] [--limit <n>]` | Read the platform audit trail, newest first, as one JSON page: connection, credential, environment and webhook endpoint changes and owner hand-offs, with the `--actor` an operator command recorded in `metadata`. `nextBefore` continues the listing with `--before`. Read-only, needs only `POSTGRES_URI`, and works headless. Catalog and promotion history are not in it. |
 | `quotum organizations add-owner <organization> --email <address>` | Hand an organization to a person: [make a merchant user who has signed in an owner](#hand-an-organization-to-an-owner). Refused in headless mode. |
@@ -124,6 +124,7 @@ required value is missing or unsafe for the selected environment.
 | `BILLING_ENV` | `development`, `test`, or `production` (default). Production requires the operator key. Projection receivers and Stripe return URLs need HTTPS in every environment; only a headless deployment can approve [private receivers](providers.md#private-receivers-headless-only). The merchant settings below are required only when `QUOTUM_CONSOLE_ENABLED=true`. |
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
 | `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `quotum connections rotate-secrets`. |
+| `QUOTUM_PROJECT_LIMIT` | Positive integer, default `5`: maximum logical projects per organization for self-service creation. Each project includes both active environments and counts once, including suspended projects. Lowering it preserves existing projects and only blocks additional creation. Operator bootstrap is not subject to this cap. |
 | `QUOTUM_CONSOLE_ENABLED` | `false` (default) runs [headless](#headless-mode): `/v1` and workers only. `true` also serves the merchant console (`/api` sign-in, onboarding, teams and remote MCP) and makes every setting below required. Organizations and projects exist in both modes; the flag only removes the management surface. |
 | `MERCHANT_ORIGIN`, `MERCHANT_PUBLIC_URL` | Merchant origin and public/legal-page URL. Both must be explicitly set to nonblank values in production, including when `BILLING_ENV` is unset. Development and test defaults are `https://app.quotum.dev` and `https://quotum.dev`. The merchant origin must be exact HTTPS outside tests. |
 | `QUOTUM_AUTH_SECRET` | Operator-owned secret for Quotum sessions and token HMACs, at least 32 characters. Never reuse another secret. |
@@ -161,8 +162,8 @@ API, the provider webhooks and every worker, and nothing else.
   event ingress keep working.
 - There are no **Integrations** screens: configure connections with the
   [`quotum connections`](providers.md#headless-connection-setup) commands and manage project API
-  keys with `quotum credentials`. There is no activation screen either: declare production `active`
-  in the bootstrap manifest, or [activate](#activate-a-production-environment) one that is ready
+  keys with `quotum credentials`. Declare production `active` in the bootstrap manifest; both
+  environments are available without an activation approval
   with `quotum environments`.
 
 The flag is read at startup and accepts only `true` or `false`; unset or blank means `false`. Set
@@ -307,11 +308,8 @@ bootstrap is declarative, additive and idempotent:
 - Every row already in the database must be declared with the same name, project, environment and
   lifecycle status. Any other difference, including a row the manifest omits, is refused before
   anything is written.
-- It never updates or deletes a row, so it cannot activate an environment that exists as
-  `inactive`; [`quotum environments activate`](#activate-a-production-environment) does. It never
-  adds rows or credentials to an organization that has members (one onboarded through the merchant
-  application) or is not active, and it does not apply the organization's production limit, which
-  only gates merchant activation. To give an
+- It never updates or deletes a row, and never adds rows or credentials to an organization that has members (one onboarded through the merchant
+  application) or is not active, and it does not apply the self-service project limit. To give an
   organization it created a person who can see it in the merchant application, [add an
   owner](#hand-an-organization-to-an-owner).
 - It issues each declared credential once, into the `--credentials-out` file, so every run that
@@ -321,58 +319,35 @@ bootstrap is declarative, additive and idempotent:
 `projectInstancesToCreate`, `credentialsToIssue`, `readOnlyCredentialsToIssue`) and exits `2` while
 `--apply` has work to do, `0` once everything declared exists, and `1` when it refuses.
 
-## Activate a production environment
+## Production availability and setup
 
-A production environment is `inactive` until it is activated, and has no project key:
-`quotum credentials rotate` refuses it with `ENVIRONMENT_INACTIVE`. The merchant application
-activates one behind a step-up confirmation. Without it, or when the host operator must act, use
-the operator CLI, which holds the database already and so asks for no step-up:
+Onboarding creates active sandbox and production environments together. Production does not need
+an activation approval, a published catalog, a provider or a projection receiver before it can issue
+a key or serve unrelated API operations. A bootstrap manifest must declare production `active`, or
+explicitly `suspended` when it should be unavailable; `inactive` production is rejected.
+
+Issue the first production key, or replace an existing one, through the console's API credentials
+screen or the operator command:
 
 ```sh
+quotum credentials rotate <instance> --access full --credentials-out <new-file> --actor <you>
 quotum environments readiness <instance>
-quotum environments activate <instance> --credentials-out <new-file> --actor <you>
 ```
 
-Both read the settings `quotum connections` does: `POSTGRES_URI`, the `QUOTUM_SECRETS_KEY_*` key
-and `QUOTUM_AUTH_SECRET`.
+The credentials command writes the key once to an owner-only file and never prints it. Merchant
+production issuance and rotation retain action-bound step-up authentication. Operators changing an
+organization with members still need `--member-override-reason`.
 
-`readiness` prints every blocker, with the connection it belongs to, and exits `2` while any
-remains and `0` once none does. They are the merchant application's checks:
+`readiness` is informational: it reports connection validation, verified provider events, secret
+availability and catalog setup, returning `2` for outstanding findings and `0` when checks pass.
+Every finding has `gating: false`; `ready` describes setup checks, not environment availability.
+A missing projection affects projection delivery. A missing or unverified live provider prevents
+new provider operations, while webhook processing and recovery continue. Production connection
+commits still require fresh validation and verified event delivery.
 
-- an enabled projection connection and at least one enabled provider connection;
-- every enabled connection validated in the last 15 minutes (`quotum connections validate`
-  refreshes it) and every provider connection holding a verified setup event;
-- stored secrets that decrypt, and a published production catalog that binds each enabled provider.
-
-An inactive environment has no key and `/v1` refuses it, so `quotum catalog push` cannot reach it
-over HTTP. Publish that catalog from the database with
-`quotum catalog push <file> --instance <instance> --actor <you>`, after
-`quotum catalog bindings adopt <file> --instance <instance> --actor <you>` for each Stripe product
-and each [App Store or Google Play product](catalog.md#register-an-app-store-or-google-play-product)
-(see [catalog without a project key](catalog.md#without-a-project-key---instance)). The merchant
-application publishes it too, and a [remote MCP
-connection](mcp.md#connect-to-production-before-it-is-activated) can propose that publication for
-the merchant to approve. Or declare production `active` in the bootstrap manifest.
-
-`activate` runs the same checks again under the organization's lock, makes the environment
-`active` and writes its first full project key to `--credentials-out`: a new file only you can read,
-in the bootstrap's format, never printed. If the file cannot be written, nothing is activated. While
-a blocker remains it changes nothing, writes no file and exits `2` with the same report.
-
-- The audit event `environment.activated` names `--actor` and no member. An organization with
-  members needs `--member-override-reason <why>`, which the event records.
-- While the merchant platform runs, the organization's production limit applies as it does to
-  merchants and a full limit answers `ACTIVATION_CONFLICT`. A headless deployment has no plan, so
-  the limit does not hold it back.
-- Retrying with the printed `--request-key`, or activating an environment that is already active,
-  answers `credentialDisclosed: false`, writes no file and never replaces a key. Rotate to replace
-  one (see [project credentials](operations.md#project-credentials)).
-- Only production is activated: the command refuses a sandbox environment with exit `64`, and a
-  suspended or deactivated environment is unavailable to it.
-- Then update the bootstrap manifest. Set the instance's `lifecycleStatus` to `active` and
-  `issueCredential` to `true`: bootstrap refuses a database whose status differs from the manifest
-  and one that holds a project key the manifest does not declare. It issues no second key, because
-  the instance already has one.
+Use `quotum environments suspend` and `resume` to control availability. There is no separate
+production quota or activation command. Existing pending production environments use the
+[documented data transition](upgrade-transitions.md#production-active-from-creation).
 
 ## Hand an organization to an owner
 

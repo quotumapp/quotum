@@ -18761,7 +18761,6 @@
           "operations.write",
           "production.manage",
           "production.connections.manage",
-          "production.activate",
           "production.credentials.rotate"
         ],
         "type": "string"
@@ -45845,170 +45844,6 @@
         ]
       }
     },
-    "/api/platform/environments/activate": {
-      "post": {
-        "operationId": "activateEnvironment",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/HeaderXCSRFToken"
-          },
-          {
-            "$ref": "#/components/parameters/HeaderIdempotencyKey"
-          },
-          {
-            "$ref": "#/components/parameters/HeaderXQuotumStepUpGrant"
-          },
-          {
-            "$ref": "#/components/parameters/HeaderOrigin"
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": false,
-                "properties": {
-                  "fingerprint": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "scope": {
-                    "additionalProperties": false,
-                    "properties": {
-                      "environment": {
-                        "$ref": "#/components/schemas/MerchantEnvironment"
-                      },
-                      "kind": {
-                        "enum": [
-                          "merchant"
-                        ],
-                        "type": "string"
-                      },
-                      "organizationSlug": {
-                        "type": "string"
-                      },
-                      "projectKey": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "organizationSlug",
-                      "projectKey",
-                      "environment"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "scope",
-                  "fingerprint"
-                ],
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "data": {
-                      "properties": {
-                        "access": {
-                          "enum": [
-                            "full",
-                            "read_only"
-                          ],
-                          "type": "string"
-                        },
-                        "active": {
-                          "type": "boolean"
-                        },
-                        "credential": {
-                          "type": "string"
-                        },
-                        "credentialDisclosed": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "credentialDisclosed"
-                      ],
-                      "type": "object"
-                    },
-                    "success": {
-                      "enum": [
-                        true
-                      ],
-                      "type": "boolean"
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "data"
-                  ],
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful response"
-          },
-          "400": {
-            "$ref": "#/components/responses/QuotumError400"
-          },
-          "401": {
-            "$ref": "#/components/responses/QuotumError401"
-          },
-          "403": {
-            "$ref": "#/components/responses/QuotumError403"
-          },
-          "404": {
-            "$ref": "#/components/responses/QuotumError404"
-          },
-          "409": {
-            "$ref": "#/components/responses/QuotumError409"
-          },
-          "410": {
-            "$ref": "#/components/responses/QuotumError410"
-          },
-          "413": {
-            "$ref": "#/components/responses/QuotumError413"
-          },
-          "415": {
-            "$ref": "#/components/responses/QuotumError415"
-          },
-          "422": {
-            "$ref": "#/components/responses/QuotumError422"
-          },
-          "429": {
-            "$ref": "#/components/responses/QuotumError429"
-          },
-          "500": {
-            "$ref": "#/components/responses/QuotumError500"
-          },
-          "501": {
-            "$ref": "#/components/responses/QuotumError501"
-          },
-          "503": {
-            "$ref": "#/components/responses/QuotumError503"
-          }
-        },
-        "security": [
-          {
-            "merchantSession": [],
-            "serviceToken": []
-          }
-        ],
-        "summary": "POST /api/platform/environments/activate",
-        "tags": [
-          "connections"
-        ]
-      }
-    },
     "/api/platform/environments/catalog/prepare-promotion": {
       "post": {
         "operationId": "prepareCatalogPromotion",
@@ -46405,9 +46240,6 @@
                             "read_only"
                           ],
                           "type": "string"
-                        },
-                        "active": {
-                          "type": "boolean"
                         },
                         "credential": {
                           "type": "string"
@@ -50042,7 +49874,6 @@
                       "operations.write",
                       "connections.manage",
                       "webhooks.manage",
-                      "environment.activate",
                       "credentials.rotate",
                       "credentials.rotate_read_only",
                       "credentials.revoke_read_only"

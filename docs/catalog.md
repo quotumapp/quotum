@@ -325,10 +325,9 @@ printed on stderr; legacy spellings are simply rewritten.
 
 ### Without a project key: `--instance`
 
-An inactive environment, such as a production environment waiting to be
-[activated](deployment.md#activate-a-production-environment), has no project key, and `/v1` refuses
-it. Add `--instance <key>` to run the same commands against the database instead, as the other
-operator commands do:
+An active environment can be configured before its first API key is issued. Add `--instance <key>`
+to run these commands directly against the database, without a project key, as the other operator
+commands do:
 
 ```sh
 quotum catalog status --instance app

@@ -58,6 +58,10 @@ How the runtime fits together, and the repository checks that most often reject 
   `403 READ_ONLY_CREDENTIAL`. Operator-only admin routes additionally require
   `X-Billing-Operator-Key`, and audited mutations `X-Billing-Actor`. The operator paths live in one
   list, `src/shared/operator-key-paths.ts`, which both the guards and the documented security read.
+- Onboarding creates active sandbox and production environments together; there is no production
+  activation approval. `QUOTUM_PROJECT_LIMIT` (positive integer, default 5) limits self-service
+  logical projects per organization, counting all projects once. Readiness is informational;
+  credentials are issued independently and production operations retain applicable step-up.
 - `/api/*` is the merchant platform (`src/platform/app.ts`): Better Auth sessions, organizations,
   onboarding, provider connections. Merchant billing screens do not call billing code directly;
   they dispatch through `MerchantBillingPort` (`src/platform/application/billing-port.ts`), which
@@ -259,7 +263,7 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
   generated capability table in `docs/providers.md`; `openapi:check` fails CI when any is stale.
 - `bun run quotum <command>` runs the operator CLI (`src/cli.ts`, on the image's `PATH` as
   `quotum`): migrations, usage partitions, bootstrap, catalog, connections, credentials and
-  environment activation, webhook endpoints, key rotation, `healthcheck` and `init`; see
+  environment suspension/resumption, webhook endpoints, key rotation, `healthcheck` and `init`; see
   [docs/deployment.md](docs/deployment.md#operator-cli).
 - `bun run platform:bootstrap`, `catalog:provision` and `catalog` for operator workflows (see
   [docs/quickstart.md](docs/quickstart.md)); `bun run connections:rotate-secrets` re-encrypts

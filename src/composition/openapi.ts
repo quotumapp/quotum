@@ -81,13 +81,13 @@ function documentStore(): MerchantStore {
 			forProject: unavailable,
 			forPrincipal: unavailable,
 			create: unavailable,
-			activateProduction: unavailable,
 			suspend: unavailable,
 			resume: unavailable,
 			renameForProject: unavailable,
 		},
 	});
 	return new MerchantStore(sql, {
+		projectLimit: 5,
 		signupEnabled: true,
 		origin: "https://app.quotum.invalid",
 		publicUrl: "https://quotum.invalid",

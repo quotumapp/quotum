@@ -62,7 +62,7 @@ on and requires an explicitly selected Cloudflare or Resend email sender outside
 `QUOTUM_EMAIL_*` settings. [`deploy/compose`](docs/deployment.md#headless-docker-compose)
 runs it with Postgres in Docker Compose. The fake test entrypoints are not
 production configurations. `/ready` checks database/schema health;
-customer integrations and production activation have separate checks.
+customer integrations have operation-specific checks; both environments start active.
 
 ## Commands
 

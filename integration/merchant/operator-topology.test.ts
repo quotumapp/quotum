@@ -232,7 +232,7 @@ describe("quotum environments suspend and resume", () => {
 		expect(deactivated.stderr).toContain("is deactivated");
 	});
 
-	it("applies the production limit to a resume only while the console runs", async () => {
+	it("resumes production without applying the deprecated production quota", async () => {
 		await seedOperatorOrganization(f);
 		// A second project in the same organization already holds the one production slot.
 		await f.sql`
@@ -247,14 +247,11 @@ describe("quotum environments suspend and resume", () => {
 		// Suspend the first production environment, then fill its slot by activating the second.
 		await f.sql`UPDATE projects SET lifecycle_status='suspended' WHERE key='alpha'`;
 
-		const blocked = await environments(["resume", "alpha"], consoleEnv);
-		expect(blocked.code).toBe(1);
-		expect(blocked.stderr).toContain("production limit is reached");
-		expect(await lifecycleStatusOf(f, "alpha")).toBe("suspended");
-
-		// A headless deployment has no plan to enforce.
-		const waived = await environments(["resume", "alpha"], headless);
-		expect(waived.json).toMatchObject({ lifecycleStatus: "active", changed: true });
+		await f.sql`UPDATE platform_organizations SET production_limit=0 WHERE slug='ops'`;
+		const resumed = await environments(["resume", "alpha"], consoleEnv);
+		expect(resumed.code).toBe(0);
+		expect(resumed.json).toMatchObject({ lifecycleStatus: "active", changed: true });
+		expect(await lifecycleStatusOf(f, "alpha")).toBe("active");
 	});
 
 	it("needs a stated reason once the organization has members", async () => {

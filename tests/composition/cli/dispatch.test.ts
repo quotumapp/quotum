@@ -127,11 +127,6 @@ describe("quotum command resolution", () => {
 			["readiness", "acme"],
 		],
 		[
-			["environments", "activate", "acme", "--credentials-out", "keys.json"],
-			"composition/cli/environments.ts",
-			["activate", "acme", "--credentials-out", "keys.json"],
-		],
-		[
 			["organizations", "add-owner", "acme", "--email", "owner@acme.example"],
 			"composition/cli/organizations.ts",
 			["add-owner", "acme", "--email", "owner@acme.example"],

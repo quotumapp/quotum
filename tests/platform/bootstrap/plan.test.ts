@@ -371,3 +371,22 @@ describe("planPlatformBootstrap", () => {
 		}
 	});
 });
+
+it("rejects pending production in new manifests but accepts deliberate suspension", () => {
+	const manifest = extendedManifest();
+	const production = manifest.organizations[0]?.projects[0]?.instances.find(
+		(i) => i.environment === "production",
+	);
+	if (!production) throw new Error("Missing production");
+	production.issueCredential = false;
+	production.issueReadOnlyCredential = false;
+	production.lifecycleStatus = "inactive";
+	expect(() => parsePlatformBootstrapManifest(JSON.stringify(manifest))).toThrow(
+		"production starts active",
+	);
+	production.lifecycleStatus = "suspended";
+	expect(
+		parsePlatformBootstrapManifest(JSON.stringify(manifest)).organizations[0]?.projects[0]
+			?.instances[1]?.lifecycleStatus,
+	).toBe("suspended");
+});

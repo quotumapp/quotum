@@ -24,7 +24,7 @@ export interface DirectCatalogDependencies {
 /**
  * The catalog operations `quotum catalog` needs, served from the database instead of `/v1`. They are
  * the repository calls the merchant billing port makes for the console, so an environment that
- * `/v1` refuses (an inactive one has no project key) is reached the way the console reaches it.
+ * has no issued project key is reached directly through the same billing services as the console.
  * Input is validated by the schemas the HTTP routes use, and a refusal comes back as the same
  * `BillingApiError` the HTTP client throws, so the command reports it identically.
  */

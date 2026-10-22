@@ -9,8 +9,6 @@ function run(argv: string[], env: Record<string, string | undefined> = {}) {
 	}).then((code) => ({ code, out: out.join("\n"), err: err.join("\n") }));
 }
 
-const activate = ["activate", "acme", "--credentials-out", "keys.json", "--actor", "ops-runbook"];
-
 describe("quotum environments", () => {
 	it("rejects wrong arguments with exit 64 before it touches the database", async () => {
 		for (const [argv, message] of [
@@ -19,16 +17,7 @@ describe("quotum environments", () => {
 			[["readiness"], "Expected 1 argument before the options."],
 			[["readiness", "acme", "extra"], "Expected 1 argument before the options."],
 			[["readiness", "acme", "--actor", "ops"], "Unknown option --actor."],
-			[["activate"], "Expected 1 argument before the options."],
-			[["activate", "acme", "--actor", "ops"], "--credentials-out <new-file> is required."],
-			[["activate", "acme", "--credentials-out", "keys.json"], "Name the operator with --actor"],
-			[[...activate, "--access", "full"], "Unknown option --access."],
-			[[...activate, "--request-key", "short"], "--request-key must be"],
-			[[...activate, "--member-override-reason", " "], "--member-override-reason must be"],
-			[
-				[...activate, "--credentials-out", "again.json"],
-				"--credentials-out is given more than once.",
-			],
+			[["activate", "acme"], 'Unknown subcommand "activate".'],
 			[["suspend"], "Expected 1 argument before the options."],
 			[["suspend", "acme", "--actor", "ops"], "--reason <why> is required to suspend"],
 			[["suspend", "acme", "--reason", "incident"], "Name the operator with --actor"],
@@ -46,7 +35,7 @@ describe("quotum environments", () => {
 	});
 
 	it("needs only POSTGRES_URI to suspend or resume", async () => {
-		// The connection key and auth secret that readiness and activation read are not needed.
+		// The connection key and auth secret that readiness reads are not needed.
 		for (const argv of [
 			["suspend", "acme", "--reason", "incident", "--actor", "ops"],
 			["resume", "acme", "--actor", "ops"],
@@ -57,8 +46,8 @@ describe("quotum environments", () => {
 		}
 	});
 
-	it("needs POSTGRES_URI for both subcommands", async () => {
-		for (const argv of [["readiness", "acme"], activate]) {
+	it("needs POSTGRES_URI for readiness", async () => {
+		for (const argv of [["readiness", "acme"]]) {
 			const result = await run(argv);
 			expect(result.code).toBe(1);
 			expect(result.err).toContain("POSTGRES_URI is required");

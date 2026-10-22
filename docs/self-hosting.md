@@ -65,10 +65,9 @@ curl -f https://billing.example.com/ready
 
 ## 3. Declare your projects
 
-Write the topology to `platform.json`. Declare production `active` here: a headless deployment has
-no merchant application to activate it later, and an `inactive` production environment can neither
-hold a project key nor receive a catalog through `/v1` (`quotum catalog --instance` reaches it from
-the database):
+Write the topology to `platform.json`. Declare production `active`: it is available immediately,
+with keys issued when requested. Declare it `suspended` to keep it intentionally unavailable.
+No activation approval or setup checklist is required.
 
 ```json
 {
@@ -217,8 +216,7 @@ rely on them.
   Quotum a product lookup, so a mistyped product id is found by the first real purchase, not at
   registration. `quotum catalog provision` imports Stripe web mappings only, and only for a
   non-production instance that has no published catalog.
-- Headless deployments have no activation screen or step-up. Declare production `active` in the
-  bootstrap manifest. [`quotum environments activate`](deployment.md#activate-a-production-environment)
-  activates one that is already ready, for example after `quotum catalog ... --instance` or a
-  merchant application prepared it.
+- Both environments are available immediately. Declare production `active` in bootstrap and issue
+  its key with `quotum credentials rotate`; use suspension for an intentional stop.
+
 - Schema baselines evolve in place until 1.0, so upgrades before then can need manual steps.

@@ -54,7 +54,6 @@ describe("operatorConnectionGate", () => {
 	it("records the operator and resolves the target through the instance port", async () => {
 		const gate = operatorConnectionGate("ops-runbook", target, {
 			allowMemberOrganizations: false,
-			enforceProductionLimit: false,
 		});
 		expect(gate.actor).toEqual({ kind: "operator", name: "ops-runbook" });
 		expect(gate.environment).toBe("sandbox");
@@ -71,7 +70,6 @@ describe("operatorConnectionGate", () => {
 	it("applies the merchant gate's instance filters", async () => {
 		const gate = operatorConnectionGate("ops", target, {
 			allowMemberOrganizations: false,
-			enforceProductionLimit: false,
 		});
 		for (const candidate of [
 			{ ...instance, environment: "production" as const },
@@ -85,13 +83,12 @@ describe("operatorConnectionGate", () => {
 		const inactive = fakeSql({ status: "active", has_members: false }, [
 			{ ...instance, lifecycleStatus: "inactive" },
 		]);
-		await expect(gate.instance(inactive.sql, true)).resolves.toMatchObject({ id: "instance-1" });
+		await expect(gate.instance(inactive.sql, true)).rejects.toThrow(MerchantError);
 	});
 
 	it("requires an active organization", async () => {
 		const gate = operatorConnectionGate("ops", target, {
 			allowMemberOrganizations: true,
-			enforceProductionLimit: false,
 		});
 		for (const organization of [undefined, { status: "suspended", has_members: false }]) {
 			const { sql, statements } = fakeSql(organization);
@@ -107,7 +104,6 @@ describe("operatorConnectionGate", () => {
 		const members = { status: "active", has_members: true };
 		const gate = operatorConnectionGate("ops", target, {
 			allowMemberOrganizations: false,
-			enforceProductionLimit: false,
 		});
 		await expect(gate.instance(fakeSql(members).sql, false)).resolves.toEqual(instance);
 		// A read still needs an active organization.
@@ -120,7 +116,6 @@ describe("operatorConnectionGate", () => {
 		const members = { status: "active", has_members: true };
 		const refused = operatorConnectionGate("ops", target, {
 			allowMemberOrganizations: false,
-			enforceProductionLimit: false,
 		});
 		await expect(refused.instance(fakeSql(members).sql, true)).rejects.toThrow(
 			"This organization has members",
@@ -131,13 +126,11 @@ describe("operatorConnectionGate", () => {
 		await expect(
 			operatorConnectionGate("ops", target, {
 				allowMemberOrganizations: true,
-				enforceProductionLimit: false,
 			}).instance(fakeSql(members).sql, true),
 		).resolves.toEqual(instance);
 		const reasoned = operatorConnectionGate("ops", target, {
 			allowMemberOrganizations: false,
 			memberOverrideReason: "rotating a leaked key for the owner",
-			enforceProductionLimit: false,
 		});
 		await expect(reasoned.instance(fakeSql(members).sql, true)).resolves.toEqual(instance);
 		expect(reasoned.actor).toEqual({
@@ -150,7 +143,6 @@ describe("operatorConnectionGate", () => {
 	it("checks for members again once it holds the organization lock", async () => {
 		const gate = operatorConnectionGate("ops", target, {
 			allowMemberOrganizations: false,
-			enforceProductionLimit: false,
 		});
 		// A membership accepted after instance() passed is seen under the lock.
 		const joined = fakeSql({ status: "active", has_members: true });
@@ -165,7 +157,6 @@ describe("operatorConnectionGate", () => {
 			operatorConnectionGate("ops", target, {
 				allowMemberOrganizations: false,
 				memberOverrideReason: "owner asked",
-				enforceProductionLimit: false,
 			}).lock(reasoned.sql),
 		).resolves.toBeUndefined();
 		expect(reasoned.statements).toHaveLength(1);
@@ -177,7 +168,6 @@ describe("operatorConnectionGate", () => {
 		await expect(
 			operatorConnectionGate("ops", target, {
 				allowMemberOrganizations: true,
-				enforceProductionLimit: false,
 			}).lock(headless.sql),
 		).resolves.toBeUndefined();
 		expect(headless.statements).toHaveLength(1);

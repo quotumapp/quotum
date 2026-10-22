@@ -214,7 +214,6 @@ export function createRemoteMcpApp(options: {
 								port,
 								projectInstanceId: access.context.projectInstanceId,
 								principalId: grant.principal_id,
-								environmentStatus: access.environmentStatus,
 							}),
 						}),
 					});

@@ -85,29 +85,24 @@ export function consentedScopes(
 	return requested.filter((scope) => kept.has(scope));
 }
 
-/**
- * Whether a remote call may target this environment. An `inactive` environment (a production not yet
- * activated) is usable so an agent can author its catalog; the tools it reaches there are limited
- * to the catalog (see `allowedOnInactiveEnvironment`). Suspended, deactivating and deactivated
- * environments stay refused.
- */
+/** Remote tools target active environments only; setup completeness does not affect access. */
 export function environmentUsable(instance: {
 	lifecycleStatus: string;
 	environment: string;
 	internalProject: boolean;
 }): boolean {
 	return (
-		(instance.lifecycleStatus === "active" || instance.lifecycleStatus === "inactive") &&
+		instance.lifecycleStatus === "active" &&
 		!instance.internalProject &&
 		instance.environment !== "internal"
 	);
 }
 
-export type McpEnvironmentStatus = "active" | "inactive";
+export type McpEnvironmentStatus = "active";
 
 /** The status of an environment `environmentUsable` accepted. */
-export function environmentStatus(instance: { lifecycleStatus: string }): McpEnvironmentStatus {
-	return instance.lifecycleStatus === "inactive" ? "inactive" : "active";
+export function environmentStatus(): McpEnvironmentStatus {
+	return "active";
 }
 
 /** A space-separated OAuth `scope` value as a list, or null when it is absent. */
@@ -276,7 +271,7 @@ export class McpAuthorizations {
 			grant,
 			member: grant.member,
 			scope,
-			environmentStatus: environmentStatus(instance),
+			environmentStatus: environmentStatus(),
 			context: { projectInstanceId: instance.id, actor: `merchant:${grant.principal_id}` },
 		};
 	}
@@ -293,7 +288,7 @@ export class McpAuthorizations {
 					name: project.name,
 					environments: project.instances.filter(environmentUsable).map((instance) => ({
 						environment: instance.environment,
-						status: environmentStatus(instance),
+						status: environmentStatus(),
 					})),
 				})),
 		};

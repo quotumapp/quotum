@@ -25,7 +25,6 @@ const rotateBody = z.strictObject({
 	access: z.enum(credentialAccessLevels).default("full"),
 });
 const disableBody = z.strictObject({ scope, expectedRevision: z.number().int().nonnegative() });
-const activateBody = z.strictObject({ scope, fingerprint: z.string().min(1) });
 const connection = z.object({
 	id: z.uuid(),
 	kind,
@@ -37,7 +36,6 @@ const connection = z.object({
 	event_verified_at: z.string().nullable(),
 });
 const credential = z.object({
-	active: z.boolean().optional(),
 	access: z.enum(credentialAccessLevels).optional(),
 	credentialDisclosed: z.boolean(),
 	credential: z.string().optional(),
@@ -324,29 +322,6 @@ export function registerConnectionRoutes(
 						fingerprint: z.string(),
 					}),
 				),
-			}),
-		},
-	);
-
-	app.post(
-		"/api/platform/environments/activate",
-		async ({ body, request }) => {
-			const input = activateBody.parse(body);
-			return {
-				success: true as const,
-				data: await service.activate(
-					await store.authenticate(request),
-					input.scope,
-					idempotencyKey(request),
-					input.fingerprint,
-					request.headers.get("x-quotum-step-up-grant") ?? null,
-				),
-			};
-		},
-		{
-			...jsonBody(activateBody),
-			...route("activateEnvironment", "/api/platform/environments/activate", {
-				200: success(credential),
 			}),
 		},
 	);

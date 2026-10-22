@@ -1124,7 +1124,6 @@ const postApiPlatformStepUpBodySchema = z.strictObject({
 		"operations.write",
 		"connections.manage",
 		"webhooks.manage",
-		"environment.activate",
 		"credentials.rotate",
 		"credentials.rotate_read_only",
 		"credentials.revoke_read_only",

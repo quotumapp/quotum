@@ -99,7 +99,7 @@ with current MCP messages and the SDK's older-protocol fallback; it keeps no cro
 
 Remote authorization binds one organization, not an active environment. Start with `list_projects`:
 it returns that organization's project keys and available sandbox/production environments, with
-`active` or `inactive` status. An organization with no projects can connect; projects provisioned
+`active` status. An organization with no projects can connect; projects provisioned
 later appear without reconnecting. Internal and suspended environments are unavailable.
 
 Every environment-specific read, `get_mcp_capabilities`, `get_billing_configuration` and
@@ -119,26 +119,14 @@ A suspended environment refuses calls targeting it while the connection keeps wo
 Disconnecting the connection ends access across the organization. Existing environment-level
 connections must reconnect after the [organization cutover](upgrade-transitions.md#organization-scoped-remote-mcp).
 
-## Connect to production before it is activated
+## Connect to production immediately
 
-A project's production environment is `inactive` until it is
-[activated](deployment.md#activate-a-production-environment). The `list_projects` tool lists it with
-`status: "inactive"` and a call can target it, so an agent can author the catalog that
-activation requires. Until then calls targeting that environment:
-
-- reads the published catalog (`get_catalog`) and can propose `catalog.publish`, which the
-  connected merchant approves in the browser with the production step-up of any production change;
-- answers every other read tool, `get_billing_configuration` and every other proposal action with
-  `409 ENVIRONMENT_INACTIVE`. `get_mcp_capabilities` lists those actions as `available: false` with
-  `unavailableReason: "environment_inactive"`.
-
-Activation needs no new consent: every request rechecks the environment, so the same connection
-reaches every tool it was consented to once the environment is active. A suspended, deactivating or
-deactivated environment is refused as before.
-
-Provider connections, the projection receiver, credentials and activation itself are not MCP
-actions. Connect the live provider and the receiver in the merchant application (or with
-`quotum connections`), let the agent author and publish the catalog, then activate.
+Production is active from project creation, even before credentials, integrations or a catalog
+have been configured. `list_projects` discovers both environments, and the organization connection
+can use the normal read tools immediately. Proposals retain explicit write consent, current
+permissions, browser approval and applicable production step-up authentication. Setup diagnostics
+do not limit the connection to catalog operations. Suspended, deactivating and deactivated
+environments remain unavailable.
 
 ## Propose billing changes
 

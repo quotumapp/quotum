@@ -95,6 +95,15 @@ export function createRuntimeConnectionResolver(
 					purpose === "recovery",
 				);
 				if (!current) return null;
+				// Legacy inactive production could store an enabled provider before event verification.
+				// Making the environment available must not make that provider usable for new work.
+				if (
+					project.environment === "production" &&
+					kind !== "projection" &&
+					purpose === "new" &&
+					!current.version.event_verified_at
+				)
+					return null;
 				const value = { ...current.version.settings, ...current.secrets };
 				const accountIdentity = current.version.external_identity ?? null;
 				let parsed: unknown;

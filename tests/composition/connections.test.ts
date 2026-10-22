@@ -71,7 +71,7 @@ function connectionVersion(
 		settings,
 		status: "active",
 		validated_at: null,
-		event_verified_at: null,
+		event_verified_at: new Date("2026-01-01T00:00:00Z"),
 		validation: null,
 		external_identity: externalIdentity,
 		expires_at: new Date("2027-01-01T00:00:00.000Z"),
@@ -153,6 +153,22 @@ async function withStripeAppEnv<T>(run: () => Promise<T>): Promise<T> {
 }
 
 describe("runtime connection resolver account identity", () => {
+	it("holds unverified production providers out of new work but permits recovery and sandbox", async () => {
+		for (const kind of ["stripe", "apple", "google"] as const) {
+			const { repository } = apiKeyRepository(kind, "identity");
+			const active = repository.active.bind(repository);
+			repository.active = async (...args) => {
+				const current = await active(...args);
+				if (current) current.version.event_verified_at = null;
+				return current;
+			};
+			const resolver = createRuntimeConnectionResolver(repository);
+			expect(await resolver.resolve(project, kind)).toBeNull();
+			expect(await resolver.resolve(project, kind, "recovery")).not.toBeNull();
+			expect(await resolver.resolve(sandboxProject, kind)).not.toBeNull();
+		}
+	});
+
 	it("fills accountIdentity for a Stripe API-key connection without a connected account", async () => {
 		const { repository, lookups } = apiKeyRepository("stripe", "acct_api_key");
 		const resolver = createRuntimeConnectionResolver(repository);

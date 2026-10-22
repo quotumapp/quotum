@@ -252,10 +252,10 @@ export class MerchantOnboarding {
 		input: { name: string; key: string; draftId: string | null },
 	): Promise<{ id: string }> {
 		const [projects] = await tx<
-			{ used: number; project_limit: number }[]
-		>`SELECT (SELECT count(*)::int FROM platform_projects WHERE organization_id=${organizationId}) AS used,project_limit FROM platform_organizations WHERE id=${organizationId}`;
+			{ used: number }[]
+		>`SELECT count(*)::int AS used FROM platform_projects WHERE organization_id=${organizationId}`;
 		if (!projects) throw new Error("Organization disappeared");
-		if (projects.used >= projects.project_limit)
+		if (projects.used >= this.store.config.projectLimit)
 			throw new MerchantError(
 				"PROJECT_LIMIT_REACHED",
 				"The organization has reached its project limit.",
@@ -341,7 +341,7 @@ export class MerchantOnboarding {
 						key: runtimeKey,
 						name: op.project_name,
 						environment,
-						lifecycleStatus: environment === "sandbox" ? "active" : "inactive",
+						lifecycleStatus: "active",
 						internalProject: false,
 					});
 					await tx`UPDATE platform_provisioning_steps SET status='succeeded' WHERE operation_id=${id} AND environment=${environment}`;

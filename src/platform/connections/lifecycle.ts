@@ -13,7 +13,7 @@ import { resolveStripeOAuth } from "./oauth-runtime";
 import type { ConnectionInput, ConnectionValidationPort, EnvironmentBillingPort } from "./ports";
 import { type ConnectionKind, ConnectionRepository, type ConnectionVersion } from "./repository";
 
-/** How long a validation stays fresh enough to commit a version or activate an environment. */
+/** How long a validation stays fresh enough to commit a connection version. */
 export const validationWindowMs = 900_000;
 
 /**
@@ -32,11 +32,6 @@ export type ConnectionActor =
 export interface ConnectionGate {
 	readonly actor: ConnectionActor;
 	readonly environment: "sandbox" | "production";
-	/**
-	 * Whether activating production counts against the organization's production limit. A plan
-	 * limit gates merchants; a headless deployment has no plan, so its operators are not held to it.
-	 */
-	readonly enforcesProductionLimit: boolean;
 	/** Resolves and authorizes the target instance. Every transaction calls it first. */
 	instance(sql: MerchantSql, write: boolean): Promise<PlatformProjectInstanceRecord>;
 	/** Serializes changes within the organization, optionally requiring a capability. */
@@ -196,12 +191,7 @@ export class ConnectionLifecycle {
 					"Verify this connection again.",
 					409,
 				);
-			if (
-				gate.environment === "production" &&
-				instance.lifecycleStatus === "active" &&
-				kind !== "projection" &&
-				!version.event_verified_at
-			)
+			if (gate.environment === "production" && kind !== "projection" && !version.event_verified_at)
 				throw new MerchantError(
 					"PROVIDER_EVENT_REQUIRED",
 					"Verify provider event delivery before enabling this production connection.",
@@ -298,7 +288,7 @@ export class ConnectionLifecycle {
 			const saved = await this.receipt(tx, instance.id, key, receiptAction);
 			if (saved) return saved;
 			if (instance.lifecycleStatus !== "active")
-				throw new MerchantError("ENVIRONMENT_INACTIVE", "Activate the environment first.", 409);
+				throw new MerchantError("ENVIRONMENT_INACTIVE", "This environment is not active.", 409);
 			await gate.confirm(tx, confirmAction, key);
 			const generated = generateProjectApiCredential(gate.environment, access);
 			const replaced = await tx<
@@ -374,9 +364,8 @@ export class ConnectionLifecycle {
 	}
 
 	/**
-	 * What stands between an environment and production: validation, provider event and catalog
-	 * blockers per enabled connection, and a fingerprint of the connection and catalog revisions
-	 * that `activate` binds a reviewed decision to. `billing` reads the published catalog.
+	 * Informational setup diagnostics. Neither these findings nor `ready` gate environment access.
+	 * Connection commits and individual billing operations enforce their own prerequisites.
 	 */
 	async readiness(gate: ConnectionGate, billing: EnvironmentBillingPort) {
 		const instance = await gate.instance(this.deps.sql, false);
@@ -387,7 +376,7 @@ export class ConnectionLifecycle {
 		const blockerDetails: ReadinessBlockerDetail[] = [];
 		const block = (code: string, extra: Omit<ReadinessBlockerDetail, "code" | "gating"> = {}) => {
 			blockers.push(code);
-			blockerDetails.push({ code, gating: true, ...extra });
+			blockerDetails.push({ code, gating: false, ...extra });
 		};
 		const providers = connections.filter((c) => c.enabled && c.kind !== "projection");
 		if (!providers.length) block("PROVIDER_REQUIRED");
@@ -439,101 +428,6 @@ export class ConnectionLifecycle {
 					connections: connections.map((c) => [c.id, c.revision, c.active_version_id]),
 				}),
 			),
-		};
-	}
-
-	/**
-	 * Activates a production environment and issues its first full key. A merchant binds the call to
-	 * the readiness `fingerprint` they reviewed, and the gate confirms it with a step-up; an operator
-	 * passes `null` and is held to the state read now. Either way the readiness blockers, the
-	 * production limit (where the gate enforces it) and the connection revisions seen at readiness
-	 * are rechecked under the organization lock. `deliver` stores the key before commit: if it
-	 * fails, the environment stays inactive and a retry with the same key starts over.
-	 */
-	async activate(
-		gate: ConnectionGate,
-		billing: EnvironmentBillingPort,
-		key: string,
-		{
-			fingerprint,
-			deliver,
-		}: { fingerprint: string | null; deliver?: (credential: string) => Promise<void> },
-	) {
-		if (gate.environment !== "production")
-			throw new MerchantError("INVALID_REQUEST", "Sandbox is activated during onboarding.");
-		const readiness = await this.readiness(gate, billing);
-		const reviewed = fingerprint ?? readiness.fingerprint;
-		const receiptAction = `activate:${reviewed}`;
-		let credential: string | null = null;
-		const result = await this.deps.sql.begin(async (tx) => {
-			const instance = await gate.instance(tx, true);
-			// Also takes the organization row lock that serializes the production limit and connections.
-			await gate.lock(tx, "production.activate");
-			const previous = await this.receipt(tx, instance.id, key, receiptAction);
-			if (previous) return previous;
-			if (instance.lifecycleStatus === "active")
-				return { active: true, credentialDisclosed: false };
-			if (!readiness.ready || !readiness.catalogRevisionId || reviewed !== readiness.fingerprint)
-				throw new MerchantError(
-					"ENVIRONMENT_NOT_READY",
-					"Review and resolve the current production readiness checks.",
-					409,
-				);
-			const organizationId = await gate.organizationId(tx);
-			await tx`SELECT id FROM platform_connections WHERE project_instance_id=${instance.id} ORDER BY id FOR UPDATE`;
-			const repository = new ConnectionRepository(tx, this.deps.repository.cipher);
-			const current = await repository.list(instance.id);
-			if (
-				canonicalJson(current.map((c) => [c.id, c.revision, c.active_version_id])) !==
-				canonicalJson(readiness.connections.map((c) => [c.id, c.revision, c.active_version_id]))
-			)
-				throw new MerchantError("CONNECTION_CHANGED", "Review production readiness again.", 409);
-			for (const row of current.filter((c) => c.enabled)) {
-				if (
-					!row.validated_at ||
-					row.validated_at.getTime() < this.deps.now().getTime() - validationWindowMs ||
-					(row.kind !== "projection" && !row.event_verified_at)
-				)
-					throw new MerchantError(
-						"ENVIRONMENT_NOT_READY",
-						"Refresh connection verification before activating production.",
-						409,
-					);
-				await repository.active(instance.id, row.kind);
-			}
-			await gate.confirm(tx, "environment.activate", reviewed);
-			if (
-				!(await tx.instances.activateProduction(
-					instance.id,
-					organizationId,
-					readiness.catalogRevisionId,
-					{ enforceProductionLimit: gate.enforcesProductionLimit },
-				))
-			)
-				throw new MerchantError(
-					"ACTIVATION_CONFLICT",
-					"Production capacity or catalog state changed. Refresh readiness.",
-					409,
-				);
-			const generated = generateProjectApiCredential("production", "full");
-			// A first activation finds nothing to revoke. One live key of a kind per instance is a
-			// database invariant, so a repeated activation replaces the key instead of failing.
-			await tx`UPDATE platform_project_api_credentials SET revoked_at=clock_timestamp() WHERE project_instance_id=${instance.id} AND access=${generated.access} AND revoked_at IS NULL`;
-			await tx`INSERT INTO platform_project_api_credentials(id,project_instance_id,audience,access,secret_verifier) VALUES(${generated.credentialId},${instance.id},'billing_api',${generated.access},${generated.secretVerifier})`;
-			await this.audit(tx, gate, "environment.activated", instance.id, {
-				catalogRevisionId: readiness.catalogRevisionId,
-			});
-			const saved = { active: true, credentialDisclosed: false };
-			await this.saveReceipt(tx, instance.id, key, receiptAction, saved);
-			// Last before commit, so once the key is stored only the commit itself can still fail.
-			await deliver?.(generated.token);
-			credential = generated.token;
-			return saved;
-		});
-		return {
-			...result,
-			credentialDisclosed: credential !== null,
-			...(credential ? { credential } : {}),
 		};
 	}
 
