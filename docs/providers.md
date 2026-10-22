@@ -253,6 +253,8 @@ Planned providers and planned statuses come from a dated provider assessment in 
 
 Connection setup derives `apple.environment` from the selected environment, enforces online checks
 in both modes, and uses the committed public Apple PKI roots in `src/providers/apple/certs/`.
+Verified notifications retain Apple's `signedDate`, which connection setup uses to check that a
+signed test event is no more than five minutes old.
 Self-service does not expose a certificate-directory override. Production retries sandbox verification
 only for signed payloads Apple rejects with an explicit environment mismatch.
 
