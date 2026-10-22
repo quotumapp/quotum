@@ -489,5 +489,6 @@ or eligibility has since changed. If the subscription id was not persisted, reco
 pages of the customer's subscriptions, including canceled ones. A failed page read retries instead
 of treating a partial list as proof that no subscription exists. Failures recording that subscription
 or its outcome remain retryable; they do not turn an existing purchase into `not_eligible` or `plan_changed`.
-Merchants learn the outcome from the setup session and from that projection. Quotum has no outbound
-merchant event for it.
+Merchants learn the outcome from the setup session and from that projection. The setup has no
+event of its own, but the subscription it starts is recorded like any other, so an
+[outbound webhook](webhooks.md) endpoint that subscribes to `subscription.activated` receives it.

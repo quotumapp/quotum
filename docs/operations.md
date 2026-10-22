@@ -244,6 +244,10 @@ them faithfully. Event-loop lag is one scrape-time sample, not an interval maxim
 Collection runs only during scrapes, with no persistent sampling timer. Concurrent scrapes share
 an in-flight collection. Each app/runtime owns its registry and billing counters; process readings
 cover the entire process, including HTTP handling and workers.
+
+The `billing_*` counters are described with the feature that raises them; for example,
+[outbound webhook delivery](webhooks.md#retries) counts each attempt in
+`billing_event_delivery_total{result,code}`.
 Billing instrumentation retains its synchronous interface. The HTTP layer combines its output
 with the asynchronous runtime exporter for both metrics endpoints, including when billing metrics
 are supplied through dependency injection.
