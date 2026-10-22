@@ -9,7 +9,7 @@ const documentDescriptions = {
 	"errors.json":
 		"Every literal error code the API can return, with the source files that raise it.",
 	"provider-capabilities.json":
-		"Which operations Apple, Google and Stripe support, with support levels and reasons.",
+		"Current Quotum support and dated future-feasibility assessments for Apple, Google Play, Stripe and Paddle, with conditions, test evidence and public provider sources.",
 	"projection-delivery.schema.json":
 		"JSON Schema of the signed billing_state_v1 delivery a projection receiver gets.",
 	"projection-delivery.examples.json":

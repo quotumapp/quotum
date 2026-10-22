@@ -4,6 +4,8 @@ import type {
 	OperationSupport,
 	ProviderCapabilityDeclaration,
 } from "../../shared/provider-capabilities";
+import { withFeasibility } from "../feasibility";
+import { paddleFeasibility } from "./feasibility";
 
 type ImplementableLevel = "native" | "quotum_composed";
 
@@ -258,7 +260,7 @@ const paddleAssessment: ProviderCapabilityDeclaration = {
 };
 
 /** Only checkout dispatch has durable recovery in this increment. Worker write groups remain absent. */
-export const paddleCapabilities: ProviderCapabilityDeclaration = {
+const paddleDeclaration: ProviderCapabilityDeclaration = {
 	...paddleAssessment,
 	operations: {
 		...paddleAssessment.operations,
@@ -327,3 +329,5 @@ export const paddleCapabilities: ProviderCapabilityDeclaration = {
 		),
 	},
 };
+
+export const paddleCapabilities = withFeasibility(paddleDeclaration, paddleFeasibility);

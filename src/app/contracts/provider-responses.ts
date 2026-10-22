@@ -12,11 +12,13 @@ import {
 	billingChannels,
 	type CapabilityCondition,
 	type CapabilityEvidence,
+	type CapabilityFeasibility,
 	type CapabilityReason,
 	type CapabilityResolution,
 	type CapabilityVerdict,
 	type CapabilityVerification,
 	capabilityBlockerKinds,
+	capabilityFeasibilityStatuses,
 	capabilityLayers,
 	capabilityOutcomes,
 	capabilityStatusLabelIds,
@@ -178,12 +180,20 @@ export const CapabilityVerificationSchema = z.discriminatedUnion("status", [
 	}),
 ]);
 
+export const CapabilityFeasibilitySchema = z.object({
+	status: z.enum(capabilityFeasibilityStatuses),
+	reason: z.string(),
+	sources: z.array(z.object({ title: z.string(), url: z.string() })),
+	reviewedOn: z.string(),
+});
+
 export const ProviderOperationSupportSchema = z.object({
 	level: z.enum(supportLevels),
 	composedVia: z.string().optional(),
 	verification: CapabilityVerificationSchema,
 	conditions: z.array(CapabilityConditionSchema),
 	notes: z.string().optional(),
+	feasibility: CapabilityFeasibilitySchema.optional(),
 });
 
 const operationSupportShape = Object.fromEntries(
@@ -323,6 +333,7 @@ type MutuallyAssignable<A, B> = [A] extends [B] ? ([B] extends [A] ? true : fals
 type Expect<T extends true> = T;
 /** Fails typechecking when a wire schema drifts from the shared contract type it mirrors. */
 export type ProviderCapabilitySchemaMirrors = [
+	Expect<MutuallyAssignable<z.infer<typeof CapabilityFeasibilitySchema>, CapabilityFeasibility>>,
 	Expect<MutuallyAssignable<z.infer<typeof ProviderOperationSchema>, ProviderOperation>>,
 	Expect<MutuallyAssignable<z.infer<typeof CapabilityEvidenceSchema>, CapabilityEvidence>>,
 	Expect<MutuallyAssignable<z.infer<typeof CapabilityVerificationSchema>, CapabilityVerification>>,

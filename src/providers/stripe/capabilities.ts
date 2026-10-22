@@ -3,6 +3,8 @@ import type {
 	OperationSupport,
 	ProviderCapabilityDeclaration,
 } from "../../shared/provider-capabilities";
+import { withFeasibility } from "../feasibility";
+import { stripeFeasibility } from "./feasibility";
 
 const verifiedOn = "2026-09-17";
 
@@ -85,7 +87,7 @@ function verification(
 }
 
 /** Current Stripe web behaviour; verified and conditional entries cite tagged tests. */
-export const stripeCapabilities: ProviderCapabilityDeclaration = {
+const stripeDeclaration: ProviderCapabilityDeclaration = {
 	provider: "stripe",
 	channel: "web",
 	connectionKind: "stripe",
@@ -218,3 +220,5 @@ export const stripeCapabilities: ProviderCapabilityDeclaration = {
 		}),
 	},
 };
+
+export const stripeCapabilities = withFeasibility(stripeDeclaration, stripeFeasibility);

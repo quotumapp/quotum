@@ -118,6 +118,11 @@ provider, refresh a token, or decrypt a secret. They list the admitted providers
 the shape described in [Provider capability errors](#provider-capability-errors), whose `outcome` is
 `available`, `blocked`, or `undetermined`.
 
+These reads describe runtime availability. The static
+[provider matrix](providers.md#provider-capabilities) separately carries dated `feasibility`
+assessments and public provider sources in `contracts/v1/provider-capabilities.json`. A Possible
+or Conditional future assessment never makes an operation available in either read or at execution.
+
 The capabilities read returns one entry per provider with its `channel`, `connectionKind`,
 `connection`, and a verdict for every operation in contract order. Operations are evaluated through
 the configuration layer, so conditions of a single request, such as a subscription's status, are not

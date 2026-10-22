@@ -1381,6 +1381,58 @@ describe("validateDeclaration", () => {
 			"Invalid capability declaration for stripe: availability: Admitted provider stripe must be available; operations.checkout.plan.composedVia: Quotum-composed support must name the primitive it composes; operations.checkout.plan.verification.status: A planned declaration cannot claim verified support",
 		);
 	});
+
+	it("accepts optional dated feasibility without requiring it in older declarations", () => {
+		const feasibility = {
+			status: "conditional" as const,
+			reason: "A provider primitive exists; collection consent still needs validation.",
+			reviewedOn: "2026-10-22",
+			sources: [{ title: "Provider API", url: "https://example.com/api" }],
+		};
+		expect(validateDeclaration(declaration())).toEqual([]);
+		expect(
+			validateDeclaration(declaration({ "refund.issue": { ...notEvaluated, feasibility } })),
+		).toEqual([]);
+		expect(
+			validateDeclaration(
+				declaration({
+					"refund.issue": {
+						...notEvaluated,
+						feasibility: { ...feasibility, status: "unknown", sources: [] },
+					},
+				}),
+			),
+		).toEqual([]);
+	});
+
+	it.each([
+		[null, "feasibility"],
+		[{ status: "promised" }, "feasibility.status"],
+		[{ reason: " " }, "feasibility.reason"],
+		[{ reviewedOn: "2026-02-30" }, "feasibility.reviewedOn"],
+		[{ sources: null }, "feasibility.sources"],
+		[{ sources: [] }, "feasibility.sources"],
+		[{ sources: [null] }, "feasibility.sources.0.title"],
+		[{ sources: [{ title: " ", url: "https://example.com" }] }, "feasibility.sources.0.title"],
+		[{ sources: [{ title: "Docs", url: "http://example.com" }] }, "feasibility.sources.0.url"],
+		[
+			{ sources: [{ title: "Docs", url: "https://user:secret@example.com" }] },
+			"feasibility.sources.0.url",
+		],
+	])("rejects invalid feasibility metadata %j", (override, path) => {
+		const feasibility =
+			override === null
+				? null
+				: {
+						status: "possible",
+						reason: "Documented provider primitive.",
+						reviewedOn: "2026-10-22",
+						sources: [{ title: "Docs", url: "https://example.com" }],
+						...override,
+					};
+		const input = withSupport("refund.issue", { ...notEvaluated, feasibility });
+		expect(issuePaths(input)).toContain(`operations.refund.issue.${path}`);
+	});
 });
 
 describe("capability status labels", () => {

@@ -6,6 +6,7 @@ import {
 	type BillingCadenceSupport,
 	type CapabilityEvidence,
 	type CapabilityStatusLabel,
+	capabilityFeasibilityLabels,
 	capabilityStatusLabels,
 	describeCondition,
 	type OperationSupport,
@@ -46,7 +47,14 @@ export type ProviderCapabilityMatrixMirror = Expect<
 
 /** Deterministic: no timestamps, vocabulary in contract order, declarations validated first. */
 export function providerCapabilityContract(): ProviderCapabilityContract {
-	for (const declaration of providerCapabilityDeclarations) assertValidDeclaration(declaration);
+	for (const declaration of providerCapabilityDeclarations) {
+		assertValidDeclaration(declaration);
+		for (const operation of providerOperations) {
+			if (declaration.operations[operation].feasibility === undefined) {
+				throw new Error(`Missing feasibility assessment: ${declaration.provider}.${operation}`);
+			}
+		}
+	}
 	return {
 		schemaVersion: 1,
 		domains: providerOperationDomains.map((id) => ({
@@ -65,13 +73,15 @@ export function providerCapabilityContract(): ProviderCapabilityContract {
 
 /**
  * The Markdown between the provider capability markers in `docs/providers.md`: one row per
- * operation grouped by domain, one column per declared provider, then the legend. Links stay inside
- * the repository and the block carries no HTTP examples.
+ * operation grouped by domain, one column per declared provider, then the legends. Test links stay
+ * inside the repository; dated research links to public provider documentation.
  */
 export function renderProviderCapabilityBlock(contract: ProviderCapabilityContract): string {
 	const providers = contract.providers;
 	const lines = [
 		"<!-- Generated from contracts/v1/provider-capabilities.json by bun run openapi:generate; do not edit. -->",
+		"",
+		"Each cell separates **Today** (Quotum implementation) from **Potential** (provider feasibility). Potential describes current provider APIs and documented primitives; it does not enable an operation or promise delivery.",
 		"",
 		tableRow(["Operation", ...providers.map(providerHeading)]),
 		tableRow(["---", ...providers.map(() => "---")]),
@@ -101,7 +111,17 @@ export function renderProviderCapabilityBlock(contract: ProviderCapabilityContra
 				`- **${providerHeading(declaration)}**: ${declaration.billingCadences.map(billingCadenceLabel).join(", ")}`,
 		),
 		"",
-		"Statuses:",
+		"Today: Supported and Conditional describe implemented scope; Not implemented includes planned or blocked work; Unavailable in Quotum describes a current rejection; Not assessed in Quotum makes no implementation claim. Provider-managed means an external flow, with mirroring stated separately. Conditions, verification notes and sandbox restrictions remain explicit.",
+		"",
+		"Potential:",
+		"",
+		"- **Possible**: documented provider primitives can implement the operation, natively or through Quotum composition.",
+		"- **Conditional**: a candidate exists, with the stated eligibility, policy, client-flow or semantic prerequisites still applying.",
+		"- **Provider-managed only**: the provider offers an external customer flow; it does not expose the defined Quotum command.",
+		"- **Unavailable through current provider APIs**: the assessed APIs do not expose the operation's required semantics; this is not a prediction about future provider releases.",
+		"- **Unknown**: evidence does not establish semantic parity. A related feature alone is insufficient.",
+		"",
+		"Declaration status rules (retained in the contract; Unsupported describes Quotum's current declaration, not future provider feasibility):",
 		"",
 		...contract.labels.map(
 			(entry) => `- **${escapeMarkdown(entry.label)}**: ${escapeMarkdown(entry.rule)}`,
@@ -111,7 +131,7 @@ export function renderProviderCapabilityBlock(contract: ProviderCapabilityContra
 		"",
 		"Tests link to the repository tests that exercise the declared behavior. Scenario ids name conformance scenarios; question ids and decision ids name provider assessment questions and decision register entries in the Quotum documentation repository.",
 		"",
-		"Planned providers and planned statuses come from a dated provider assessment in the Quotum documentation repository and are not commitments. Provider-layer sources are cited in that assessment and are not linked from this guide.",
+		"Planned providers, planned statuses and feasibility assessments are not commitments. Public provider sources and their review dates appear in each cell. Tests verify current implementation scope, not future feasibility or a production deployment.",
 	);
 	return lines.join("\n");
 }
@@ -149,19 +169,54 @@ function providerHeading(declaration: ProviderCapabilityDeclaration): string {
 }
 
 function supportCell(contract: ProviderCapabilityContract, support: OperationSupport): string {
-	const status = renderCapabilityStatus(support);
+	const status = currentSupportStatus(support);
 	const kind =
 		contract.supportLevels.find((level) => level.id === support.level)?.label ?? support.level;
 	// A status named after the support level already says it; a longer kind label replaces it.
 	const headline =
-		kind === status || kind.startsWith(status)
-			? kind
+		support.level !== "native" && support.level !== "quotum_composed"
+			? status
 			: `${status} · ${support.composedVia === undefined ? kind : `${kind} via ${support.composedVia}`}`;
+	const feasibility = support.feasibility;
+	const verificationNote = "note" in support.verification ? support.verification.note : undefined;
 	return [
-		escapeMarkdown(headline),
+		`**Today:** ${escapeMarkdown(headline)}`,
 		...support.conditions.map((condition) => escapeMarkdown(describeCondition(condition))),
+		...[...new Set([verificationNote, support.notes])]
+			.filter((note): note is string => note !== undefined && note !== "")
+			.map(escapeMarkdown),
+		feasibility === undefined
+			? "**Potential:** Unknown. No provider assessment recorded."
+			: `**Potential:** ${escapeMarkdown(capabilityFeasibilityLabels[feasibility.status])}. ${escapeMarkdown(feasibility.reason)}`,
+		...(feasibility === undefined
+			? []
+			: [
+					`Reviewed ${escapeMarkdown(feasibility.reviewedOn)}${feasibility.sources.length === 0 ? "" : ` · ${feasibility.sources.map(feasibilitySourceLink).join(", ")}`}`,
+				]),
 		...evidenceLines(support.verification.evidence),
 	].join("<br>");
+}
+
+function currentSupportStatus(support: OperationSupport): string {
+	if (support.level === "unsupported") return "Unavailable in Quotum";
+	if (support.level === "not_evaluated") return "Not assessed in Quotum";
+	if (support.level === "provider_managed") {
+		return support.verification.status === "verified" ||
+			support.verification.status === "conditional"
+			? "Provider-managed; mirrored by Quotum"
+			: "Provider-managed; no Quotum command";
+	}
+	const status = renderCapabilityStatus(support);
+	return support.verification.status === "planned" ? `Not implemented · ${status}` : status;
+}
+
+function feasibilitySourceLink(source: { title: string; url: string }): string {
+	const url = new URL(source.url);
+	if (url.protocol !== "https:" || url.username !== "" || url.password !== "") {
+		throw new Error("Feasibility source must be an HTTPS URL without credentials");
+	}
+	const href = url.href.replaceAll("(", "%28").replaceAll(")", "%29").replaceAll("|", "%7C");
+	return `[${escapeMarkdown(source.title)}](${href})`;
 }
 
 function evidenceLines(evidence: CapabilityEvidence | undefined): string[] {
