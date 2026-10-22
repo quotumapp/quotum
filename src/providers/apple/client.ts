@@ -430,6 +430,7 @@ function toDecodedNotification(
 	}
 
 	return {
+		signedDate: notification.signedDate,
 		notificationType: String(notification.notificationType),
 		subtype: notification.subtype === undefined ? undefined : String(notification.subtype),
 		notificationUUID: notification.notificationUUID,

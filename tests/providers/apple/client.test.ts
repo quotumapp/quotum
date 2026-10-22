@@ -60,6 +60,20 @@ function notificationClient(
 }
 
 describe("Apple StoreKit client", () => {
+	it("preserves the verified signed date for setup notification freshness checks", async () => {
+		const signedDate = Date.now();
+		const client = notificationClient("sandbox", async () => ({
+			notificationType: "TEST",
+			notificationUUID: "setup-notification",
+			signedDate,
+			data: { bundleId: "com.acme.app", environment: "Sandbox" },
+		}));
+
+		const result = await client.verifyNotification("signed-test-notification");
+
+		expect(result.notification.signedDate).toBe(signedDate);
+	});
+
 	it("maps configured environments to Apple library environments", () => {
 		expect(toAppleLibraryEnvironment("sandbox")).toBe(Environment.SANDBOX);
 		expect(toAppleLibraryEnvironment("production")).toBe(Environment.PRODUCTION);
