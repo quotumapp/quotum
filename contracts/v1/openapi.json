@@ -6491,6 +6491,51 @@
         ],
         "type": "object"
       },
+      "CapabilityFeasibility": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "reviewedOn": {
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "url"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "possible",
+              "conditional",
+              "provider_managed",
+              "unavailable",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "reason",
+          "sources",
+          "reviewedOn"
+        ],
+        "type": "object"
+      },
       "CapabilityReason": {
         "properties": {
           "code": {
@@ -28773,6 +28818,9 @@
               "$ref": "#/components/schemas/CapabilityCondition"
             },
             "type": "array"
+          },
+          "feasibility": {
+            "$ref": "#/components/schemas/CapabilityFeasibility"
           },
           "level": {
             "enum": [

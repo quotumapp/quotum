@@ -2,6 +2,8 @@ import type {
 	OperationSupport,
 	ProviderCapabilityDeclaration,
 } from "../../shared/provider-capabilities";
+import { withFeasibility } from "../feasibility";
+import { appleFeasibility } from "./feasibility";
 
 const verifiedOn = "2026-09-17";
 const appleFlows = "tests/integration/apple-flows.test.ts";
@@ -86,7 +88,7 @@ const nativePurchaseFlow =
 const noUsageInvoices = "App Store purchases cannot carry postpaid usage invoices.";
 
 /** Current Apple StoreKit behaviour; every verified entry cites a test tagged with its operation. */
-export const appleCapabilities: ProviderCapabilityDeclaration = {
+const appleDeclaration: ProviderCapabilityDeclaration = {
 	provider: "apple",
 	channel: "ios",
 	connectionKind: "apple",
@@ -167,7 +169,7 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 			[appleFlows, appleNormalizer],
 		),
 		"refund.issue": providerManaged(
-			"Apple decides refunds and exposes no API for a developer to issue one; the customer requests it from Apple.",
+			"Quotum uses the standard StoreKit customer-refund flow and sends no refund command; eligible Advanced Commerce refund requests are not integrated.",
 		),
 		"topup.customer_initiated": verified(
 			[appleFlows],
@@ -196,3 +198,5 @@ export const appleCapabilities: ProviderCapabilityDeclaration = {
 		"promotion.hosted_code": notEvaluated(),
 	},
 };
+
+export const appleCapabilities = withFeasibility(appleDeclaration, appleFeasibility);

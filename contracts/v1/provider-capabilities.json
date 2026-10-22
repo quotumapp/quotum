@@ -340,6 +340,21 @@
       "operations": {
         "adjustment.issue": {
           "conditions": [],
+          "feasibility": {
+            "reason": "There is no postpaid usage invoice to correct; refund requests are a separate capability.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "App Store Server API",
+                "url": "https://developer.apple.com/documentation/appstoreserverapi"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Adjustments apply to postpaid usage invoices, which App Store purchases cannot carry.",
           "verification": {
@@ -348,6 +363,21 @@
         },
         "catalog.addon": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Separate subscription groups or eligible Advanced Commerce items could supply add-ons; Quotum's base-plan and lifecycle parity need qualification.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Auto-renewable subscriptions",
+                "url": "https://developer.apple.com/app-store/subscriptions/"
+              },
+              {
+                "title": "Advanced Commerce eligibility",
+                "url": "https://developer.apple.com/in-app-purchase/advanced-commerce-api/"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "not_evaluated",
           "notes": "The catalog accepts add-on plans only when every binding is Stripe.",
           "verification": {
@@ -356,6 +386,17 @@
         },
         "catalog.price.flat": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Storefront-specific product prices can represent a flat fee; explicit Quotum amount and currency bindings need validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Auto-renewable subscriptions",
+                "url": "https://developer.apple.com/app-store/subscriptions/"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "not_evaluated",
           "notes": "The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -364,6 +405,17 @@
         },
         "catalog.price.hybrid": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Advanced Commerce supports multiple subscription items, but licensed or metered-overage parity is unassessed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "unsupported",
           "notes": "Hybrid pricing is not an App Store capability. The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -372,6 +424,21 @@
         },
         "catalog.price.licensed": {
           "conditions": [],
+          "feasibility": {
+            "reason": "StoreKit has fixed products; licensed-quantity parity through Advanced Commerce has not been established.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple In-App Purchase",
+                "url": "https://developer.apple.com/in-app-purchase/"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "unsupported",
           "notes": "Seat pricing is not an App Store capability. The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -380,6 +447,21 @@
         },
         "catalog.price.postpaid_usage": {
           "conditions": [],
+          "feasibility": {
+            "reason": "StoreKit and Advanced Commerce start purchases in the app; they expose no arbitrary off-session usage invoice for Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "App Store purchases cannot carry postpaid usage invoices.",
           "verification": {
@@ -388,6 +470,21 @@
         },
         "catalog.price.tiered": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Fixed store prices do not establish provider-side volume or graduated pricing; Advanced Commerce parity is unassessed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple In-App Purchase",
+                "url": "https://developer.apple.com/in-app-purchase/"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "not_evaluated",
           "notes": "The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -396,6 +493,17 @@
         },
         "catalog.product.consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Consumable purchases can fund app-owned balances after server verification.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple In-App Purchase",
+                "url": "https://developer.apple.com/in-app-purchase/"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -412,6 +520,17 @@
         },
         "catalog.product.non_consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Non-consumable purchases support lasting access; Quotum would need to qualify that fulfillment path.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple In-App Purchase",
+                "url": "https://developer.apple.com/in-app-purchase/"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "not_evaluated",
           "notes": "StoreKit normalizes non-consumable transactions, but no test exercises one.",
           "verification": {
@@ -420,6 +539,17 @@
         },
         "catalog.product.subscription": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Auto-renewable products can fund plans whose entitlements Quotum mirrors.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple In-App Purchase",
+                "url": "https://developer.apple.com/in-app-purchase/"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -435,6 +565,17 @@
         },
         "catalog.topup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Consumable products can grant a fixed quantity to a balance maintained by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple In-App Purchase",
+                "url": "https://developer.apple.com/in-app-purchase/"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -450,6 +591,17 @@
         },
         "catalog.trial": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Store introductory offers own trial eligibility and duration; they cannot honor arbitrary Quotum trial-end policies.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription offers",
+                "url": "https://developer.apple.com/app-store/subscriptions/#subscription-offers"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Free-trial offers (introductory, promotional, offer code or win-back) run in the App Store; Quotum records the trial bounds from the signed transaction. The catalog rejects plan trial days on Apple bindings.",
           "verification": {
@@ -468,6 +620,17 @@
         },
         "checkout.hosted": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Apple starts these purchases through StoreKit, without a server-created hosted checkout session.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Purchases start in the app through StoreKit and reach Quotum through purchase verification.",
           "verification": {
@@ -476,6 +639,21 @@
         },
         "checkout.plan": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Recurring purchases require the native StoreKit purchase flow, including Advanced Commerce creation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Purchases start in the app through StoreKit and reach Quotum through purchase verification.",
           "verification": {
@@ -484,6 +662,17 @@
         },
         "event.replay": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can retain authenticated notifications and reprocess them locally.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "App Store Server Notifications",
+                "url": "https://developer.apple.com/documentation/appstoreservernotifications"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -499,6 +688,17 @@
         },
         "payment_method.setup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Apple owns the customer's payment account; Quotum cannot save or choose its default payment method.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple Account payment methods",
+                "url": "https://support.apple.com/118293"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "The App Store owns the Apple ID payment method; there is no Quotum-hosted setup and nothing for Quotum to make default.",
           "verification": {
@@ -507,6 +707,17 @@
         },
         "portal.session": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Apple supplies subscription-management UI; no Quotum-created billing portal session exposes the defined self-service surface.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Auto-renewable subscriptions",
+                "url": "https://developer.apple.com/app-store/subscriptions/"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "not_evaluated",
           "verification": {
             "status": "not_applicable"
@@ -515,6 +726,17 @@
         "promotion.code_entry": {
           "composedVia": "Apple subscription promotional offers",
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum codes can map to eligible signed StoreKit promotional offers; redemption still requires a verified native purchase.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription offers",
+                "url": "https://developer.apple.com/app-store/subscriptions/#subscription-offers"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "quotum_composed",
           "notes": "Mapped iOS discount codes return a signed StoreKit action. Direct feature and plan grants remain unsupported.",
           "verification": {
@@ -531,6 +753,21 @@
         },
         "promotion.hosted_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Apple's native offer-code sheet is not a provider-hosted web checkout with Quotum promotion entry.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              },
+              {
+                "title": "Subscription offers",
+                "url": "https://developer.apple.com/app-store/subscriptions/#subscription-offers"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "not_evaluated",
           "verification": {
             "status": "not_applicable"
@@ -539,6 +776,17 @@
         "promotion.signed_offer": {
           "composedVia": "Apple subscription promotional offers",
           "conditions": [],
+          "feasibility": {
+            "reason": "StoreKit promotional offers accept server signatures, subject to customer and subscription eligibility.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription offers",
+                "url": "https://developer.apple.com/app-store/subscriptions/#subscription-offers"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "quotum_composed",
           "notes": "Requires an active mapping and an existing linked subscription; a signature reserves one use for 24 hours, and StoreKit confirms the purchase.",
           "verification": {
@@ -555,6 +803,17 @@
         },
         "promotion.store_offer_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Apple controls offer-code distribution and redemption; Quotum can mirror the resulting verified purchase.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Offer codes",
+                "url": "https://developer.apple.com/help/app-store-connect/manage-in-app-purchases/offer-codes-for-in-app-purchases"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "App Store Connect owns offer codes; Quotum records one mapped use per linked subscription.",
           "verification": {
@@ -571,6 +830,17 @@
         },
         "purchase.verify": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Signed transactions and authenticated server reads can verify purchases and their ownership.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "App Store Server API",
+                "url": "https://developer.apple.com/documentation/appstoreserverapi"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "The transaction's app account token must match the token Quotum issued for the billing account.",
           "verification": {
@@ -588,14 +858,44 @@
         },
         "refund.issue": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Advanced Commerce permits server refund requests for eligible apps with the signed addendum; approval and Quotum amount/recovery parity need qualification. Standard StoreKit keeps the customer-request flow.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Request a transaction refund",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi/request-transaction-refund"
+              },
+              {
+                "title": "Advanced Commerce eligibility",
+                "url": "https://developer.apple.com/in-app-purchase/advanced-commerce-api/"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "provider_managed",
-          "notes": "Apple decides refunds and exposes no API for a developer to issue one; the customer requests it from Apple.",
+          "notes": "Quotum uses the standard StoreKit customer-refund flow and sends no refund command; eligible Advanced Commerce refund requests are not integrated.",
           "verification": {
             "status": "not_applicable"
           }
         },
         "refund.sync": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Refund and revocation notifications plus refund-history reads can drive balance reversals.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "App Store Server Notifications",
+                "url": "https://developer.apple.com/documentation/appstoreservernotifications"
+              },
+              {
+                "title": "App Store Server API",
+                "url": "https://developer.apple.com/documentation/appstoreserverapi"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "provider_managed",
           "notes": "Apple decides refunds; Quotum mirrors refund, revocation and refund reversal notifications.",
           "verification": {
@@ -613,6 +913,21 @@
         },
         "settlement.collect_finalized_charge": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Native purchases do not offer an off-session invoice for an arbitrary finalized usage amount.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "App Store purchases cannot carry postpaid usage invoices.",
           "verification": {
@@ -621,6 +936,21 @@
         },
         "subscription.cancel": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Eligible apps can stop renewal through Advanced Commerce after signing its addendum; immediate no-refund cancellation parity is unassessed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Cancel through Advanced Commerce",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi/cancel-a-subscription"
+              },
+              {
+                "title": "Advanced Commerce eligibility",
+                "url": "https://developer.apple.com/in-app-purchase/advanced-commerce-api/"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "provider_managed",
           "notes": "Cancellation happens in the store's subscription settings; Quotum records the resulting notification.",
           "verification": {
@@ -629,6 +959,21 @@
         },
         "subscription.change.apply": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Plan replacements use native purchase flows; Advanced Commerce subscription modification also runs in the app.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Auto-renewable subscriptions",
+                "url": "https://developer.apple.com/app-store/subscriptions/"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Upgrades and crossgrades happen in the App Store; Quotum records the resulting subscription notifications.",
           "verification": {
@@ -637,6 +982,21 @@
         },
         "subscription.change.period_end": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Apple determines when native subscription replacements take effect; Quotum cannot dispatch an arbitrary deferred plan change.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Auto-renewable subscriptions",
+                "url": "https://developer.apple.com/app-store/subscriptions/"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Downgrades are scheduled in the App Store; Quotum records the renewal preference notification.",
           "verification": {
@@ -645,6 +1005,21 @@
         },
         "subscription.change.preview": {
           "conditions": [],
+          "feasibility": {
+            "reason": "StoreKit presents purchase terms to the customer; server-side proration previews matching Quotum are not exposed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              },
+              {
+                "title": "Auto-renewable subscriptions",
+                "url": "https://developer.apple.com/app-store/subscriptions/"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "unsupported",
           "notes": "Upgrades, downgrades and crossgrades are priced in the App Store purchase sheet; Quotum has no preview for them and records no preview outcome.",
           "verification": {
@@ -653,6 +1028,21 @@
         },
         "subscription.create": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Subscription creation requires an in-app purchase, including Advanced Commerce; no silent saved-card start is exposed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "The App Store starts subscriptions in its own purchase sheet. Quotum cannot start one on a saved card.",
           "verification": {
@@ -661,6 +1051,17 @@
         },
         "subscription.reconcile": {
           "conditions": [],
+          "feasibility": {
+            "reason": "The server API exposes transaction history and subscription status for reconciliation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "App Store Server API",
+                "url": "https://developer.apple.com/documentation/appstoreserverapi"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -676,6 +1077,21 @@
         },
         "subscription.uncancel": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Reactivation requires a customer-facing StoreKit or Advanced Commerce in-app flow, rather than a generic backend command.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Auto-renewable subscriptions",
+                "url": "https://developer.apple.com/app-store/subscriptions/"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Resubscribing before the period ends happens in the store's subscription settings; Quotum records the resulting notification.",
           "verification": {
@@ -684,6 +1100,21 @@
         },
         "topup.automatic": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Creating a new consumable charge requires a native customer purchase; existing subscription renewal is a different operation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "StoreKit",
+                "url": "https://developer.apple.com/documentation/storekit"
+              },
+              {
+                "title": "Advanced Commerce API",
+                "url": "https://developer.apple.com/documentation/advancedcommerceapi"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Silent automatic purchases are unavailable; Apple automatic top-up jobs end as provider_action_required.",
           "verification": {
@@ -692,6 +1123,17 @@
         },
         "topup.customer_initiated": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A customer can buy a consumable through StoreKit to replenish a Quotum balance.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Apple In-App Purchase",
+                "url": "https://developer.apple.com/in-app-purchase/"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "The customer buys a consumable top-up through StoreKit.",
           "verification": {
@@ -709,6 +1151,21 @@
         "trial.ending_notice": {
           "composedVia": "App Store free-trial transactions",
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can derive a notice from the verified trial period, without a dedicated Apple ending event.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "App Store Server API",
+                "url": "https://developer.apple.com/documentation/appstoreserverapi"
+              },
+              {
+                "title": "Subscription offers",
+                "url": "https://developer.apple.com/app-store/subscriptions/#subscription-offers"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "quotum_composed",
           "notes": "App Store sends no trial-ending notification; the subscription reconciliation worker sends the notice three days before the recorded trial end.",
           "verification": {
@@ -725,6 +1182,17 @@
         },
         "webhook.ingest": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Signed server notifications expose subscription and transaction changes.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "App Store Server Notifications",
+                "url": "https://developer.apple.com/documentation/appstoreservernotifications"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -785,6 +1253,21 @@
       "operations": {
         "adjustment.issue": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play has no usage invoice to adjust; order refunds and revocations are separate operations.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Developer API",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest"
+              },
+              {
+                "title": "Refund an order",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest/v3/orders/refund"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Adjustments apply to postpaid usage invoices, which Google Play purchases cannot carry.",
           "verification": {
@@ -793,6 +1276,17 @@
         },
         "catalog.addon": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play supports native subscription add-ons with cadence and country restrictions; separate Quotum add-on subscriptions and base-plan gating need qualification.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscriptions with add-ons",
+                "url": "https://developer.android.com/google/play/billing/subscription-with-addons"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "not_evaluated",
           "notes": "The catalog accepts add-on plans only when every binding is Stripe.",
           "verification": {
@@ -801,6 +1295,17 @@
         },
         "catalog.price.flat": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Base-plan prices can represent a flat fee; exact Quotum price bindings need storefront/currency validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription products and offers",
+                "url": "https://developer.android.com/google/play/billing/subscriptions#base-plans-offers"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "not_evaluated",
           "notes": "The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -809,6 +1314,17 @@
         },
         "catalog.price.hybrid": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Multiple subscription items exist, but the required licensed or metered-overage components have no established equivalent.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscriptions with add-ons",
+                "url": "https://developer.android.com/google/play/billing/subscription-with-addons"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "unsupported",
           "notes": "Hybrid pricing is not a Google Play capability. The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -817,6 +1333,21 @@
         },
         "catalog.price.licensed": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Auto-renewing subscriptions do not expose a licensed-seat quantity; one-time multi-quantity purchases do not supply that recurring contract.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              },
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Seat pricing is not a Google Play capability. The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -825,6 +1356,17 @@
         },
         "catalog.price.postpaid_usage": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Native base plans do not accept an arbitrary usage invoice after a Quotum metering period.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Google Play purchases cannot carry postpaid usage invoices.",
           "verification": {
@@ -833,6 +1375,17 @@
         },
         "catalog.price.tiered": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play base plans expose fixed offer phases, not provider-side volume or graduated recurring prices.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription products and offers",
+                "url": "https://developer.android.com/google/play/billing/subscriptions#base-plans-offers"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "not_evaluated",
           "notes": "The catalog accepts explicit price components only on Stripe bindings.",
           "verification": {
@@ -841,6 +1394,17 @@
         },
         "catalog.product.consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A verified one-time purchase can grant a consumable balance before the purchase is consumed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -856,6 +1420,17 @@
         },
         "catalog.product.non_consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Unconsumed one-time purchases can fund lasting access; Quotum still needs a qualified fulfillment path.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "not_evaluated",
           "notes": "Play normalization accepts non-consumable products, but no test exercises a completed one.",
           "verification": {
@@ -864,6 +1439,17 @@
         },
         "catalog.product.subscription": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Auto-renewing base plans can fund subscription entitlements mirrored by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -879,6 +1465,17 @@
         },
         "catalog.topup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Consumable one-time products can replenish balances managed by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -894,6 +1491,17 @@
         },
         "catalog.trial": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play offers determine trial phases and eligibility; arbitrary Quotum trial-end behavior is not a publisher command.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription products and offers",
+                "url": "https://developer.android.com/google/play/billing/subscriptions#base-plans-offers"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Free trials are offers on Play base plans; Quotum records the trial bounds while the subscription is in its free-trial offer phase. The catalog rejects plan trial days on Google bindings.",
           "verification": {
@@ -912,6 +1520,17 @@
         },
         "checkout.hosted": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play Billing launches a native purchase sheet, without a server-created hosted checkout session.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Purchases start in the app through Google Play Billing and reach Quotum through purchase verification.",
           "verification": {
@@ -920,6 +1539,17 @@
         },
         "checkout.plan": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A base plan is purchased through the native Play Billing flow.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Purchases start in the app through Google Play Billing and reach Quotum through purchase verification.",
           "verification": {
@@ -928,6 +1558,17 @@
         },
         "event.replay": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can retain authenticated notifications and replay them locally with fresh provider state.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Real-time developer notifications",
+                "url": "https://developer.android.com/google/play/billing/rtdn-reference"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -943,6 +1584,17 @@
         },
         "payment_method.setup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Google manages the customer's payment methods; Quotum cannot choose the account's default collection method.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Google Play owns the account's payment methods; there is no Quotum-hosted setup and nothing for Quotum to make default.",
           "verification": {
@@ -951,6 +1603,17 @@
         },
         "portal.session": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play supplies subscription-management screens and deep links, not a Quotum-created billing portal session.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "not_evaluated",
           "verification": {
             "status": "not_applicable"
@@ -958,6 +1621,17 @@
         },
         "promotion.code_entry": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum codes could select developer-determined Play offers; client offer-token handling, eligibility and discount parity need validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription products and offers",
+                "url": "https://developer.android.com/google/play/billing/subscriptions#base-plans-offers"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "not_evaluated",
           "notes": "Quotum passes no discount to Google Play; Android code redemption executes feature grants in Quotum only.",
           "verification": {
@@ -966,6 +1640,17 @@
         },
         "promotion.hosted_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play's native promotion redemption is not a provider-hosted web checkout.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "not_evaluated",
           "verification": {
             "status": "not_applicable"
@@ -973,6 +1658,17 @@
         },
         "promotion.signed_offer": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play offer tokens do not implement Apple's signed subscription-offer protocol.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription products and offers",
+                "url": "https://developer.android.com/google/play/billing/subscriptions#base-plans-offers"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "verification": {
             "status": "not_applicable"
@@ -980,6 +1676,17 @@
         },
         "promotion.store_offer_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play promotion redemption exists; mapping a redeemed code from authoritative purchase data needs validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play promotions",
+                "url": "https://developer.android.com/google/play/billing/promo"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "verification": {
             "status": "not_applicable"
@@ -987,6 +1694,21 @@
         },
         "purchase.verify": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Publisher purchase reads plus acknowledgement or consumption can verify and fulfill purchases.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              },
+              {
+                "title": "Play Developer API",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Quotum acknowledges or consumes the purchase after recording it only when publisher mutations are enabled on the connection.",
           "verification": {
@@ -1004,6 +1726,21 @@
         },
         "refund.issue": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Publisher order refunds and subscription revocation exist; arbitrary-amount, proration and durable recovery parity need validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Refund an order",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest/v3/orders/refund"
+              },
+              {
+                "title": "Revoke a subscription purchase",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2/revoke"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "provider_managed",
           "notes": "Google Play can refund an order through its API, but Quotum has not built the call; refund in Play Console and Quotum mirrors the voided purchase.",
           "verification": {
@@ -1012,6 +1749,21 @@
         },
         "refund.sync": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Voided purchase notifications and reads can reverse refunded or revoked purchase grants.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Real-time developer notifications",
+                "url": "https://developer.android.com/google/play/billing/rtdn-reference"
+              },
+              {
+                "title": "Voided purchases",
+                "url": "https://developers.google.com/android-publisher/voided-purchases"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "provider_managed",
           "notes": "Refunds and revocations happen in Google Play; Quotum mirrors voided purchase notifications, including partial consumable refunds.",
           "verification": {
@@ -1029,6 +1781,21 @@
         },
         "settlement.collect_finalized_charge": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play Billing has no arbitrary postpaid subscription-usage invoice endpoint.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              },
+              {
+                "title": "Play Developer API",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Google Play purchases cannot carry postpaid usage invoices.",
           "verification": {
@@ -1037,6 +1804,17 @@
         },
         "subscription.cancel": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Publisher cancellation can stop renewals; immediate no-refund termination and cancellation-mode parity need validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Cancel a subscription purchase",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2/cancel"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "provider_managed",
           "notes": "Cancellation happens in the store's subscription settings; Quotum records the resulting notification.",
           "verification": {
@@ -1045,6 +1823,17 @@
         },
         "subscription.change.apply": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Replacement modes act through a customer-facing native purchase and a linked purchase token.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Plan changes happen in Google Play and arrive as a new purchase token linked to the replaced one.",
           "verification": {
@@ -1053,6 +1842,17 @@
         },
         "subscription.change.period_end": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Deferred replacements are chosen in the native purchase flow; Quotum mirrors the resulting state.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Deferred plan changes are scheduled in Google Play; Quotum records the resulting purchase state.",
           "verification": {
@@ -1061,6 +1861,17 @@
         },
         "subscription.change.preview": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Play displays replacement pricing in the purchase flow; a matching server-side proration preview is not exposed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play subscriptions",
+                "url": "https://developer.android.com/google/play/billing/subscriptions"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "unsupported",
           "notes": "Plan changes are priced in the Google Play purchase sheet; Quotum has no preview for them and records no preview outcome.",
           "verification": {
@@ -1069,6 +1880,17 @@
         },
         "subscription.create": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A new subscription requires a native customer purchase, not an off-session charge initiated by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Google Play starts subscriptions in its own purchase sheet. Quotum cannot start one on a saved card.",
           "verification": {
@@ -1077,6 +1899,17 @@
         },
         "subscription.reconcile": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Subscription purchase reads expose authoritative state and line items.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Get a subscription purchase",
+                "url": "https://developers.google.com/android-publisher/api-ref/rest/v3/purchases.subscriptionsv2/get"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1093,6 +1926,17 @@
         },
         "subscription.uncancel": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Customer resubscription through Play can restore renewal; it is not a generic backend clear-cancellation command.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription lifecycle",
+                "url": "https://developer.android.com/google/play/billing/lifecycle/subscriptions"
+              }
+            ],
+            "status": "provider_managed"
+          },
           "level": "provider_managed",
           "notes": "Resubscribing before the period ends happens in the store's subscription settings; Quotum records the resulting notification.",
           "verification": {
@@ -1101,6 +1945,17 @@
         },
         "topup.automatic": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A new consumable purchase requires the native customer flow; subscription renewal is not a silent top-up purchase.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "notes": "Silent automatic purchases are unavailable; Google automatic top-up jobs end as provider_action_required.",
           "verification": {
@@ -1109,6 +1964,17 @@
         },
         "topup.customer_initiated": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A customer can buy a consumable in Play Billing to replenish a Quotum balance.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Play Billing integration",
+                "url": "https://developer.android.com/google/play/billing/integrate"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "The customer buys a consumable top-up through Google Play Billing.",
           "verification": {
@@ -1126,6 +1992,21 @@
         "trial.ending_notice": {
           "composedVia": "Play free-trial offer phases",
           "conditions": [],
+          "feasibility": {
+            "reason": "Offer phases and recorded expiry let Quotum derive a trial-ending notice.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription products and offers",
+                "url": "https://developer.android.com/google/play/billing/subscriptions#base-plans-offers"
+              },
+              {
+                "title": "Subscription lifecycle",
+                "url": "https://developer.android.com/google/play/billing/lifecycle/subscriptions"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "quotum_composed",
           "notes": "Play sends no trial-ending notification; the subscription reconciliation worker sends the notice three days before the recorded trial end.",
           "verification": {
@@ -1142,6 +2023,17 @@
         },
         "webhook.ingest": {
           "conditions": [],
+          "feasibility": {
+            "reason": "RTDN and authenticated purchase reads expose lifecycle changes.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Real-time developer notifications",
+                "url": "https://developer.android.com/google/play/billing/rtdn-reference"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1207,6 +2099,21 @@
         "adjustment.issue": {
           "composedVia": "Stripe invoices with a signed correction line",
           "conditions": [],
+          "feasibility": {
+            "reason": "Invoice items and credit notes provide primitives for signed usage corrections.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Create and collect invoices",
+                "url": "https://docs.stripe.com/invoicing/integration"
+              },
+              {
+                "title": "Credit notes",
+                "url": "https://docs.stripe.com/invoicing/dashboard/credit-notes"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "quotum_composed",
           "notes": "Late usage corrections invoice the rated difference for the closed period: a negative difference finalizes without payment and a positive one is paid like a period charge.",
           "verification": {
@@ -1224,6 +2131,17 @@
         },
         "catalog.addon": {
           "conditions": [],
+          "feasibility": {
+            "reason": "An additional subscription can sell an add-on; Quotum enforces the base-plan prerequisite.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe subscriptions",
+                "url": "https://docs.stripe.com/billing/subscriptions/overview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "An add-on is a separate Stripe subscription and requires an active base plan.",
           "verification": {
@@ -1240,6 +2158,17 @@
         },
         "catalog.price.flat": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Fixed recurring prices map to explicit flat components.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe pricing models",
+                "url": "https://docs.stripe.com/products-prices/pricing-models"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1256,6 +2185,21 @@
         },
         "catalog.price.hybrid": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Multiple subscription items can combine fixed, quantity and usage charges.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe pricing models",
+                "url": "https://docs.stripe.com/products-prices/pricing-models"
+              },
+              {
+                "title": "Stripe subscriptions",
+                "url": "https://docs.stripe.com/billing/subscriptions/overview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1272,6 +2216,17 @@
         },
         "catalog.price.licensed": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Per-seat recurring prices accept an explicit quantity.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe pricing models",
+                "url": "https://docs.stripe.com/products-prices/pricing-models"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1288,6 +2243,17 @@
         },
         "catalog.price.postpaid_usage": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can rate usage and invoice the finalized amount through Stripe.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Create and collect invoices",
+                "url": "https://docs.stripe.com/invoicing/integration"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1303,6 +2269,17 @@
         },
         "catalog.price.tiered": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Volume and graduated prices support quantity-based tiers.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe pricing models",
+                "url": "https://docs.stripe.com/products-prices/pricing-models"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Stripe prices tiered in-advance lines during Checkout; Quotum rates tiered postpaid overage itself.",
           "verification": {
@@ -1320,6 +2297,17 @@
         },
         "catalog.product.consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "One-time payments can fund consumable grants; Quotum owns the balance.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe Checkout",
+                "url": "https://docs.stripe.com/payments/checkout/how-checkout-works"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1336,6 +2324,17 @@
         },
         "catalog.product.non_consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "One-time payments can fund lasting access tracked by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe Checkout",
+                "url": "https://docs.stripe.com/payments/checkout/how-checkout-works"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Non-consumable products are provisioned Stripe web store products sold through product Checkout.",
           "verification": {
@@ -1353,6 +2352,17 @@
         },
         "catalog.product.subscription": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Recurring prices fund subscription entitlements tracked by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe subscriptions",
+                "url": "https://docs.stripe.com/billing/subscriptions/overview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1369,6 +2379,17 @@
         },
         "catalog.topup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A one-time price can fund a metered balance maintained by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe Checkout",
+                "url": "https://docs.stripe.com/payments/checkout/how-checkout-works"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1384,6 +2405,17 @@
         },
         "catalog.trial": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Subscription trials support payment-method and trial-end policies that must match the plan.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription trials",
+                "url": "https://docs.stripe.com/billing/subscriptions/trials"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1401,6 +2433,17 @@
         },
         "checkout.hosted": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Checkout supports hosted one-time and subscription payments.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe Checkout",
+                "url": "https://docs.stripe.com/payments/checkout/how-checkout-works"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1417,6 +2460,17 @@
         },
         "checkout.plan": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Checkout can start a subscription with the plan's recurring line items.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe Checkout",
+                "url": "https://docs.stripe.com/payments/checkout/how-checkout-works"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1433,6 +2487,17 @@
         },
         "event.replay": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can persist and reprocess authenticated webhook payloads locally.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe webhooks",
+                "url": "https://docs.stripe.com/webhooks"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1448,6 +2513,17 @@
         },
         "payment_method.setup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Checkout setup mode saves a payment method without a charge; Quotum can set the invoice default.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Set up future payments",
+                "url": "https://docs.stripe.com/payments/checkout/save-and-reuse"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Hosted Checkout in `setup` mode saves a card without a charge; on the verified completion Quotum sets it as the Stripe customer's invoice default payment method and leaves subscription-specific methods untouched.",
           "verification": {
@@ -1465,6 +2541,17 @@
         },
         "portal.session": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Authenticated portal sessions expose customer billing self-service.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe customer portal",
+                "url": "https://docs.stripe.com/customer-management"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1482,6 +2569,17 @@
         "promotion.code_entry": {
           "composedVia": "Stripe coupons applied as Checkout and subscription discounts",
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can map validated codes to coupons applied to Checkout or subscriptions.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Coupons and promotion codes",
+                "url": "https://docs.stripe.com/billing/subscriptions/coupons"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "quotum_composed",
           "notes": "Quotum validates and reserves the code, then applies the promotion's Stripe coupon to the Checkout Session or subscription change.",
           "verification": {
@@ -1500,6 +2598,21 @@
         },
         "promotion.hosted_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Checkout can accept Stripe promotion codes and report the applied discount.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Coupons and promotion codes",
+                "url": "https://docs.stripe.com/billing/subscriptions/coupons"
+              },
+              {
+                "title": "Stripe Checkout",
+                "url": "https://docs.stripe.com/payments/checkout/how-checkout-works"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "The connection needs write access to Stripe Coupons and Promotion codes.",
           "verification": {
@@ -1518,6 +2631,17 @@
         },
         "promotion.signed_offer": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Apple's signed subscription-offer protocol has no Stripe equivalent; coupons are a different operation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Coupons and promotion codes",
+                "url": "https://docs.stripe.com/billing/subscriptions/coupons"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "verification": {
             "status": "not_applicable"
@@ -1525,6 +2649,17 @@
         },
         "promotion.store_offer_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Stripe has hosted promotion codes, not native app-store offer-code redemption.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Coupons and promotion codes",
+                "url": "https://docs.stripe.com/billing/subscriptions/coupons"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "verification": {
             "status": "not_applicable"
@@ -1532,6 +2667,17 @@
         },
         "purchase.verify": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A native payment could be verified by retrieving its PaymentIntent; trusted account correlation and fulfillment would need a new Quotum flow.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Retrieve a PaymentIntent",
+                "url": "https://docs.stripe.com/api/payment_intents/retrieve"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "notes": "Stripe purchases complete in hosted Checkout and are recorded from signed webhook events; the Checkout Session status route never grants access.",
           "verification": {
@@ -1540,6 +2686,17 @@
         },
         "refund.issue": {
           "conditions": [],
+          "feasibility": {
+            "reason": "The refund API returns all or part of a payment, up to its unrefunded amount.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Create a refund",
+                "url": "https://docs.stripe.com/api/refunds/create"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Quotum creates the Stripe refund under the execution idempotency key and records the request; one refund may be open per payment and the amount never exceeds what was paid net of earlier refunds. The connection needs write access to Refunds.",
           "verification": {
@@ -1557,6 +2714,21 @@
         },
         "refund.sync": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Refund and dispute events can be reconciled to their original payment and grants.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe webhooks",
+                "url": "https://docs.stripe.com/webhooks"
+              },
+              {
+                "title": "Create a refund",
+                "url": "https://docs.stripe.com/api/refunds/create"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Refunds reverse the credits the payment funded in proportion to the cumulative amount reversed, never below what is spent or held, deduplicated by refund id. Disputes reverse a one-time purchase only.",
           "verification": {
@@ -1577,6 +2749,17 @@
         "settlement.collect_finalized_charge": {
           "composedVia": "Stripe invoices with a one-off usage line",
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can place its finalized usage amount on an invoice and collect it.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Create and collect invoices",
+                "url": "https://docs.stripe.com/invoicing/integration"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "quotum_composed",
           "notes": "Quotum rates the overage after the usage period closes, then finalizes and pays the invoice against the subscription.",
           "verification": {
@@ -1605,6 +2788,17 @@
               "kind": "subscription_state"
             }
           ],
+          "feasibility": {
+            "reason": "Cancellation supports immediate termination or stopping renewal at period end.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Cancel subscriptions",
+                "url": "https://docs.stripe.com/billing/subscriptions/cancel"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "An immediate cancellation ends the Stripe subscription with no proration credit and no closing invoice; a period-end cancellation sets `cancel_at_period_end`. A queued change for the subscription is superseded, and a base plan cannot be cancelled while add-on subscriptions are active.",
           "verification": {
@@ -1632,6 +2826,17 @@
               "kind": "subscription_state"
             }
           ],
+          "feasibility": {
+            "reason": "Subscription updates support price and quantity changes with explicit billing and proration policies.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Change subscription prices",
+                "url": "https://docs.stripe.com/billing/subscriptions/change-price"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "The target plan must be the same kind as the current plan and publish Stripe base or licensed prices. The recurring billing worker applies the change with its Stripe proration behavior.",
           "verification": {
@@ -1660,6 +2865,17 @@
               "kind": "subscription_state"
             }
           ],
+          "feasibility": {
+            "reason": "Subscription schedules or Quotum's worker can apply a change at a period boundary.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription schedules",
+                "url": "https://docs.stripe.com/billing/subscriptions/subscription-schedules"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "The target plan must be the same kind as the current plan and publish Stripe base or licensed prices. Downgrades default to the end of the current period, when the recurring billing worker applies them.",
           "verification": {
@@ -1687,6 +2903,17 @@
               "kind": "subscription_state"
             }
           ],
+          "feasibility": {
+            "reason": "Invoice previews expose the financial effect of subscription updates.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Preview an invoice",
+                "url": "https://docs.stripe.com/api/invoices/create_preview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "The target plan must be the same kind as the current plan and publish Stripe base or licensed prices. Stripe calculates the final proration amount during execution.",
           "verification": {
@@ -1703,6 +2930,21 @@
         },
         "subscription.create": {
           "conditions": [],
+          "feasibility": {
+            "reason": "The subscription API can bill a saved method; collection may still require customer authentication.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe subscriptions",
+                "url": "https://docs.stripe.com/billing/subscriptions/overview"
+              },
+              {
+                "title": "Set up future payments",
+                "url": "https://docs.stripe.com/payments/checkout/save-and-reuse"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "After hosted setup saves a card, Quotum calls subscriptions.create with payment_behavior error_if_incomplete and off_session. A decline or authentication requirement leaves the card saved and records payment_failed; no subscription is stored. A plan version that changed after the preview records plan_changed instead of starting.",
           "verification": {
@@ -1720,6 +2962,17 @@
         },
         "subscription.reconcile": {
           "conditions": [],
+          "feasibility": {
+            "reason": "The subscription API exposes authoritative state for local reconciliation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe subscriptions",
+                "url": "https://docs.stripe.com/billing/subscriptions/overview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1748,6 +3001,17 @@
               "required": true
             }
           ],
+          "feasibility": {
+            "reason": "A pending period-end cancellation can be cleared before the subscription ends.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Cancel subscriptions",
+                "url": "https://docs.stripe.com/billing/subscriptions/cancel"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Clearing `cancel_at_period_end` only restores renewal; it does not restore a subscription change the cancellation superseded, and a subscription Stripe already ended cannot be cleared.",
           "verification": {
@@ -1772,6 +3036,21 @@
               "resolveWith": "payment_method.setup"
             }
           ],
+          "feasibility": {
+            "reason": "An off-session invoice can charge a saved method; authentication or payment failure requires customer action.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Create and collect invoices",
+                "url": "https://docs.stripe.com/invoicing/integration"
+              },
+              {
+                "title": "Set up future payments",
+                "url": "https://docs.stripe.com/payments/checkout/save-and-reuse"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "quotum_composed",
           "notes": "Quotum pays a Stripe invoice with the customer's default payment method; a missing method or an authentication request ends the job as action required.",
           "verification": {
@@ -1790,6 +3069,17 @@
         },
         "topup.customer_initiated": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Checkout can sell a one-time credit pack; Quotum credits it after payment.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe Checkout",
+                "url": "https://docs.stripe.com/payments/checkout/how-checkout-works"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1805,6 +3095,17 @@
         },
         "trial.ending_notice": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Trial-ending webhook events can trigger a Quotum notice.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Subscription webhook events",
+                "url": "https://docs.stripe.com/billing/subscriptions/webhooks"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Attached to customer.subscription.trial_will_end, which the webhook endpoint or Stripe App event destination must send.",
           "verification": {
@@ -1821,6 +3122,17 @@
         },
         "webhook.ingest": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Signed payment and subscription events can drive local state.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Stripe webhooks",
+                "url": "https://docs.stripe.com/webhooks"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -1901,6 +3213,21 @@
       "operations": {
         "adjustment.issue": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Refund/credit adjustments and extra charges offer correction primitives; signed-difference semantics and DEC-14 need validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle adjustments",
+                "url": "https://developer.paddle.com/api-reference/adjustments/create-adjustment"
+              },
+              {
+                "title": "Charge a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/create-subscription-charge"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
@@ -1913,6 +3240,17 @@
               "kind": "uniform_billing_interval"
             }
           ],
+          "feasibility": {
+            "reason": "Recurring add-ons can be separate subscriptions with a Quotum-enforced base-plan prerequisite.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Recurring add-ons",
+                "url": "https://developer.paddle.com/build/subscriptions/add-remove-products-prices-addons"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "All recurring items in one Paddle subscription must share a billing period.",
           "verification": {
@@ -1927,6 +3265,17 @@
         },
         "catalog.price.flat": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Fixed recurring prices support explicit flat subscription components.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
@@ -1948,6 +3297,21 @@
               "kind": "uniform_billing_interval"
             }
           ],
+          "feasibility": {
+            "reason": "Recurring items and custom usage charges can compose a hybrid bill; timing and recovery parity need qualification.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle for AI companies",
+                "url": "https://developer.paddle.com/get-started/how-paddle-works/ai-companies/"
+              },
+              {
+                "title": "Charge a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/create-subscription-charge"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Base and seat items share one subscription and one billing period; metered overage follows postpaid usage settlement.",
           "verification": {
@@ -1966,6 +3330,21 @@
               "kind": "quantity_integer"
             }
           ],
+          "feasibility": {
+            "reason": "Subscription line-item quantities can represent licensed seats within price quantity bounds.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              },
+              {
+                "title": "Update a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/update-subscription"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Paddle quantities are whole numbers; Quotum keeps seat allocation authority.",
           "verification": {
@@ -1981,6 +3360,21 @@
         "catalog.price.postpaid_usage": {
           "composedVia": "non-catalog transaction item",
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum-rated overage can become a custom charge; Paddle's beta usage balances alone do not bill overage. DEC-14 remains open.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle for AI companies",
+                "url": "https://developer.paddle.com/get-started/how-paddle-works/ai-companies/"
+              },
+              {
+                "title": "Charge a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/create-subscription-charge"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "quotum_composed",
           "notes": "Quotum keeps usage rating and bills the finalized amount as one non-catalog item with quantity one, so fractional usage is never rounded into Paddle quantities.",
           "verification": {
@@ -1998,6 +3392,21 @@
         },
         "catalog.price.tiered": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Externally rated tiered usage is documented, but binding an exact provider-side volume or graduated price is unassessed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle for AI companies",
+                "url": "https://developer.paddle.com/get-started/how-paddle-works/ai-companies/"
+              },
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "not_evaluated",
           "notes": "The Paddle assessment does not cover tiered prices.",
           "verification": {
@@ -2006,6 +3415,21 @@
         },
         "catalog.product.consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "One-time products can fund app-owned credits; merchant eligibility, credit terms and DEC-14 still need review.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle for AI companies",
+                "url": "https://developer.paddle.com/get-started/how-paddle-works/ai-companies/"
+              },
+              {
+                "title": "Paddle acceptable use policy",
+                "url": "https://www.paddle.com/help/start/intro-to-paddle/what-am-i-not-allowed-to-sell-on-paddle"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Paddle must confirm that software-usage credit packs are acceptable products.",
           "verification": {
@@ -2023,6 +3447,21 @@
         },
         "catalog.product.non_consumable": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A one-time transaction can fund lasting access maintained by Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              },
+              {
+                "title": "Paddle transaction checkout",
+                "url": "https://developer.paddle.com/build/transactions/pass-transaction-checkout"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -2036,6 +3475,17 @@
         },
         "catalog.product.subscription": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Recurring Paddle prices support subscription products; Quotum's present qualification remains sandbox-only.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
@@ -2053,6 +3503,21 @@
         },
         "catalog.topup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "One-time software-usage credits are technically composable; merchant eligibility and DEC-14 remain open.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle for AI companies",
+                "url": "https://developer.paddle.com/get-started/how-paddle-works/ai-companies/"
+              },
+              {
+                "title": "Paddle acceptable use policy",
+                "url": "https://www.paddle.com/help/start/intro-to-paddle/what-am-i-not-allowed-to-sell-on-paddle"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Paddle must confirm that software-usage credit packs are acceptable products.",
           "verification": {
@@ -2070,6 +3535,17 @@
         },
         "catalog.trial": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Recurring prices support trials; payment-method requirements and trial-end parity need validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Trial access follows subscription lifecycle state, separately from paid fulfilment.",
           "verification": {
@@ -2084,6 +3560,17 @@
         },
         "checkout.hosted": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A server-created transaction opens in Paddle Checkout on an approved payment page.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle transaction checkout",
+                "url": "https://developer.paddle.com/build/transactions/pass-transaction-checkout"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
@@ -2102,6 +3589,21 @@
         "checkout.plan": {
           "composedVia": "checkout.hosted",
           "conditions": [],
+          "feasibility": {
+            "reason": "Recurring transaction items can start a plan; full trials, quantities and multi-item parity need qualification.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle transaction checkout",
+                "url": "https://developer.paddle.com/build/transactions/pass-transaction-checkout"
+              },
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "quotum_composed",
           "notes": "Sandbox fixed subscription scope. The stored commercial preview pins the provider connection and plan version; fulfillment awaits signed provider events.",
           "verification": {
@@ -2119,6 +3621,17 @@
         },
         "event.replay": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Quotum can persist and reprocess authenticated Paddle event payloads locally.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle webhook delivery",
+                "url": "https://developer.paddle.com/webhooks/overview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {
@@ -2136,6 +3649,17 @@
         },
         "payment_method.setup": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Updating a subscription's payment method is documented; no-charge setup and an account-wide collection default need semantic validation (Q-SET-02).",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Update payment details",
+                "url": "https://developer.paddle.com/build/subscriptions/update-payment-details"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "native",
           "notes": "Paddle saves a payment method through its own hosted transaction; whether Quotum can start one without a charge and promote the result to the account default is unresolved.",
           "verification": {
@@ -2153,6 +3677,17 @@
         },
         "portal.session": {
           "conditions": [],
+          "feasibility": {
+            "reason": "The API creates authenticated customer portal sessions.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Create a portal session",
+                "url": "https://developer.paddle.com/api-reference/customer-portals/create-customer-portal-session"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Portal sessions are created on demand; their authenticated URLs are never stored.",
           "verification": {
@@ -2167,6 +3702,17 @@
         },
         "promotion.code_entry": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Discount entities exist; scope, stacking and duration parity remain unvalidated (Q-PROMO-01).",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle discounts",
+                "url": "https://developer.paddle.com/api-reference/discounts/create-discount"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Paddle has discount entities; stacking, product scope and duration parity with Quotum promotions is unvalidated.",
           "verification": {
@@ -2184,6 +3730,17 @@
         },
         "promotion.hosted_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Checkout accepts discount codes; Quotum redemption limits and reporting parity need validation (Q-PROMO-01).",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle discounts",
+                "url": "https://developer.paddle.com/api-reference/discounts/create-discount"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "verification": {
             "blockedBy": {
@@ -2200,6 +3757,17 @@
         },
         "promotion.signed_offer": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Paddle discounts do not implement Apple's signed subscription-offer protocol.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle discounts",
+                "url": "https://developer.paddle.com/api-reference/discounts/create-discount"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "verification": {
             "status": "not_applicable"
@@ -2207,6 +3775,17 @@
         },
         "promotion.store_offer_code": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Paddle checkout discount codes are not native app-store offer codes.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle discounts",
+                "url": "https://developer.paddle.com/api-reference/discounts/create-discount"
+              }
+            ],
+            "status": "unavailable"
+          },
           "level": "unsupported",
           "verification": {
             "status": "not_applicable"
@@ -2214,6 +3793,17 @@
         },
         "purchase.verify": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Authenticated transaction reads exist, but a distinct native purchase submission and account-correlation contract is unassessed.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Get a transaction",
+                "url": "https://developer.paddle.com/api-reference/transactions/get-transaction"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "not_evaluated",
           "notes": "Paddle purchases are web checkouts fulfilled from webhooks; the assessment covers no client-submitted purchase verification.",
           "verification": {
@@ -2222,6 +3812,17 @@
         },
         "refund.issue": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Refund adjustments support full or partial amounts, usually subject to Paddle approval; durable recovery is still required.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle adjustments",
+                "url": "https://developer.paddle.com/api-reference/adjustments/create-adjustment"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
@@ -2230,6 +3831,21 @@
         },
         "refund.sync": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Adjustment notifications and reads can mirror refunds and disputes into Quotum.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle adjustments",
+                "url": "https://developer.paddle.com/api-reference/adjustments/create-adjustment"
+              },
+              {
+                "title": "Paddle webhook delivery",
+                "url": "https://developer.paddle.com/webhooks/overview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Refunds arrive as adjustments whose approval state can change after creation.",
           "verification": {
@@ -2244,6 +3860,21 @@
         },
         "settlement.collect_finalized_charge": {
           "conditions": [],
+          "feasibility": {
+            "reason": "One-time subscription charges can collect a Quotum-rated amount; DEC-14, correlation and uncertain-write recovery still block parity.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Charge a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/create-subscription-charge"
+              },
+              {
+                "title": "Paddle for AI companies",
+                "url": "https://developer.paddle.com/get-started/how-paddle-works/ai-companies/"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
@@ -2252,6 +3883,17 @@
         },
         "subscription.cancel": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Cancellation can take effect immediately or at the next billing period.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Cancel a subscription",
+                "url": "https://developer.paddle.com/build/subscriptions/cancel-subscriptions"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Paddle cancels immediately or at the next billing period; whether an immediate cancellation refunds the paid period is not assessed.",
           "verification": {
@@ -2266,6 +3908,17 @@
         },
         "subscription.change.apply": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Updates support item replacement and billing modes; renewal exclusion, collection and uncertain-write recovery require qualification.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Update a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/update-subscription"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
@@ -2274,6 +3927,17 @@
         },
         "subscription.change.period_end": {
           "conditions": [],
+          "feasibility": {
+            "reason": "A Quotum worker could apply an update at renewal; exact boundary timing and billing semantics remain unvalidated.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Update a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/update-subscription"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
@@ -2282,6 +3946,17 @@
         },
         "subscription.change.preview": {
           "conditions": [],
+          "feasibility": {
+            "reason": "The subscription preview API calculates update charges before a write.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Preview a subscription update",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/preview-subscription-update"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "not_evaluated",
           "notes": "The Paddle assessment does not cover previewing subscription updates.",
           "verification": {
@@ -2295,6 +3970,21 @@
         },
         "subscription.create": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Subscriptions normally follow paid recurring transactions; starting one off-session on a saved method needs separate proof.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle transaction checkout",
+                "url": "https://developer.paddle.com/build/transactions/pass-transaction-checkout"
+              },
+              {
+                "title": "Saved payment methods",
+                "url": "https://developer.paddle.com/build/checkout/saved-payment-methods"
+              }
+            ],
+            "status": "unknown"
+          },
           "level": "native",
           "notes": "Paddle creates subscriptions from paid transactions or issued invoices and has no direct create-subscription operation.",
           "verification": {
@@ -2309,6 +3999,17 @@
         },
         "subscription.reconcile": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Authenticated subscription reads expose current provider state.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Get a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/get-subscription"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "verification": {
             "evidence": {
@@ -2322,6 +4023,17 @@
         },
         "subscription.uncancel": {
           "conditions": [],
+          "feasibility": {
+            "reason": "An update can remove a scheduled cancellation while the subscription remains active.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Update a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/update-subscription"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "not_evaluated",
           "notes": "The Paddle assessment does not cover clearing a scheduled cancellation.",
           "verification": {
@@ -2335,6 +4047,21 @@
         },
         "topup.automatic": {
           "conditions": [],
+          "feasibility": {
+            "reason": "An automatically collected subscription charge is a candidate; saved-method consent, eligibility, DEC-14 and write recovery need validation.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Charge a subscription",
+                "url": "https://developer.paddle.com/api-reference/subscriptions/create-subscription-charge"
+              },
+              {
+                "title": "Paddle acceptable use policy",
+                "url": "https://www.paddle.com/help/start/intro-to-paddle/what-am-i-not-allowed-to-sell-on-paddle"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "unsupported",
           "notes": "Planned for a later increment; this adapter has no durable dispatcher for this operation.",
           "verification": {
@@ -2343,6 +4070,21 @@
         },
         "topup.customer_initiated": {
           "conditions": [],
+          "feasibility": {
+            "reason": "One-time checkout can fund app-owned credits; merchant eligibility and DEC-14 remain unresolved.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle for AI companies",
+                "url": "https://developer.paddle.com/get-started/how-paddle-works/ai-companies/"
+              },
+              {
+                "title": "Paddle acceptable use policy",
+                "url": "https://www.paddle.com/help/start/intro-to-paddle/what-am-i-not-allowed-to-sell-on-paddle"
+              }
+            ],
+            "status": "conditional"
+          },
           "level": "native",
           "notes": "Paddle must confirm that software-usage credit packs are acceptable products.",
           "verification": {
@@ -2360,6 +4102,17 @@
         },
         "trial.ending_notice": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Recorded trial bounds can drive a Quotum notice without a dedicated provider event.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle prices",
+                "url": "https://developer.paddle.com/api-reference/prices/create-price"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "not_evaluated",
           "notes": "The Paddle assessment does not cover trial-ending notices.",
           "verification": {
@@ -2368,6 +4121,17 @@
         },
         "webhook.ingest": {
           "conditions": [],
+          "feasibility": {
+            "reason": "Signed notifications expose transaction and subscription lifecycle changes.",
+            "reviewedOn": "2026-10-22",
+            "sources": [
+              {
+                "title": "Paddle webhook delivery",
+                "url": "https://developer.paddle.com/webhooks/overview"
+              }
+            ],
+            "status": "possible"
+          },
           "level": "native",
           "notes": "Sandbox fixed subscription scope. Other product types and lifecycle actions remain unavailable until separately qualified.",
           "verification": {

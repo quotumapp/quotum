@@ -92,18 +92,22 @@ describe("renderProviderCapabilityBlock", () => {
 			cells(tableRows(block).find((line) => line.includes(`\`${operation}\``)) ?? "");
 
 		const [, apple, , stripe, paddle] = row("topup.automatic");
-		expect(apple?.trim()).toBe("Unsupported");
+		expect(apple).toContain("**Today:** Unavailable in Quotum");
+		expect(apple).toContain("**Potential:** Unavailable through current provider APIs");
 		expect(stripe).toContain(
 			"Conditional · Quotum-composed via Stripe invoices with a top-up price line<br>The customer must have a saved payment method",
 		);
 		expect(stripe).toContain("[workers/auto-topup](../tests/workers/auto-topup.test.ts)");
-		expect(paddle?.trim()).toBe("Unsupported");
-		expect(row("subscription.cancel")[1]?.trim()).toBe("Managed by provider, mirrored by Quotum");
-		expect(row("catalog.trial")[1]).toContain(
-			"Managed by provider, mirrored by Quotum<br>Tests: [providers/apple/normalizer](../tests/providers/apple/normalizer.test.ts)",
-		);
+		expect(paddle).toContain("**Today:** Unavailable in Quotum");
+		expect(paddle).toContain("**Potential:** Conditional");
+		expect(row("subscription.cancel")[1]).toContain("Provider-managed; no Quotum command");
+		expect(row("catalog.trial")[1]).toContain("**Today:** Provider-managed; mirrored by Quotum");
+		expect(row("catalog.trial")[1]).toContain("Tests: [providers/apple/normalizer]");
 		const [, applePreview, googlePreview, stripePreview] = row("subscription.change.preview");
-		expect([applePreview?.trim(), googlePreview?.trim()]).toEqual(["Unsupported", "Unsupported"]);
+		for (const preview of [applePreview, googlePreview]) {
+			expect(preview).toContain("**Today:** Unavailable in Quotum");
+			expect(preview).toContain("**Potential:** Provider-managed only");
+		}
 		expect(stripePreview).toContain("active, grace_period, billing_retry or cancelled.");
 
 		for (const label of capabilityStatusLabels) {
@@ -114,14 +118,37 @@ describe("renderProviderCapabilityBlock", () => {
 		expect(block).not.toMatch(/\b(GET|POST|PUT|PATCH|DELETE) \//);
 	});
 
-	it("links only to existing repository files", () => {
+	it("links to existing evidence files and dated public provider sources", () => {
 		const block = renderProviderCapabilityBlock(providerCapabilityContract());
 		const links = [...block.matchAll(/\]\(([^)]+)\)/g)].map((match) => match[1] ?? "");
 		expect(links.length).toBeGreaterThan(0);
 		for (const link of links) {
+			if (link.startsWith("https://")) {
+				expect(new URL(link).username).toBe("");
+				continue;
+			}
 			expect(link).toStartWith("../tests/");
 			expect(existsSync(resolve(root, "docs", link))).toBe(true);
 		}
+		expect(block).toContain("Reviewed 2026-10-22");
+		expect(block).toContain(
+			"Sandbox only; one fixed recurring item with quantity one and no trial.",
+		);
+		expect(block).toContain(
+			"https://developers.google.com/android-publisher/api-ref/rest/v3/orders/refund",
+		);
+	});
+
+	it("reads older schema-version-1 artifacts without inventing a feasibility assessment", () => {
+		const contract = providerCapabilityContract();
+		for (const provider of contract.providers) {
+			for (const operation of providerOperations) delete provider.operations[operation].feasibility;
+		}
+		const parsed = ProviderCapabilityMatrixSchema.parse(contract);
+		expect(parsed.schemaVersion).toBe(1);
+		expect(renderProviderCapabilityBlock(parsed)).toContain(
+			"**Potential:** Unknown. No provider assessment recorded.",
+		);
 	});
 
 	it("is a pure function of the committed artifact", () => {
@@ -138,11 +165,22 @@ describe("renderProviderCapabilityBlock", () => {
 		const [first] = contract.operations;
 		if (first === undefined) throw new Error("No operations");
 		first.title = "Plans | *bundles* _x_ <b>";
+		const assessment = contract.providers[0]?.operations[first.id].feasibility;
+		if (assessment === undefined) throw new Error("Missing assessment");
+		assessment.reason = "Possible | *only* <after review>";
+		assessment.sources = [{ title: "Docs | *source*", url: "https://example.com/a(b)?q=x|y" }];
 		const row = tableRows(renderProviderCapabilityBlock(contract)).find((line) =>
 			line.includes(`\`${first.id}\``),
 		);
 		expect(cells(row ?? "")).toHaveLength(contract.providers.length + 1);
 		expect(row).toContain("Plans \\| \\*bundles\\* \\_x\\_ &lt;b&gt;<br>");
+		expect(row).toContain("Possible \\| \\*only\\* &lt;after review&gt;");
+		expect(row).toContain("[Docs \\| \\*source\\*](https://example.com/a%28b%29?q=x%7Cy)");
+		assessment.sources[0] = { title: "Invalid", url: "javascript:alert(1)" };
+		expect(() => renderProviderCapabilityBlock(contract)).toThrow(
+			"Feasibility source must be an HTTPS URL",
+		);
+		assessment.sources = [];
 
 		const stripe = contract.providers.find((declaration) => declaration.provider === "stripe");
 		const verification = stripe?.operations["checkout.hosted"].verification;

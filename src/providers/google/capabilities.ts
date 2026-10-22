@@ -2,6 +2,8 @@ import type {
 	OperationSupport,
 	ProviderCapabilityDeclaration,
 } from "../../shared/provider-capabilities";
+import { withFeasibility } from "../feasibility";
+import { googleFeasibility } from "./feasibility";
 
 const verifiedOn = "2026-09-17";
 const googleFlows = "tests/integration/google-flows.test.ts";
@@ -77,7 +79,7 @@ const nativePurchaseFlow =
 const noUsageInvoices = "Google Play purchases cannot carry postpaid usage invoices.";
 
 /** Current Google Play Billing behaviour; every verified entry cites a test tagged with its operation. */
-export const googleCapabilities: ProviderCapabilityDeclaration = {
+const googleDeclaration: ProviderCapabilityDeclaration = {
 	provider: "google",
 	channel: "android",
 	connectionKind: "google",
@@ -185,3 +187,5 @@ export const googleCapabilities: ProviderCapabilityDeclaration = {
 		"promotion.hosted_code": notEvaluated(),
 	},
 };
+
+export const googleCapabilities = withFeasibility(googleDeclaration, googleFeasibility);

@@ -41,6 +41,7 @@ import {
 	type CapabilityConfigurationFacts,
 	type DeclaredProvider,
 	declaredProviders,
+	evaluateCapability,
 	type OperationSupport,
 	type ProviderCapabilityDeclaration,
 	type ProviderOperation,
@@ -119,6 +120,51 @@ describe("provider capability declarations", () => {
 				issues: [],
 			});
 		}
+	});
+
+	it("assesses all 144 provider-operation pairs with public provider evidence", () => {
+		const officialHosts = new Set([
+			"developer.apple.com",
+			"support.apple.com",
+			"developer.android.com",
+			"developers.google.com",
+			"docs.stripe.com",
+			"developer.paddle.com",
+			"www.paddle.com",
+		]);
+		expect(everySupport()).toHaveLength(144);
+		for (const [, , support] of everySupport()) {
+			expect(support.feasibility).toBeDefined();
+			for (const source of support.feasibility?.sources ?? []) {
+				expect(officialHosts.has(new URL(source.url).hostname)).toBe(true);
+			}
+		}
+	});
+
+	it("keeps all runtime verdicts independent of feasibility metadata", () => {
+		for (const declaration of providerCapabilityDeclarations) {
+			const withoutResearch = structuredClone(declaration);
+			for (const operation of providerOperations)
+				delete withoutResearch.operations[operation].feasibility;
+			for (const operation of providerOperations) {
+				for (const facts of [
+					{},
+					{
+						configuration: { connectionEnabled: true, connectionValidated: true, accountFlags: {} },
+					},
+				]) {
+					expect(evaluateCapability(declaration, operation, facts)).toEqual(
+						evaluateCapability(withoutResearch, operation, facts),
+					);
+				}
+			}
+		}
+		for (const provider of ["google", "paddle", "apple"] as const) {
+			const declaration = providerCapabilityDeclaration(provider);
+			expect(declaration.operations["refund.issue"].feasibility?.status).toBe("conditional");
+			expect(implementsOperation(declaration, "refund.issue")).toBe(false);
+		}
+		expect(implementsOperation(stripeCapabilities, "refund.issue")).toBe(true);
 	});
 
 	it("cites existing tests tagged with each verified or conditional operation", () => {

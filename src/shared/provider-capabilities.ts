@@ -465,6 +465,31 @@ export function isCapabilityConditionKind(value: unknown): value is CapabilityCo
 	return includes(capabilityConditionKinds, value);
 }
 
+export const capabilityFeasibilityStatuses = [
+	"possible",
+	"conditional",
+	"provider_managed",
+	"unavailable",
+	"unknown",
+] as const;
+export type CapabilityFeasibilityStatus = (typeof capabilityFeasibilityStatuses)[number];
+
+export const capabilityFeasibilityLabels: Record<CapabilityFeasibilityStatus, string> = {
+	possible: "Possible",
+	conditional: "Conditional",
+	provider_managed: "Provider-managed only",
+	unavailable: "Unavailable through current provider APIs",
+	unknown: "Unknown",
+};
+
+/** Dated provider research, independent of runtime admission and implementation verification. */
+export interface CapabilityFeasibility {
+	status: CapabilityFeasibilityStatus;
+	reason: string;
+	sources: Array<{ title: string; url: string }>;
+	reviewedOn: string;
+}
+
 export interface OperationSupport {
 	level: SupportLevel;
 	/** Required exactly when `level` is `quotum_composed`: the provider primitive Quotum builds on. */
@@ -473,6 +498,8 @@ export interface OperationSupport {
 	/** All must hold; each is evaluated at the layer `conditionLayer` assigns to its kind. */
 	conditions: CapabilityCondition[];
 	notes?: string;
+	/** Informational only: never enables an operation or changes a capability verdict. */
+	feasibility?: CapabilityFeasibility;
 }
 
 export const changeBillingModes = ["prorated", "full", "none"] as const;
@@ -1145,6 +1172,7 @@ function validateOperationSupport(
 	if (support.notes !== undefined && typeof support.notes !== "string") {
 		issue(`${path}.notes`, "Notes must be a string");
 	}
+	validateFeasibility(`${path}.feasibility`, support.feasibility, issue);
 
 	const conditions = support.conditions;
 	if (!Array.isArray(conditions)) {
@@ -1218,6 +1246,42 @@ function validateOperationSupport(
 				`${verificationPath}.blockedBy`,
 				"Blocker must be a decision, scenario or question with a reference",
 			);
+		}
+	}
+}
+
+function validateFeasibility(path: string, feasibility: unknown, issue: IssueSink): void {
+	if (feasibility === undefined) return;
+	if (!isRecord(feasibility)) {
+		issue(path, "Feasibility must be an object");
+		return;
+	}
+	if (!includes(capabilityFeasibilityStatuses, feasibility.status)) {
+		issue(`${path}.status`, "Feasibility must name a known status");
+	}
+	if (!isNonBlankString(feasibility.reason)) {
+		issue(`${path}.reason`, "Feasibility must explain its scope and limitations");
+	}
+	if (!isIsoDate(feasibility.reviewedOn)) {
+		issue(`${path}.reviewedOn`, "Reviewed on must be a YYYY-MM-DD date");
+	}
+	if (!Array.isArray(feasibility.sources)) {
+		issue(`${path}.sources`, "Feasibility sources must be an array");
+		return;
+	}
+	if (feasibility.status !== "unknown" && feasibility.sources.length === 0) {
+		issue(`${path}.sources`, "Assessed feasibility must cite at least one provider source");
+	}
+	for (const [index, source] of feasibility.sources.entries()) {
+		if (!isRecord(source) || !isNonBlankString(source.title)) {
+			issue(`${path}.sources.${index}.title`, "Source title must be a non-empty string");
+		}
+		try {
+			const url = new URL(isRecord(source) && typeof source.url === "string" ? source.url : "");
+			if (url.protocol !== "https:" || url.username !== "" || url.password !== "")
+				throw new Error();
+		} catch {
+			issue(`${path}.sources.${index}.url`, "Source must be an HTTPS URL without credentials");
 		}
 	}
 }
