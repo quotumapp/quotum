@@ -192,6 +192,7 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 	const quantity = options.quantity ?? 1;
 	let refundableQuantity = options.refundableQuantity ?? quantity;
 	let productPurchaseState = "PURCHASED";
+	let productConsumptionState = "CONSUMPTION_STATE_YET_TO_BE_CONSUMED";
 	let subscriptionLineItemOverrides: Record<string, unknown> = {};
 
 	return attachFailNext({
@@ -223,7 +224,7 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 						{
 							productId,
 							productOfferDetails: {
-								consumptionState: "CONSUMPTION_STATE_YET_TO_BE_CONSUMED",
+								consumptionState: productConsumptionState,
 								quantity,
 								refundableQuantity,
 							},
@@ -264,6 +265,11 @@ export function createFakeGooglePlayClient(options: FakeGooglePlayClientOptions)
 		},
 		setProductPurchaseState(state: "PURCHASED" | "CANCELLED") {
 			productPurchaseState = state;
+		},
+		setProductConsumptionState(
+			state: "CONSUMPTION_STATE_YET_TO_BE_CONSUMED" | "CONSUMPTION_STATE_CONSUMED",
+		) {
+			productConsumptionState = state;
 		},
 		setRefundableQuantity(value: number) {
 			refundableQuantity = value;

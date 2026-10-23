@@ -354,6 +354,10 @@ Client flow:
    records state, acknowledges or consumes when required, enqueues projection sync, and returns the
    entitlement snapshot.
 
+Purchase verification and RTDN delivery skip consumption when Google's fetched product state is
+`CONSUMPTION_STATE_CONSUMED`. A retry still records the purchase idempotently and returns its
+entitlement snapshot, including when a previous consume succeeded but its response was lost.
+
 Configure the Real-time Developer Notifications push subscription to
 `https://<billing-host>/v1/projects/<projectKey>/webhooks/google`. Quotum verifies the Pub/Sub OIDC
 token issuer, audience, authorized party, service-account email, and expiry. Voided purchases use a

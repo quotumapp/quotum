@@ -216,7 +216,10 @@ export function normalizeGoogleProductPurchase(
 			input.purchaseKind === "non_consumable" &&
 			purchaseStatus === "completed" &&
 			acknowledgementState === "ACKNOWLEDGEMENT_STATE_PENDING",
-		requiresConsumption: input.purchaseKind === "consumable" && purchaseStatus === "completed",
+		requiresConsumption:
+			input.purchaseKind === "consumable" &&
+			purchaseStatus === "completed" &&
+			quantityState.consumptionState !== "CONSUMPTION_STATE_CONSUMED",
 	};
 }
 

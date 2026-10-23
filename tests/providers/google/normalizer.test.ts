@@ -315,6 +315,33 @@ describe("Google Play normalizer", () => {
 		expect(canceled?.invalidationReason).toBe("canceled");
 	});
 
+	it.each([
+		["consumed", "CONSUMPTION_STATE_CONSUMED", false],
+		["unconsumed", "CONSUMPTION_STATE_YET_TO_BE_CONSUMED", true],
+		["unspecified", "CONSUMPTION_STATE_UNSPECIFIED", true],
+		["missing", undefined, true],
+		["null", null, true],
+	] as const)(
+		"sets the consumption requirement for %s state",
+		(_, consumptionState, requiresConsumption) => {
+			const command = normalizeGoogleProductPurchase({
+				billingAccountId: "user_1",
+				purchaseToken: "purchase_token_1",
+				purchaseKind: "consumable",
+				productId: "credits_10",
+				purchase: productPurchase({
+					productLineItem: [{ productId: "credits_10", productOfferDetails: { consumptionState } }],
+				}),
+			});
+
+			expect(command).toMatchObject({
+				purchaseStatus: "completed",
+				consumptionState: consumptionState ?? null,
+				requiresConsumption,
+			});
+		},
+	);
+
 	it("maps voided purchase notifications and ignores RTDN test notifications", () => {
 		const voided = normalizeGoogleVoidedPurchase({
 			billingAccountId: null,
