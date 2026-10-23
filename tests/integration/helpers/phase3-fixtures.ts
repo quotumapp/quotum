@@ -1,4 +1,7 @@
 import type { SQL } from "bun";
+import { drizzle } from "drizzle-orm/bun-sql";
+import { syncLicensePools } from "../../../src/db/repository/license-pools";
+import type { QueryExecutor } from "../../../src/db/repository/types";
 
 export async function seedPhase3ControlCatalog(sql: SQL): Promise<void> {
 	await sql`
@@ -200,6 +203,13 @@ export async function seedPhase3CatalogMigration(sql: SQL, projectKey = "acme"):
 			AND price.plan_version_id = subscription.plan_version_id
 		WHERE subscription.external_subscription_id = 'sub_migrate_stripe' AND subscription.project_id = (SELECT id FROM projects WHERE key = ${projectKey})
 	`;
+	// Raw fixtures emulate the materialization normally committed by provider entitlement writes.
+	const executor = drizzle({ client: sql }) as unknown as QueryExecutor;
+	const customers = await sql<
+		{ project_id: string; id: string }[]
+	>`SELECT project_id,id FROM customers WHERE billing_account_id IN ('migration-stripe','migration-apple')`;
+	for (const customer of customers)
+		await syncLicensePools(executor, customer.project_id, customer.id);
 }
 
 export async function seedPhase3MeteringCatalog(sql: SQL): Promise<void> {

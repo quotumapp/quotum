@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
+import { sql as drizzleSql } from "drizzle-orm";
+import { BillingRepository } from "../../src/db/repository";
+import { syncLicensePoolPage } from "../../src/db/repository/license-pools";
+import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
 import { StripeBillingService } from "../../src/providers/stripe/service";
 import { calendarWindow } from "../../src/shared/cadence";
 import { createIntegrationApp } from "./helpers/app-fixture";
@@ -12,6 +16,7 @@ import {
 	integrationProjectContext,
 	type LocalPostgresContext,
 } from "./helpers/local-postgres";
+import { integrationProjectReadOnlyCredential } from "./helpers/platform-fixture";
 import { runAutoTopupWorkerOnce } from "./helpers/worker-fixture";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
@@ -2013,7 +2018,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(listed).toMatchObject([{ id: first?.id, quantity: 7 }]);
 	});
 
-	it("follows a provider quantity change once, then reads are pure again", async () => {
+	it("reads a provider quantity change without persisting a pool refresh", async () => {
 		await seedCatalogMigration(context.sql);
 		const [pool] = await context.repository.controlsEnterprise.listLicensePools(
 			project,
@@ -2035,10 +2040,106 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		const changed = await poolVersion();
 		await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe");
 
-		// Same pool id, new capacity, written once.
+		// Same pool id and row version, current capacity derived without writing.
 		expect(after).toMatchObject({ id: pool?.id, quantity: 3, active: true });
-		expect(changed).not.toBe(unchanged);
+		expect(changed).toBe(unchanged);
 		expect(await poolVersion()).toBe(changed);
+	});
+
+	it("executes both license GETs in a read-only transaction while subscription capacity changes", async () => {
+		await seedCatalogMigration(context.sql);
+		await context.repository.controlsEnterprise.createEntity(project, {
+			billingAccountId: "migration-stripe",
+			externalId: "readonly-team",
+			kind: "team",
+		});
+		const [pool] = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		if (!pool) throw new Error("Missing pool");
+		await context.repository.controlsEnterprise.assignLicense(project, {
+			billingAccountId: "migration-stripe",
+			poolId: pool.id,
+			entityId: "readonly-team",
+			quantity: 5,
+			actor: "test",
+		});
+		await downgradeLicensedSeats(context.sql, 3);
+		await (context.db as unknown as TransactionalQueryExecutor).transaction(async (tx) => {
+			await tx.execute(drizzleSql`SET TRANSACTION READ ONLY`);
+			const database: TransactionalQueryExecutor = {
+				execute: (query) => tx.execute(query),
+				transaction: async (callback) => callback(tx),
+			};
+			const repository = new BillingRepository(database);
+			expect(
+				await repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
+			).toMatchObject([{ id: pool.id, quantity: 3 }]);
+			expect(
+				await repository.controlsEnterprise.checkEntityLicense(project, {
+					billingAccountId: "migration-stripe",
+					entityId: "readonly-team",
+					featureKey: "licensed_seats",
+					requiredQuantity: 4,
+				}),
+			).toMatchObject({ allowed: false, assignedQuantity: 3 });
+			const { app } = createIntegrationApp({ env: context.env, repository });
+			for (const path of ["license-pools", "entities/readonly-team/licenses/licensed_seats"]) {
+				const response = await app.handle(
+					new Request(`http://localhost/v1/billing-accounts/migration-stripe/${path}`, {
+						headers: { authorization: `Bearer ${integrationProjectReadOnlyCredential()}` },
+					}),
+				);
+				expect(response.status).toBe(200);
+			}
+		});
+		await context.sql`UPDATE subscriptions SET expires_at=now()-interval '1 second' WHERE external_subscription_id='sub_migrate_stripe'`;
+		expect(
+			await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
+		).toMatchObject([{ id: pool.id, quantity: 0, active: false }]);
+		expect(
+			await context.repository.controlsEnterprise.checkEntityLicense(project, {
+				billingAccountId: "migration-stripe",
+				entityId: "readonly-team",
+				featureKey: "licensed_seats",
+				requiredQuantity: 1,
+			}),
+		).toMatchObject({ allowed: false, assignedQuantity: 0 });
+	});
+	it("backfills bounded customer pages idempotently while preserving pool IDs", async () => {
+		await seedCatalogMigration(context.sql);
+		await context.sql`DELETE FROM license_pools`;
+		expect(
+			await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
+		).toEqual([]);
+		let after: string | null = null;
+		let total = 0;
+		do {
+			const page = await syncLicensePoolPage(
+				context.db as unknown as TransactionalQueryExecutor,
+				project.projectInstanceId,
+				after,
+				1,
+			);
+			total += page.customers;
+			after = page.nextAfter;
+		} while (after !== null);
+		expect(total).toBeGreaterThan(0);
+		const first = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		expect(first[0]?.quantity).toBe(7);
+		await syncLicensePoolPage(
+			context.db as unknown as TransactionalQueryExecutor,
+			project.projectInstanceId,
+			null,
+			500,
+		);
+		expect(
+			await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
+		).toEqual(first);
 	});
 
 	it("honors license assignments in assignment order after a partial downgrade", async () => {
@@ -2355,4 +2456,5 @@ async function seedCatalogMigration(sql: SQL): Promise<void> {
 			AND price.plan_version_id = subscription.plan_version_id
 		WHERE subscription.external_subscription_id = 'sub_migrate_stripe'
 	`;
+	await context.repository.recomputeCustomerEntitlements(project, "migration-stripe");
 }

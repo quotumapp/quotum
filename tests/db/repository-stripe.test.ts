@@ -289,6 +289,7 @@ describe("BillingRepository Stripe", () => {
 				[{ id: "customer-id" }],
 				// The default-plan state read: no marker and no default grant, so nothing changes.
 				[],
+				[{ current: true }],
 				[],
 				[{ id: "customer-id" }],
 				[
@@ -341,7 +342,7 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(24);
+		expect(database.queries).toHaveLength(25);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");

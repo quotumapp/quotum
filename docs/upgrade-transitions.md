@@ -1227,3 +1227,14 @@ receipts, active/retired versions and secrets remain. Unprocessed events without
 account/mode mapping are deleted thirty days after receipt; inspect/reconnect quarantined events
 before their deadline. Mapped unresolved events remain. `001_platform.sql` also adds the partial
 unprocessed-event retention index.
+
+## Pure license reads
+
+License GETs no longer materialize missing pools or update stale quantities. Provider entitlement
+recomputation and assignment perform that work in mutating transactions. Before switching existing
+traffic to pure reads, run `quotum licenses sync --instance <key> --actor <name>` for every instance.
+Each invocation handles 100 customers by default (maximum 500 with `--limit`) and returns
+`nextAfter`; pass it as `--after` until null. Use `--member-override-reason <why>` for a
+member-managed organization. The command is audited and safe to repeat; pool IDs and assignments
+are preserved. Run the new binary for the backfill while old traffic is drained, then start the
+new runtime. No SQL baseline or environment variable changes are required.

@@ -44,6 +44,7 @@ import { defaultPlanReadVersionSql } from "./default-plan-sql";
 import { recordUsageAlertTriggered } from "./domain-event-facts";
 import { featureNotMetered } from "./feature-errors";
 import { ensureCustomer } from "./identities";
+import { desiredLicensePoolsSql, syncLicensePools } from "./license-pools";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -1015,7 +1016,6 @@ export class ControlsEnterpriseRepository
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
 			const customer = await requireCustomer(tx, projectId, billingAccountId);
-			await syncLicensePools(tx, projectId, customer.id);
 			const rows = await executeRows<{
 				id: string | number | bigint;
 				external_subscription_id: string;
@@ -1027,16 +1027,17 @@ export class ControlsEnterpriseRepository
 				tx,
 				drizzleSql`
 				SELECT pool.id, subscription.external_subscription_id, feature.key AS feature_key,
-					pool.quantity, COALESCE(sum(assignment.quantity), 0)::integer AS assigned_quantity,
-					pool.active
+					COALESCE(wanted.quantity,0)::integer AS quantity, COALESCE(sum(assignment.quantity), 0)::integer AS assigned_quantity,
+					(wanted.plan_item_id IS NOT NULL) AS active
 				FROM license_pools pool
+ LEFT JOIN (${desiredLicensePoolsSql(projectId, customer.id)}) wanted ON wanted.subscription_id=pool.subscription_id AND wanted.plan_item_id=pool.plan_item_id
 				JOIN subscriptions subscription ON subscription.project_id = pool.project_id AND subscription.id = pool.subscription_id
 				JOIN features feature ON feature.project_id = pool.project_id AND feature.id = pool.feature_id
 				LEFT JOIN license_assignments assignment
 					ON assignment.project_id = pool.project_id AND assignment.license_pool_id = pool.id
 					AND assignment.revoked_at IS NULL
 				WHERE pool.project_id = ${projectId} AND pool.customer_id = ${customer.id}
-				GROUP BY pool.id, subscription.external_subscription_id, feature.key ORDER BY pool.created_at, pool.id
+				GROUP BY pool.id, subscription.external_subscription_id, feature.key,wanted.quantity,wanted.plan_item_id ORDER BY pool.created_at, pool.id
 			`,
 			);
 			return rows.map((row) => ({
@@ -1169,7 +1170,6 @@ export class ControlsEnterpriseRepository
 			1,
 			1_000_000,
 		);
-		await this.listLicensePools(project, input.billingAccountId);
 		const projectId = project.projectInstanceId;
 		const customer = await requireCustomer(this.database, projectId, input.billingAccountId);
 		const entity = await resolveEntity(this.database, projectId, customer.id, input.entityId);
@@ -1188,7 +1188,7 @@ export class ControlsEnterpriseRepository
 						LEAST(
 							assignment.quantity,
 							GREATEST(
-								pool.quantity - (
+								wanted.quantity - (
 									sum(assignment.quantity) OVER (
 										PARTITION BY assignment.license_pool_id
 										ORDER BY assignment.assigned_at, assignment.id
@@ -1200,10 +1200,11 @@ export class ControlsEnterpriseRepository
 					FROM license_assignments assignment
 					JOIN license_pools pool
 						ON pool.project_id = assignment.project_id AND pool.id = assignment.license_pool_id
-					JOIN subscriptions subscription
+					JOIN (${desiredLicensePoolsSql(projectId, customer.id)}) wanted ON wanted.subscription_id=pool.subscription_id AND wanted.plan_item_id=pool.plan_item_id
+ JOIN subscriptions subscription
 						ON subscription.project_id = pool.project_id AND subscription.id = pool.subscription_id
 					WHERE assignment.project_id = ${projectId}
-						AND assignment.revoked_at IS NULL AND pool.active = true
+						AND assignment.revoked_at IS NULL
 						AND pool.customer_id = ${customer.id} AND pool.feature_id = ${String(feature.id)}::bigint
 						AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
 						AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
@@ -1906,95 +1907,6 @@ interface AssignmentDbRow {
  * The pools a customer's purchased subscription items entitle it to right now: one per live
  * subscription and licensed-quantity plan item, sized by the item's active subscription quantity.
  */
-function desiredLicensePoolsSql(projectId: string, customerId: string) {
-	return drizzleSql`
-		SELECT subscription.project_id, subscription.customer_id, subscription.id AS subscription_id,
-			item.id AS plan_item_id, item.feature_id,
-			COALESCE(subscription_item.quantity, item.quantity::integer) AS quantity
-		FROM subscriptions subscription
-		JOIN plan_items item
-			ON item.project_id = subscription.project_id
-			AND item.plan_version_id = subscription.plan_version_id
-		JOIN price_components price
-			ON price.project_id = item.project_id AND price.plan_item_id = item.id
-			AND price.component_kind = 'licensed'
-		LEFT JOIN subscription_items subscription_item
-			ON subscription_item.project_id = subscription.project_id
-			AND subscription_item.subscription_id = subscription.id
-			AND subscription_item.price_component_id = price.id
-			AND subscription_item.active = true
-		WHERE subscription.project_id = ${projectId} AND subscription.customer_id = ${customerId}
-			AND subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
-			AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
-			AND item.item_kind = 'licensed_quantity' AND item.allocation_scope = 'license_pool'
-	`;
-}
-
-/**
- * Brings the customer's stored pools in line with `desiredLicensePoolsSql`, and does nothing
- * when they already are. Listing pools is a read, so it must not take the customer lock or
- * rewrite rows on every call; only a change in the subscription items (or an expiry) makes the
- * stored pools stale.
- */
-async function syncLicensePools(
-	executor: QueryExecutor,
-	projectId: string,
-	customerId: string,
-): Promise<void> {
-	const state = await executeOne<{ current: boolean }>(
-		executor,
-		drizzleSql`
-			WITH desired AS (
-				SELECT subscription_id, plan_item_id, quantity
-				FROM (${desiredLicensePoolsSql(projectId, customerId)}) wanted
-			), stored AS (
-				SELECT subscription_id, plan_item_id, quantity
-				FROM license_pools
-				WHERE project_id = ${projectId} AND customer_id = ${customerId} AND active = true
-			)
-			SELECT NOT EXISTS (SELECT * FROM desired EXCEPT SELECT * FROM stored)
-				AND NOT EXISTS (SELECT * FROM stored EXCEPT SELECT * FROM desired) AS current
-		`,
-	);
-	if (state?.current === true) return;
-	await refreshLicensePools(executor, projectId, customerId);
-}
-
-/**
- * Rebuilds the customer's license pools from the purchased subscription items under the customer
- * lock. Pool ids are stable across refreshes, so callers that remembered one keep using it while
- * its capacity follows the provider's current quantity.
- */
-async function refreshLicensePools(
-	executor: QueryExecutor,
-	projectId: string,
-	customerId: string,
-): Promise<void> {
-	await executeOne(
-		executor,
-		drizzleSql`
-			SELECT id FROM customers
-			WHERE project_id = ${projectId} AND id = ${customerId}
-			FOR NO KEY UPDATE
-		`,
-	);
-	await executeRows(
-		executor,
-		drizzleSql`
-			UPDATE license_pools SET active = false, updated_at = now()
-			WHERE project_id = ${projectId} AND customer_id = ${customerId} AND active = true
-		`,
-	);
-	await executeRows(
-		executor,
-		drizzleSql`
-			INSERT INTO license_pools (project_id, customer_id, subscription_id, plan_item_id, feature_id, quantity)
-			${desiredLicensePoolsSql(projectId, customerId)}
-			ON CONFLICT (project_id, subscription_id, plan_item_id) DO UPDATE SET
-				quantity = EXCLUDED.quantity, active = true, updated_at = now()
-		`,
-	);
-}
 
 async function findCustomer(
 	executor: QueryExecutor,
