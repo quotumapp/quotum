@@ -33,8 +33,10 @@ class ScriptedExecutor implements PlatformQueryExecutor {
 		private readonly batchSize = 1_000,
 	) {}
 	async query<Row>(query: PlatformQuery): Promise<readonly Row[]> {
+		if (query.text === "SELECT clock_timestamp() AS now")
+			return [{ now: new Date() }] as unknown as readonly Row[];
 		this.calls.push(query);
-		const table = /DELETE FROM (platform_[a-z_]+)/.exec(query.text)?.[1] ?? "";
+		const table = /(?:retention: |DELETE FROM )(platform_[a-z_]+)/.exec(query.text)?.[1] ?? "";
 		const answer = this.answer(table);
 		if (answer instanceof Error) throw answer;
 		return [{ deleted: Math.min(answer, this.batchSize - 1) }] as unknown as readonly Row[];
@@ -53,7 +55,7 @@ describe("platform retention job wiring", () => {
 		});
 		expect(job?.pollIntervalMs).toBe(1234);
 		await job?.runOnce();
-		expect(executor.calls).toHaveLength(PLATFORM_RETENTION_TABLES.length * 2);
+		expect(executor.calls).toHaveLength((PLATFORM_RETENTION_TABLES.length - 1) * 2);
 		for (const call of executor.calls) expect(call.values[1]).toBe(3);
 	});
 
@@ -71,7 +73,7 @@ describe("platform retention job wiring", () => {
 		expect(PLATFORM_RETENTION_POLL_INTERVAL_MS).toBe(15 * 60_000);
 	});
 
-	it("schedules nothing for a headless process and never touches the database", () => {
+	it("constructs a headless connection sweep without touching the database", () => {
 		const executor = new ScriptedExecutor(() => 0);
 
 		const jobs = platformRetentionJobs({
@@ -80,7 +82,7 @@ describe("platform retention job wiring", () => {
 			logger: new RecordingLogger(),
 		});
 
-		expect(jobs).toEqual([]);
+		expect(jobs).toHaveLength(1);
 		expect(executor.calls).toEqual([]);
 	});
 
@@ -91,7 +93,7 @@ describe("platform retention job wiring", () => {
 
 		await job?.runOnce();
 
-		expect(executor.calls).toHaveLength(PLATFORM_RETENTION_TABLES.length);
+		expect(executor.calls).toHaveLength(PLATFORM_RETENTION_TABLES.length - 1);
 		expect(logger.errors).toEqual([]);
 		expect(logger.infos).toHaveLength(1);
 		expect(logger.infos[0]?.message).toBe("Platform retention sweep deleted expired rows");
@@ -105,6 +107,11 @@ describe("platform retention job wiring", () => {
 				{ table: "platform_step_up_grants", deleted: 0 },
 				{ table: "platform_mcp_changes", deleted: 0 },
 				{ table: "platform_mcp_authorizations", deleted: 0 },
+				{ table: "platform_connection_versions", deleted: 0 },
+				{ table: "platform_connection_secrets", deleted: 0 },
+				{ table: "platform_connection_operations", deleted: 0 },
+				{ table: "platform_connection_oauth_states", deleted: 0 },
+				{ table: "platform_stripe_app_events", deleted: 0 },
 			],
 			capped: [],
 		});
@@ -145,7 +152,7 @@ describe("platform retention job wiring", () => {
 			table: "platform_mcp_authorizations",
 		});
 		expect(logger.errors[0]?.error).toBe(failure);
-		expect(executor.calls).toHaveLength(PLATFORM_RETENTION_TABLES.length);
+		expect(executor.calls).toHaveLength(PLATFORM_RETENTION_TABLES.length - 1);
 	});
 });
 
@@ -183,7 +190,7 @@ describe("platform retention log lines", () => {
 		expect(line?.context.worker).toBe("platform_retention");
 		expect(line?.context.deleted).toBe(11 + 12 + 13 + 14 + 15 + 16);
 		expect(line?.context.tables).toEqual(
-			PLATFORM_RETENTION_TABLES.map((table) => ({ table, deleted: counts[table] })),
+			PLATFORM_RETENTION_TABLES.map((table) => ({ table, deleted: counts[table] ?? 0 })),
 		);
 		expect(line?.context.capped).toEqual([]);
 	});
@@ -205,7 +212,9 @@ describe("platform retention log lines", () => {
 
 		const [info, failure] = events();
 		expect(info?.context.capped).toEqual(
-			PLATFORM_RETENTION_TABLES.filter((table) => table !== "platform_mcp_changes"),
+			PLATFORM_RETENTION_TABLES.filter(
+				(table) => table !== "platform_mcp_changes" && table !== "platform_connection_secrets",
+			),
 		);
 		expect(failure?.msg).toBe("Platform retention sweep failed");
 		expect(failure?.context).toEqual({

@@ -63,7 +63,11 @@ export function createStripeAppEvents(
 						new Date(event.payload.created * 1000),
 					);
 				if (event.payload.type === "account.application.deauthorized")
-					await events.deauthorize(mapping.id);
+					await events.deauthorize(
+						mapping.id,
+						mapping.active_version_id,
+						new Date(typeof event.payload.created === "number" ? event.payload.created * 1000 : 0),
+					);
 				else if (lookup.context.lifecycleStatus !== "inactive") {
 					const config = await connections.resolve(lookup.context, "stripe", "recovery");
 					if (!config || config.connectedAccountId !== event.account_id) continue;

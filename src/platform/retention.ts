@@ -11,6 +11,10 @@ const DAY_MS = 24 * 60 * 60_000;
 export const PLATFORM_RETENTION = {
 	/** `platform_rate_limits`: after `reset_at`. An elapsed window restarts its count anyway. */
 	rateLimitsMs: 1 * DAY_MS,
+	connectionDraftsMs: 7 * DAY_MS,
+	connectionOauthMs: 7 * DAY_MS,
+	connectionOperationsMs: 30 * DAY_MS,
+	stripeAppEventsMs: 30 * DAY_MS,
 	/** `platform_auth_links`: after `expires_at` or `consumed_at`, whichever passed. */
 	authLinksMs: 7 * DAY_MS,
 	/** `platform_idempotency`: after `created_at`, completed results only. */
@@ -35,6 +39,11 @@ export const PLATFORM_RETENTION_TABLES = [
 	"platform_step_up_grants",
 	"platform_mcp_changes",
 	"platform_mcp_authorizations",
+	"platform_connection_versions",
+	"platform_connection_secrets",
+	"platform_connection_operations",
+	"platform_connection_oauth_states",
+	"platform_stripe_app_events",
 ] as const;
 
 export type PlatformRetentionTable = (typeof PLATFORM_RETENTION_TABLES)[number];
@@ -50,24 +59,27 @@ export interface PlatformRetentionResult {
 
 export interface PlatformRetentionOptions {
 	now?: () => Date;
+	connectionsOnly?: boolean;
 	batchSize?: number;
 	maxBatchesPerTable?: number;
 }
 
 interface DeletedCount {
 	deleted: number;
+	secrets_deleted?: number;
 }
 
 type DeleteBatch = (before: Date, limit: number) => Promise<readonly DeletedCount[]>;
 
 /**
  * Deletes expired operational rows from the platform tables that nothing else prunes. Each batch
- * locks the rows it deletes with `FOR UPDATE SKIP LOCKED` and takes no other lock, so concurrent
- * replicas split the work and a sweep never waits on, or deadlocks with, a request. Proposals are
+ * locks candidates with `FOR UPDATE SKIP LOCKED`, so replicas split the work. Draft secrets are
+ * removed with their parent version in one statement, respecting the restrictive foreign key. Proposals are
  * removed before the grants they belong to, because a grant that a proposal still names is kept.
  */
 export class PlatformRetentionSweep {
-	private readonly now: () => Date;
+	private readonly now?: () => Date;
+	private readonly connectionsOnly: boolean;
 	private readonly batchSize: number;
 	private readonly maxBatches: number;
 
@@ -75,7 +87,8 @@ export class PlatformRetentionSweep {
 		private readonly executor: PlatformQueryExecutor,
 		options: PlatformRetentionOptions = {},
 	) {
-		this.now = options.now ?? (() => new Date());
+		this.now = options.now;
+		this.connectionsOnly = options.connectionsOnly ?? false;
 		this.batchSize = positive(options.batchSize ?? PLATFORM_RETENTION.batchSize, "batchSize");
 		this.maxBatches = positive(
 			options.maxBatchesPerTable ?? PLATFORM_RETENTION.maxBatchesPerTable,
@@ -84,7 +97,14 @@ export class PlatformRetentionSweep {
 	}
 
 	async runOnce(): Promise<PlatformRetentionResult> {
-		const now = this.now();
+		const [clock] = this.now
+			? []
+			: await this.executor.query<{ now: Date | string }>({
+					text: "SELECT clock_timestamp() AS now",
+					values: [],
+				});
+		const now = this.now ? this.now() : new Date(clock?.now ?? Number.NaN);
+		if (!Number.isFinite(now.getTime())) throw new Error("Database retention clock unavailable");
 		const result: PlatformRetentionResult = {
 			deleted: Object.fromEntries(PLATFORM_RETENTION_TABLES.map((table) => [table, 0])) as Record<
 				PlatformRetentionTable,
@@ -94,9 +114,21 @@ export class PlatformRetentionSweep {
 			failures: [],
 		};
 		for (const step of this.steps()) {
+			if (
+				this.connectionsOnly &&
+				![
+					"platform_connection_versions",
+					"platform_connection_operations",
+					"platform_connection_oauth_states",
+					"platform_stripe_app_events",
+				].includes(step.table)
+			)
+				continue;
 			try {
 				const outcome = await this.drain(step.deleteBatch, new Date(now.getTime() - step.windowMs));
 				result.deleted[step.table] = outcome.deleted;
+				if (step.table === "platform_connection_versions")
+					result.deleted.platform_connection_secrets = outcome.secretsDeleted;
 				if (outcome.capped) result.capped.push(step.table);
 			} catch (error) {
 				result.failures.push({ table: step.table, error });
@@ -108,15 +140,17 @@ export class PlatformRetentionSweep {
 	private async drain(
 		deleteBatch: DeleteBatch,
 		before: Date,
-	): Promise<{ deleted: number; capped: boolean }> {
+	): Promise<{ deleted: number; secretsDeleted: number; capped: boolean }> {
 		let deleted = 0;
+		let secretsDeleted = 0;
 		for (let batch = 0; batch < this.maxBatches; batch += 1) {
 			const [row] = await deleteBatch(before, this.batchSize);
 			const count = Number(row?.deleted ?? 0);
 			deleted += count;
-			if (count < this.batchSize) return { deleted, capped: false };
+			secretsDeleted += Number(row?.secrets_deleted ?? 0);
+			if (count < this.batchSize) return { deleted, secretsDeleted, capped: false };
 		}
-		return { deleted, capped: true };
+		return { deleted, secretsDeleted, capped: true };
 	}
 
 	private steps(): Array<{
@@ -263,6 +297,75 @@ export class PlatformRetentionSweep {
 							)
 							SELECT count(*)::int AS deleted FROM removed
 						`,
+						values: [before, limit],
+					}),
+			},
+			{
+				table: "platform_connection_versions",
+				windowMs: PLATFORM_RETENTION.connectionDraftsMs,
+				deleteBatch: (before, limit) =>
+					this.executor.query<DeletedCount>({
+						text: `
+ -- retention: platform_connection_versions
+ WITH candidates AS MATERIALIZED (
+ SELECT v.id, v.connection_id FROM platform_connection_versions v
+ WHERE v.status IN ('draft','validated','expired') AND v.expires_at < $1
+ AND (v.refresh_lease_until IS NULL OR v.refresh_lease_until < now())
+ AND NOT EXISTS (SELECT 1 FROM platform_connections c WHERE c.active_version_id = v.id)
+ ORDER BY v.expires_at, v.id LIMIT $2 FOR UPDATE OF v SKIP LOCKED
+ ), removed_secrets AS (
+ DELETE FROM platform_connection_secrets s USING candidates v
+ WHERE s.connection_id = v.connection_id AND s.version_id = v.id RETURNING 1
+ ), removed AS (
+ DELETE FROM platform_connection_versions v USING candidates c
+ WHERE v.id = c.id AND (SELECT count(*) FROM removed_secrets) >= 0 RETURNING 1
+ ) SELECT count(*)::int AS deleted, (SELECT count(*)::int FROM removed_secrets) AS secrets_deleted FROM removed
+ `,
+						values: [before, limit],
+					}),
+			},
+
+			{
+				table: "platform_connection_operations",
+				windowMs: PLATFORM_RETENTION.connectionOperationsMs,
+				deleteBatch: (before, limit) =>
+					this.executor.query<DeletedCount>({
+						text: `
+ WITH removed AS (DELETE FROM platform_connection_operations WHERE ctid = ANY(ARRAY(
+ SELECT r.ctid FROM platform_connection_operations r WHERE r.created_at < $1
+ LIMIT $2 FOR UPDATE OF r SKIP LOCKED)) RETURNING 1)
+ SELECT count(*)::int AS deleted FROM removed
+ `,
+						values: [before, limit],
+					}),
+			},
+
+			{
+				table: "platform_connection_oauth_states",
+				windowMs: PLATFORM_RETENTION.connectionOauthMs,
+				deleteBatch: (before, limit) =>
+					this.executor.query<DeletedCount>({
+						text: `
+ WITH removed AS (DELETE FROM platform_connection_oauth_states WHERE ctid = ANY(ARRAY(
+ SELECT r.ctid FROM platform_connection_oauth_states r WHERE r.expires_at < $1 OR r.consumed_at < $1
+ LIMIT $2 FOR UPDATE OF r SKIP LOCKED)) RETURNING 1)
+ SELECT count(*)::int AS deleted FROM removed
+ `,
+						values: [before, limit],
+					}),
+			},
+
+			{
+				table: "platform_stripe_app_events",
+				windowMs: PLATFORM_RETENTION.stripeAppEventsMs,
+				deleteBatch: (before, limit) =>
+					this.executor.query<DeletedCount>({
+						text: `
+ WITH removed AS (DELETE FROM platform_stripe_app_events WHERE ctid = ANY(ARRAY(
+ SELECT r.ctid FROM platform_stripe_app_events r WHERE r.processed_at < $1
+ LIMIT $2 FOR UPDATE OF r SKIP LOCKED)) RETURNING 1)
+ SELECT count(*)::int AS deleted FROM removed
+ `,
 						values: [before, limit],
 					}),
 			},

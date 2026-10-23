@@ -1211,3 +1211,13 @@ never becomes ready. [Postgres](deployment.md#postgres) lists the session limits
 
 The older image's migration check rejects the new ledger, so a rollback restores the pre-upgrade
 backup with the old binary and loses writes made since.
+
+## Connection artifact retention
+
+The pre-1.0 baselines `001_platform.sql` and `004_merchant.sql` add retention indexes.
+Drain old workers and back up a populated database before applying the documented baseline
+backup/restore transition; never bypass checksum verification. Disposable databases are recreated.
+Deploy the version-fenced Stripe App event handler before enabling the new sweep across replicas.
+The job now runs for connection artifacts in headless mode too. Drafts/OAuth states retain seven
+days after expiry, and receipts/processed events thirty days. Active/retired versions and secrets
+and unprocessed events remain.

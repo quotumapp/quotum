@@ -29,7 +29,7 @@ class RecordingExecutor implements PlatformQueryExecutor {
 }
 
 function tableOf(query: PlatformQuery): string {
-	const match = /DELETE FROM (platform_[a-z_]+)/.exec(query.text);
+	const match = /(?:retention: |DELETE FROM )(platform_[a-z_]+)/.exec(query.text);
 	if (!match?.[1]) throw new Error(`Not a platform delete: ${query.text}`);
 	return match[1];
 }
@@ -42,6 +42,10 @@ describe("platform retention windows", () => {
 	it("pins the documented windows and batch bounds", () => {
 		expect(PLATFORM_RETENTION).toEqual({
 			rateLimitsMs: 1 * DAY,
+			connectionDraftsMs: 7 * DAY,
+			connectionOauthMs: 7 * DAY,
+			connectionOperationsMs: 30 * DAY,
+			stripeAppEventsMs: 30 * DAY,
 			authLinksMs: 7 * DAY,
 			idempotencyMs: 30 * DAY,
 			stepUpGrantsMs: 7 * DAY,
@@ -63,6 +67,10 @@ describe("platform retention windows", () => {
 		const expected = (windowMs: number) => NOW.getTime() - windowMs;
 		expect(cutoffs).toEqual({
 			platform_rate_limits: expected(1 * DAY),
+			platform_connection_versions: expected(7 * DAY),
+			platform_connection_operations: expected(30 * DAY),
+			platform_connection_oauth_states: expected(7 * DAY),
+			platform_stripe_app_events: expected(30 * DAY),
 			platform_auth_links: expected(7 * DAY),
 			platform_idempotency: expected(30 * DAY),
 			platform_step_up_grants: expected(7 * DAY),
@@ -79,13 +87,21 @@ describe("platform retention statements", () => {
 
 		await sweep(executor).runOnce();
 
-		expect(executor.calls.map(tableOf)).toEqual([...PLATFORM_RETENTION_TABLES]);
+		expect(executor.calls.map(tableOf)).toEqual(
+			PLATFORM_RETENTION_TABLES.filter((table) => table !== "platform_connection_secrets"),
+		);
 		for (const call of executor.calls) {
 			const references = [...call.text.matchAll(/\b(?:FROM|JOIN)\s+([a-z_]+)/g)].map(
 				(match) => match[1],
 			);
 			for (const reference of references)
-				expect([...PLATFORM_RETENTION_TABLES, "removed"]).toContain(reference ?? "");
+				expect([
+					...PLATFORM_RETENTION_TABLES,
+					"platform_connections",
+					"candidates",
+					"removed_secrets",
+					"removed",
+				]).toContain(reference ?? "");
 			expect(call.text).toContain("LIMIT $2");
 			expect(call.text).toContain("FOR UPDATE");
 			expect(call.text).toContain("SKIP LOCKED");
@@ -168,7 +184,9 @@ describe("platform retention batching", () => {
 		expect(result.failures).toEqual([{ table: "platform_rate_limits", error: failure }]);
 		expect(result.deleted.platform_rate_limits).toBe(0);
 		expect(result.deleted.platform_mcp_changes).toBe(2);
-		expect(executor.calls.map(tableOf)).toEqual([...PLATFORM_RETENTION_TABLES]);
+		expect(executor.calls.map(tableOf)).toEqual(
+			PLATFORM_RETENTION_TABLES.filter((table) => table !== "platform_connection_secrets"),
+		);
 	});
 
 	it("rejects batch bounds that could not make progress", () => {

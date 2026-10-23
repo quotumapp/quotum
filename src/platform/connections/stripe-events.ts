@@ -30,9 +30,9 @@ export class StripeAppEvents {
 		await this
 			.sql`UPDATE platform_connection_versions SET event_verified_at=now() WHERE connection_id=${id} AND id=${versionId} AND status='active' AND created_at<=${occurred}`;
 	}
-	async deauthorize(id: string) {
+	async deauthorize(id: string, versionId: string, occurred: Date) {
 		await this
-			.sql`UPDATE platform_connections SET enabled=false,revision=revision+1,updated_at=now() WHERE id=${id} AND enabled`;
+			.sql`UPDATE platform_connections SET enabled=false,revision=revision+1,updated_at=now() WHERE id=${id} AND enabled AND active_version_id=${versionId} AND EXISTS (SELECT 1 FROM platform_connection_versions v WHERE v.id=${versionId} AND v.connection_id=${id} AND v.created_at<=${occurred})`;
 	}
 	async processed(id: string) {
 		await this.sql`UPDATE platform_stripe_app_events SET processed_at=now() WHERE event_id=${id}`;
