@@ -1227,3 +1227,15 @@ receipts, active/retired versions and secrets remain. Unprocessed events without
 account/mode mapping are deleted thirty days after receipt; inspect/reconnect quarantined events
 before their deadline. Mapped unresolved events remain. `001_platform.sql` also adds the partial
 unprocessed-event retention index.
+
+## MCP proposal admission quotas
+
+`004_merchant.sql` adds organization/storage-byte fields and their sizing trigger/index, plus
+`platform_mcp_proposal_admissions` and `platform_mcp_proposal_days`. Drain old MCP writers and
+back up populated databases before the baseline backup/restore transition; disposable databases
+are recreated and migration checksums must remain enforced. When restoring existing proposal
+rows, derive `organization_id` from their authorization and recompute `storage_bytes` through
+`platform_mcp_change_storage_trigger` (an update of `preview` to itself invokes it). Do this
+before enabling new preparations. Never drop old proposals simply because they exceed new limits.
+Deploy the quota-aware runtime and the four optional `QUOTUM_MCP_MAX_*` settings together; old
+writers do not enforce admission quotas.

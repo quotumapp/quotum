@@ -71,6 +71,9 @@ describe("platform retention windows", () => {
 			platform_connection_operations: expected(30 * DAY),
 			platform_connection_oauth_states: expected(7 * DAY),
 			platform_stripe_app_events: expected(30 * DAY),
+
+			platform_mcp_proposal_admissions: NOW.getTime(),
+			platform_mcp_proposal_days: expected(30 * DAY),
 			platform_auth_links: expected(7 * DAY),
 			platform_idempotency: expected(30 * DAY),
 			platform_step_up_grants: expected(7 * DAY),

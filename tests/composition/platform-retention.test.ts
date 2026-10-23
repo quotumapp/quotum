@@ -106,6 +106,8 @@ describe("platform retention job wiring", () => {
 				{ table: "platform_idempotency", deleted: 0 },
 				{ table: "platform_step_up_grants", deleted: 0 },
 				{ table: "platform_mcp_changes", deleted: 0 },
+				{ table: "platform_mcp_proposal_admissions", deleted: 0 },
+				{ table: "platform_mcp_proposal_days", deleted: 0 },
 				{ table: "platform_mcp_authorizations", deleted: 0 },
 				{ table: "platform_connection_versions", deleted: 0 },
 				{ table: "platform_connection_secrets", deleted: 0 },

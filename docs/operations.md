@@ -446,6 +446,8 @@ rows older than these windows:
 | `platform_idempotency` | `created_at` is past, and the stored response is complete | 30 days |
 | `platform_step_up_grants` | `expires_at` or `consumed_at` is past | 7 days |
 | `platform_mcp_changes` | `created_at` is past, and the proposal is `completed`, `rejected`, `cancelled`, `expired`, `stale` or `failed`, or is still `pending` past its expiry | 30 days |
+| `platform_mcp_proposal_admissions` | Five-minute preparation reservation expires | Immediately |
+| `platform_mcp_proposal_days` | UTC counter day is past | 30 days |
 | `platform_mcp_authorizations` | `expires_at` or `revoked_at` is past, and no proposal refers to it | 30 days |
 
 Rows younger than their window and rows still in use stay: a pending idempotency claim keeps

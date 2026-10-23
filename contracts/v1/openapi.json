@@ -50092,7 +50092,7 @@
     },
     "/mcp": {
       "post": {
-        "description": "Stateless Streamable HTTP MCP. Authorization is organization-scoped. Billing tools require explicit projectKey and environment arguments; list_projects discovers available targets. 256 KiB body limit. No persistent session or server event stream.",
+        "description": "Stateless Streamable HTTP MCP. Authorization is organization-scoped. Billing tools require explicit projectKey and environment arguments; list_projects discovers available targets. 256 KiB body limit. Proposal tools enforce organization quotas (MCP_QUOTA_EXCEEDED / 429) and complete-envelope limits (MCP_PROPOSAL_TOO_LARGE / 413) in tool error results. No persistent session or server event stream.",
         "operationId": "callRemoteMcp",
         "parameters": [
           {

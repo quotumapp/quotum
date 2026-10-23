@@ -38,6 +38,8 @@ export const PLATFORM_RETENTION_TABLES = [
 	"platform_idempotency",
 	"platform_step_up_grants",
 	"platform_mcp_changes",
+	"platform_mcp_proposal_admissions",
+	"platform_mcp_proposal_days",
 	"platform_mcp_authorizations",
 	"platform_connection_versions",
 	"platform_connection_secrets",
@@ -275,6 +277,25 @@ export class PlatformRetentionSweep {
 						values: [before, limit],
 					}),
 			},
+			{
+				table: "platform_mcp_proposal_admissions",
+				windowMs: 0,
+				deleteBatch: (before, limit) =>
+					this.executor.query<DeletedCount>({
+						text: `WITH removed AS (DELETE FROM platform_mcp_proposal_admissions WHERE ctid=ANY(ARRAY(SELECT a.ctid FROM platform_mcp_proposal_admissions a WHERE a.expires_at<$1 LIMIT $2 FOR UPDATE OF a SKIP LOCKED)) RETURNING 1) SELECT count(*)::int AS deleted FROM removed`,
+						values: [before, limit],
+					}),
+			},
+			{
+				table: "platform_mcp_proposal_days",
+				windowMs: 30 * DAY_MS,
+				deleteBatch: (before, limit) =>
+					this.executor.query<DeletedCount>({
+						text: `WITH removed AS (DELETE FROM platform_mcp_proposal_days WHERE ctid=ANY(ARRAY(SELECT d.ctid FROM platform_mcp_proposal_days d WHERE d.day<($1::timestamptz AT TIME ZONE 'UTC')::date LIMIT $2 FOR UPDATE OF d SKIP LOCKED)) RETURNING 1) SELECT count(*)::int AS deleted FROM removed`,
+						values: [before, limit],
+					}),
+			},
+
 			{
 				table: "platform_mcp_authorizations",
 				windowMs: PLATFORM_RETENTION.mcpAuthorizationsMs,

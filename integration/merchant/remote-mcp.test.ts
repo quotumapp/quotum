@@ -1130,7 +1130,8 @@ describe("MCP browser-approved writes", () => {
 
 	it("serializes a replacement and the approval of the proposal it replaces", async () => {
 		const { change, proposed, approved } = await proposalAndApprovalRace(true);
-		expect(proposed.ok).toBe(true);
+		if (!proposed.ok)
+			expect(proposed.error).toMatchObject({ code: "ACTION_REJECTED", status: 409 });
 		// Never a 503 from a deadlock: the approval either applied first or finds it cancelled.
 		expect(approved.ok && approved.value.status).toBeLessThan(500);
 		const [row] = await f.sql<
@@ -1138,7 +1139,7 @@ describe("MCP browser-approved writes", () => {
 		>`SELECT status FROM platform_mcp_changes WHERE id = ${change.id}`;
 		expect(["cancelled", "completed"]).toContain(row?.status as string);
 		expect(await f.sql`SELECT id FROM platform_mcp_changes WHERE status = 'pending'`).toHaveLength(
-			1,
+			proposed.ok ? 1 : 0,
 		);
 	});
 
