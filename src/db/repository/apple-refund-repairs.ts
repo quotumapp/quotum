@@ -4,6 +4,7 @@ import {
 	type AppleRefundAllocationTarget,
 	appleRefundAllocationAttribution,
 	appleRefundAllocationScope,
+	canRestoreAppleRefund,
 	restoreAppleRefundAllocations,
 } from "./apple-allocation-restoration";
 import { withDeadlockRetry } from "./base";
@@ -183,6 +184,10 @@ async function previewRepair(
 	};
 	if (result.reason !== null) return result;
 	const scope = allocationTarget(projectId, target);
+	if (!(await canRestoreAppleRefund(executor, scope))) {
+		result.reason = "refund_not_restorable";
+		return result;
+	}
 	const rows = await executeRows<{
 		id: string;
 		feature_key: string;

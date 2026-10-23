@@ -412,6 +412,44 @@ localDescribe("Apple refund reversal accounting", () => {
 		},
 	);
 
+	it.each(["consumable", "subscription"] as const)(
+		"blocks historical %s repair when an earlier independent revocation was overwritten",
+		async (kind) => {
+			await publishAiCreditsCatalog(context.repository);
+			const eventId = await historicalReversal(kind);
+			const revokedId = await record(kind, "REVOKE");
+			// Reproduce the old recorder: the reversal cleared purchase/subscription state even
+			// though this independent revocation had already been processed.
+			await context.sql`UPDATE store_events SET processed_at = (
+				SELECT processed_at - interval '1 second' FROM store_events WHERE id = ${eventId}::uuid
+			) WHERE project_id = ${project().projectInstanceId} AND id = ${revokedId}::uuid`;
+			await context.sql`UPDATE purchases SET status = 'completed', invalidated_at = NULL,
+				invalidation_reason = NULL WHERE project_id = ${project().projectInstanceId}`;
+			await context.sql`UPDATE subscriptions SET status = 'active'
+				WHERE project_id = ${project().projectInstanceId}`;
+			await context.sql`DELETE FROM projection_sync_jobs WHERE project_id = ${project().projectInstanceId}`;
+			const before = await allocations();
+			const report = await readAppleRefundReversalRepairs(database(), project().projectInstanceId);
+			expect(report.events).toMatchObject([
+				{ storeEventId: eventId, status: "blocked", reason: "refund_not_restorable" },
+			]);
+			expect(
+				await applyAppleRefundReversalRepair(database(), project().projectInstanceId, eventId),
+			).toMatchObject({
+				status: "blocked",
+				reason: "refund_not_restorable",
+				restoredAllocationIds: [],
+			});
+			expect(await allocations()).toEqual(before);
+			expect(await balance()).toMatchObject({ available: "0" });
+			expect(
+				await context.sql<
+					{ id: string }[]
+				>`SELECT id FROM projection_sync_jobs WHERE project_id = ${project().projectInstanceId}`,
+			).toEqual([]);
+		},
+	);
+
 	it("rolls allocation restoration back when projection enqueueing fails", async () => {
 		await publishAiCreditsCatalog(context.repository);
 		const eventId = await historicalReversal("consumable");
