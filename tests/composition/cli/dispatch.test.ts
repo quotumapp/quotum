@@ -55,6 +55,16 @@ describe("quotum command resolution", () => {
 		[["migrate", "status"], "migrate.ts", ["status"]],
 		[["partitions", "status"], "composition/cli/partitions.ts", ["status"]],
 		[
+			["repair", "apple-refund-reversals", "report", "acme"],
+			"composition/cli/apple-refund-reversals.ts",
+			["report", "acme"],
+		],
+		[
+			["repair", "apple-refund-reversals", "apply", "acme", "event-id", "--actor", "ops"],
+			"composition/cli/apple-refund-reversals.ts",
+			["apply", "acme", "event-id", "--actor", "ops"],
+		],
+		[
 			["partitions", "ensure", "--months", "24"],
 			"composition/cli/partitions.ts",
 			["ensure", "--months", "24"],

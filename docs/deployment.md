@@ -51,6 +51,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | --- | --- |
 | `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
 | `quotum partitions status` / `ensure [--months <n>]` | Report or extend the monthly [usage partitions](operations.md#usage-partitions). |
+| `quotum repair apple-refund-reversals report <instance>` / `apply <instance> <store-event-id> --actor <name>` | Inspect and [repair credits stranded by processed Apple refund reversals](operations.md#apple-refund-reversal-repairs). Reports are read-only; apply is audited and requires a member override when applicable. |
 | `quotum usage scopes report [--project <instance>] [--limit <n>] [--json]` | Read-only report of what [declared meter-limit scope](upgrade-transitions.md#declared-meter-limit-scope) will change; exits `2` while blocking items remain. |
 | `quotum usage scopes snapshot --out <file>` | Records usage windows, active holds and unbilled usage before `quotum migrate` in the [declared-scope transition](upgrade-transitions.md#move-with-a-verified-transition); never overwrites a file. |
 | `quotum usage scopes verify --baseline <file> [--json]` | Checks the migrated database against the snapshot; exits `2` when a check fails, and the service must not start until it passes. |
@@ -74,7 +75,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
 | `quotum version`, `quotum help` | Build version and command list. |
 
-`bootstrap`, `catalog`, `partitions`, `usage scopes`, `connections`, `credentials`, `environments`
+`bootstrap`, `catalog`, `partitions`, `repair apple-refund-reversals`, `usage scopes`, `connections`, `credentials`, `environments`
 and `webhooks` report a failure as one line on stderr and exit `64` for wrong arguments or `1` otherwise. A missing table reads as "the
 database schema is not migrated", and an invalid `BILLING_PLATFORM_BOOTSTRAP_JSON` names the field
 at fault.

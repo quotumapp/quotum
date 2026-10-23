@@ -1,6 +1,7 @@
 import { BillingError, NotFoundBillingError } from "../../billing/errors";
 import type { ProjectionPayload } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
+import { restoreAppleRefundAllocations } from "./apple-allocation-restoration";
 import { recordApplePromotionInTx } from "./apple-promotions";
 import { RepositoryModule } from "./base";
 import {
@@ -223,6 +224,15 @@ export class AppleBillingRepository extends RepositoryModule {
 						end: input.trialEnd,
 					});
 				}
+				if (isRefundReversal) {
+					await restoreAppleRefundAllocations(tx, {
+						projectId,
+						customerId: customer.id,
+						transactionId: input.transactionId,
+						purchaseId: null,
+						subscriptionId,
+					});
+				}
 				await materializeSubscriptionAllocations(tx, {
 					projectId,
 					customerId: customer.id,
@@ -253,7 +263,15 @@ export class AppleBillingRepository extends RepositoryModule {
 				identityError: `purchase transaction identity mismatch for provider apple transaction ${input.transactionId}`,
 			});
 			if (input.purchaseKind === "consumable") {
-				if (input.purchaseStatus === "completed") {
+				if (isRefundReversal) {
+					await restoreAppleRefundAllocations(tx, {
+						projectId,
+						customerId: customer.id,
+						transactionId: input.transactionId,
+						purchaseId,
+						subscriptionId: null,
+					});
+				} else if (input.purchaseStatus === "completed") {
 					await materializeTopupAllocation(tx, {
 						projectId,
 						customerId: customer.id,
