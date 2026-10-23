@@ -33,7 +33,7 @@ describe("connection artifact retention", () => {
 		}
 		await sql`INSERT INTO platform_connection_operations(project_instance_id,request_key,action,request_fingerprint,result,created_at) VALUES(${who.instance_id},'old-operation','commit','hash','{}',now()-interval '31 days'),(${who.instance_id},'new-operation','commit','hash','{}',now())`;
 		await sql`INSERT INTO platform_connection_oauth_states(state_hash,project_instance_id,principal_id,session_id,expected_revision,settings,expires_at) VALUES('old',${who.instance_id},${who.principal_id},${who.session_id},0,'{}',now()-interval '8 days'),('live',${who.instance_id},${who.principal_id},${who.session_id},0,'{}',now()+interval '1 day')`;
-		await sql`INSERT INTO platform_stripe_app_events(event_id,account_id,livemode,payload,created_at,processed_at) VALUES('old','acct',false,'{}',now()-interval '32 days',now()-interval '31 days'),('pending','acct',false,'{}',now()-interval '32 days',NULL),('recent','acct',false,'{}',now(),now())`;
+		await sql`INSERT INTO platform_stripe_app_events(event_id,account_id,livemode,payload,created_at,processed_at) VALUES('old','acct_retention',false,'{}',now()-interval '32 days',now()-interval '31 days'),('pending','acct_retention',false,'{}',now()-interval '32 days',NULL),('recent','acct_retention',false,'{}',now(),now())`;
 		const sweep = () =>
 			new PlatformRetentionSweep(sql, { connectionsOnly: true, batchSize: 1 }).runOnce();
 		const results = await Promise.all([sweep(), sweep()]);
@@ -53,7 +53,7 @@ describe("connection artifact retention", () => {
 			(await sql`SELECT state_hash FROM platform_connection_oauth_states`).map((r) => r.state_hash),
 		).toEqual(["live"]);
 		expect(
-			(await sql`SELECT event_id FROM platform_stripe_app_events ORDER BY event_id`).map(
+			(await sql`SELECT event_id FROM platform_stripe_app_events WHERE account_id='acct_retention' ORDER BY event_id`).map(
 				(r) => r.event_id,
 			),
 		).toEqual(["pending", "recent"]);
