@@ -34,7 +34,7 @@ import {
 } from "./meter-limit-sources";
 import { startOfUtcMonth } from "./meter-limit-windows";
 import { type PendingAllowance, readPendingAllowances } from "./plan-grant-windows";
-import { executeOne, executeRows, jsonb } from "./query";
+import { executeOne, executeRows, jsonb, readAccountingClock } from "./query";
 import type { QueryExecutor } from "./types";
 import { requireNonBlank, toIsoStringOrNull } from "./validation";
 
@@ -910,7 +910,8 @@ async function readProjectionMeterLimits(
 	const sources = await Promise.all(
 		features.map((feature) => queryMeterLimitRows(executor, projectId, customerId, feature)),
 	);
-	const now = new Date();
+	if (sources.every((rows) => rows.length === 0)) return [];
+	const now = await readAccountingClock(executor);
 	const limits = features.flatMap((feature, index) => {
 		const rows = sources[index] ?? [];
 		const combined = combineMeterLimits(rows, feature.credit_scale);
