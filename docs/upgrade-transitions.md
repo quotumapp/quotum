@@ -1321,3 +1321,13 @@ failure-attempt budgets are preserved. Store events already parked with `next_at
 'infinity'` are not made due automatically. Inspect them, then replay each applicable event with
 `POST /v1/admin/store-events/:eventId/replay` using the project credential, operator key and
 `X-Billing-Actor`. Do not bulk-reset rows or replay events whose external effect needs reconciliation.
+
+## Automatic top-up payment checkpoints
+
+`003_metering_and_pricing.sql` adds nullable `provider_result` and nonnegative
+`completion_attempts` to `auto_topup_jobs`; the Drizzle mirror changes with it. Drain old workers
+before the baseline backup/restore transition, then deploy the checkpoint-aware worker/provider
+together. Back up populated databases and preserve the job ledger; disposable databases are
+recreated, and checksum checks must not be bypassed. Existing paid-but-terminal jobs require
+manual comparison with Stripe before an operator grants credits. No automatic historical payment
+remediation runs. Unpaid drafts left before a failed checkpoint are safe to inspect separately.

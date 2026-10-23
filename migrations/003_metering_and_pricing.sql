@@ -1635,6 +1635,8 @@ CREATE TABLE IF NOT EXISTS auto_topup_jobs (
 	currency TEXT COLLATE "C",
 	external_invoice_id TEXT,
 	external_payment_id TEXT,
+	provider_result JSONB CHECK (provider_result IS NULL OR jsonb_typeof(provider_result) = 'object'),
+	completion_attempts INTEGER NOT NULL DEFAULT 0 CHECK (completion_attempts >= 0),
 	budget_reserved_at TIMESTAMPTZ,
 	budget_interval_started_at TIMESTAMPTZ,
 	attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),

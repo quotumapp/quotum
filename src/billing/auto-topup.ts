@@ -18,6 +18,9 @@ export interface AutoTopupJob {
 	attempts: number;
 	consecutiveFailures: number;
 	maxConsecutiveFailures: number;
+	externalInvoiceId?: string | null;
+	providerResult?: AutoTopupChargeSucceeded | null;
+	completionAttempts?: number;
 }
 
 export interface AutoTopupChargeSucceeded {
@@ -50,3 +53,9 @@ export interface AutoTopupRunResult {
 	circuitOpened: number;
 	failed: number;
 }
+
+/** Persisted before collection; failures must abort the provider workflow. */
+export type AutoTopupCheckpoint = (checkpoint: {
+	invoiceId: string;
+	result?: AutoTopupChargeSucceeded;
+}) => Promise<void>;

@@ -216,7 +216,9 @@ Workers lease job rows by `worker_id` (`locked_by` columns, refreshed by
 `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a worker must only
 touch rows it holds. Auto-topup and recurring billing use `src/workers/job-leases.ts` to renew
 waiting claims as well as the active job and verify ownership before provider calls and markers;
-lease renewal failures must not enter the provider-failure marker path. Projection sync delivers signed `billing_state_v1` payloads to each project's
+lease renewal failures must not enter the provider-failure marker path. Automatic top-ups checkpoint
+the invoice before collection and the paid receipt before crediting. Completion failures preserve
+the budget and retry without charging again or recording a charge failure. Projection sync delivers signed `billing_state_v1` payloads to each project's
 configured projection URL via `src/projections/http-client.ts`, through `postToDestination` in
 `src/shared/safe-http.ts`: public HTTPS only, unless a headless deployment approves private
 networks (`src/composition/projection-destinations.ts`). Provider credentials and

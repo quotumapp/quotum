@@ -18,6 +18,7 @@ import {
 	uniqueIndex,
 	uuid,
 } from "drizzle-orm/pg-core";
+import type { AutoTopupChargeSucceeded } from "../billing/auto-topup";
 import type { PaymentSetupPlanStatus, PaymentSetupStatus } from "../billing/payment-setup";
 import type { ProviderOperationStatus } from "../billing/provider-operations";
 import type {
@@ -4689,6 +4690,8 @@ export const autoTopupJobs = pgTable(
 		currency: text("currency"),
 		externalInvoiceId: text("external_invoice_id"),
 		externalPaymentId: text("external_payment_id"),
+		providerResult: jsonb("provider_result").$type<AutoTopupChargeSucceeded>(),
+		completionAttempts: integer("completion_attempts").notNull().default(0),
 		budgetReservedAt: timestamp("budget_reserved_at", { withTimezone: true }),
 		budgetIntervalStartedAt: timestamp("budget_interval_started_at", { withTimezone: true }),
 		attempts: integer("attempts").notNull().default(0),
@@ -4720,6 +4723,11 @@ export const autoTopupJobs = pgTable(
 			"auto_topup_jobs_charged_amount_minor_check",
 			sql`(((charged_amount_minor IS NULL) OR (charged_amount_minor >= 0)))`,
 		),
+		check(
+			"auto_topup_jobs_provider_result_check",
+			sql`(((provider_result IS NULL) OR (jsonb_typeof(provider_result) = 'object'::text)))`,
+		),
+		check("auto_topup_jobs_completion_attempts_check", sql`((completion_attempts >= 0))`),
 		check("auto_topup_jobs_attempts_check", sql`((attempts >= 0))`),
 		check(
 			"auto_topup_jobs_state_check",

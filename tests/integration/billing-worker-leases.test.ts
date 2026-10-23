@@ -102,7 +102,7 @@ localDescribe("Billing worker lease protection", () => {
 					: new RecurringBillingWorker(options).runOnce();
 			};
 			if (kind === "topup")
-				await expect(run("worker-a", disconnected)).rejects.toThrow("database disconnected");
+				expect(await run("worker-a", disconnected)).toMatchObject({ failed: 1, retryScheduled: 1 });
 			else
 				expect(await run("worker-a", disconnected)).toMatchObject({
 					failed: 1,
@@ -110,10 +110,11 @@ localDescribe("Billing worker lease protection", () => {
 				});
 			expect(clock.active).toBe(0);
 			await expire(kind);
+			if (kind === "topup") await context.sql`UPDATE auto_topup_jobs SET next_attempt_at=now()`;
 			expect(await run("worker-b")).toMatchObject(
 				kind === "topup" ? { succeeded: 1 } : { usageInvoicesCreated: 1 },
 			);
-			expect(client.invoiceCreateParams).toHaveLength(2);
+			expect(client.invoiceCreateParams).toHaveLength(kind === "topup" ? 1 : 2);
 			expect(invoiceIds.size).toBe(1);
 			expect(clock.active).toBe(0);
 			if (kind === "topup") {

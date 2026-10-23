@@ -435,6 +435,18 @@ it stops early with `locked`, `lock_timeout`, `blocked` or `forbidden`. Both rea
 Automatic top-up failures require resolving the payment/configuration cause before a protected
 circuit reset. Use replay/retry routes for durable work; do not manually advance job state.
 
+### Automatic top-up completion recovery
+
+The worker checkpoints the invoice ID before finalization or collection and saves the paid receipt
+before crediting. Failure after an invoice checkpoint keeps the safety budget reserved and retries
+that invoice or local completion; it does not report a charge failure or consume the charge failure
+budget. Completion retries continue with a daily maximum delay. A saved paid receipt completes
+without calling Stripe, including if the policy was disabled after payment. A known invoice is
+retrieved on recovery, so recovery does not depend on the lifetime of Stripe's creation key.
+A failed checkpoint before collection can leave an unpaid draft for operator inspection.
+Historical stranded jobs still need operator reconciliation against Stripe; this change does not
+retry or credit terminal historical jobs automatically.
+
 ### Merchant platform retention
 
 The merchant platform keeps short-lived operational rows that nothing else prunes. A runtime that

@@ -386,6 +386,17 @@ export class BillingRepository {
 		return await this.autoTopupJobs.claimAutoTopupJobs(workerId, limit, staleAfterMs);
 	}
 
+	async checkpointAutoTopup(
+		...args: Parameters<AutoTopupJobRepository["checkpointAutoTopup"]>
+	): Promise<void> {
+		await this.autoTopupJobs.checkpointAutoTopup(...args);
+	}
+	async retryAutoTopupCompletion(
+		...args: Parameters<AutoTopupJobRepository["retryAutoTopupCompletion"]>
+	): Promise<void> {
+		await this.autoTopupJobs.retryAutoTopupCompletion(...args);
+	}
+
 	async markAutoTopupSucceeded(
 		projectId: string,
 		jobId: string,

@@ -26,6 +26,8 @@ interface FakeSetupIntent {
 }
 
 interface FakeInvoice {
+	metadata: Record<string, string>;
+	lines: Stripe.InvoiceAddLinesParams.Line[];
 	id: string;
 	currency: string;
 	total: number;
@@ -480,6 +482,9 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		return this.subscriptionDiscounts.get(subscriptionId) ?? [];
 	}
 
+	async retrieveInvoice(invoiceId: string): Promise<unknown> {
+		return invoiceReceipt(this.requireInvoice(invoiceId));
+	}
 	async createInvoice(
 		params: Stripe.InvoiceCreateParams,
 		idempotencyKey: string,
@@ -491,6 +496,13 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		if (existing !== undefined) return { id: existing.id };
 		const id = `in_fake_${digest(idempotencyKey).slice(0, 24)}`;
 		const invoice: FakeInvoice = {
+			metadata:
+				params.metadata !== null && typeof params.metadata === "object"
+					? Object.fromEntries(
+							Object.entries(params.metadata).map(([key, value]) => [key, String(value)]),
+						)
+					: {},
+			lines: [],
 			id,
 			currency: params.currency ?? "usd",
 			total: 0,
@@ -511,6 +523,7 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 		this.idempotency.claim(idempotencyKey, `POST /v1/invoices/${invoiceId}/add_lines`, params);
 		if (this.invoiceLineKeys.has(idempotencyKey)) return invoiceReceipt(invoice);
 		for (const line of params.lines) invoice.total += this.lineAmount(line);
+		invoice.lines.push(...params.lines);
 		this.invoiceLineKeys.add(idempotencyKey);
 		return invoiceReceipt(invoice);
 	}
@@ -571,6 +584,11 @@ export class FakeStripeBillingClient implements StripeBillingClientDependency {
 function invoiceReceipt(invoice: FakeInvoice): Record<string, unknown> {
 	return {
 		id: invoice.id,
+		metadata: invoice.metadata,
+		lines: {
+			data: invoice.lines.map((line) => ({ ...line, quantity: line.quantity ?? 1 })),
+			has_more: false,
+		},
 		status: invoice.status,
 		total: invoice.total,
 		amount_paid: invoice.status === "paid" ? invoice.total : 0,
