@@ -756,6 +756,8 @@ events. This repair changes data in the existing schema; it requires no migratio
    the original allocation can be restored; `unchanged` means no attributed reversed row remains.
    Expired rows may be restored with a zero balance delta. `blocked` includes a `reason`, such as
    `purchase_invalidated`, `later_invalidation` or `allocation_attribution_missing`.
+   `refund_not_restorable` means the recorded history does not prove an eligible refund, including
+   an independent revocation that predates the reversal even if the old recorder cleared its state.
 3. Apply one selected event with
    `quotum repair apple-refund-reversals apply <instance> <store-event-id> --actor <name>`.
    `QUOTUM_ACTOR` may supply the actor. While the merchant platform runs, an organization with
