@@ -235,6 +235,41 @@ localDescribe("Google route flows integration", () => {
 		});
 	});
 
+	it("verifies the same Google consumable twice without consuming or granting twice", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		const { app, google, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+
+		const first = await withIsoDateSqlParameters(() => verifyGoogleConsumable(app, authHeaders));
+		expect(first.status).toBe(200);
+		expectEmptySnapshot((await first.json()).data, "integration_user");
+
+		google.setProductConsumptionState("CONSUMPTION_STATE_CONSUMED");
+		const retry = await withIsoDateSqlParameters(() => verifyGoogleConsumable(app, authHeaders));
+		expect(retry.status).toBe(200);
+		expectEmptySnapshot((await retry.json()).data, "integration_user");
+		expect(google.calls).toEqual([
+			"getProductPurchase:purchase_token_1",
+			"consumeProductPurchase:echo_credits_10:purchase_token_1",
+			"getProductPurchase:purchase_token_1",
+		]);
+		await expectTableCounts(context.sql, {
+			purchases: 1,
+			balance_allocations: 1,
+			store_events: 1,
+			projection_sync_jobs: 1,
+		});
+		expect(
+			await context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"integration_user",
+				"ai_credits",
+			),
+		).toMatchObject({ granted: "10", available: "10" });
+	});
+
 	it("never emits a consumable credit grant for a canceled Google purchase", async () => {
 		const { app, google, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -672,7 +707,44 @@ localDescribe("Google route flows integration", () => {
 		});
 	});
 
-	it("records a second Google RTDN messageId without granting twice", async () => {
+	it("acknowledges a redelivered Google consumable RTDN without consuming or granting twice", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		const { app, google, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+			googleRtdn: "one_time",
+		});
+		await createGoogleAccountLink(app, authHeaders);
+
+		const first = await withIsoDateSqlParameters(() => postGoogleRtdn(app, "message_product"));
+		expect(first.status).toBe(200);
+		expect((await first.json()).data.processed).toBe(true);
+
+		google.setProductConsumptionState("CONSUMPTION_STATE_CONSUMED");
+		const retry = await withIsoDateSqlParameters(() => postGoogleRtdn(app, "message_product"));
+		expect(retry.status).toBe(200);
+		expect((await retry.json()).data.processed).toBe(true);
+		expect(google.calls).toEqual([
+			"getProductPurchase:purchase_token_1",
+			"consumeProductPurchase:echo_credits_10:purchase_token_1",
+			"getProductPurchase:purchase_token_1",
+		]);
+		await expectTableCounts(context.sql, {
+			purchases: 1,
+			balance_allocations: 1,
+			store_events: 1,
+			projection_sync_jobs: 1,
+		});
+		expect(
+			await context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"integration_user",
+				"ai_credits",
+			),
+		).toMatchObject({ granted: "10", available: "10" });
+	});
+
+	it("records a second Google RTDN messageId without granting or consuming twice", async () => {
 		const { app, google, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
@@ -680,8 +752,12 @@ localDescribe("Google route flows integration", () => {
 		});
 		await createGoogleAccountLink(app, authHeaders);
 		expect((await postGoogleRtdn(app, "message_product")).status).toBe(200);
+		google.setProductConsumptionState("CONSUMPTION_STATE_CONSUMED");
 		expect((await postGoogleRtdn(app, "message_product_2")).status).toBe(200);
 		expect(google.calls.filter((call) => call.startsWith("getProductPurchase"))).toHaveLength(2);
+		expect(google.calls.filter((call) => call.startsWith("consumeProductPurchase"))).toHaveLength(
+			1,
+		);
 		await expectTableCounts(context.sql, {
 			customers: 1,
 			provider_customers: 1,

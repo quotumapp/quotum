@@ -45,7 +45,7 @@ const subscriptionPurchase = (overrides: Record<string, unknown> = {}) => ({
 	...overrides,
 });
 
-const productPurchase = () => ({
+const productPurchase = (consumptionState = "CONSUMPTION_STATE_YET_TO_BE_CONSUMED") => ({
 	purchaseCompletionTime: "2026-05-31T00:00:00Z",
 	orderId: "GPA.1234-5678-9012-34567",
 	purchaseStateContext: { purchaseState: "PURCHASED" },
@@ -54,7 +54,7 @@ const productPurchase = () => ({
 		{
 			productId: "credits_10",
 			productOfferDetails: {
-				consumptionState: "CONSUMPTION_STATE_YET_TO_BE_CONSUMED",
+				consumptionState,
 				quantity: 1,
 				refundableQuantity: 1,
 			},
@@ -327,7 +327,61 @@ describe("GooglePlayBillingService", () => {
 		]);
 	});
 
-	it("surfaces consume failures after durable recording", async () => {
+	it("returns entitlements on repeated verification without consuming twice", async () => {
+		const overrides = { productPurchase: productPurchase() };
+		const { service, calls, repositoryInputs } = serviceFixture(overrides);
+		const input = {
+			billingAccountId: "user_1",
+			purchaseKind: "consumable" as const,
+			purchaseToken: "purchase_token_2",
+			productId: "credits_10",
+		};
+
+		await expect(service.verifyPurchase(input)).resolves.toEqual(snapshot);
+		overrides.productPurchase = productPurchase("CONSUMPTION_STATE_CONSUMED");
+		await expect(service.verifyPurchase(input)).resolves.toEqual(snapshot);
+
+		expect(calls.filter((call) => call.startsWith("consume-product:"))).toEqual([
+			"consume-product:credits_10:purchase_token_2",
+		]);
+		expect(repositoryInputs).toHaveLength(2);
+		expect(repositoryInputs[1]).toMatchObject({
+			purchaseStatus: "completed",
+			consumptionState: "CONSUMPTION_STATE_CONSUMED",
+		});
+	});
+
+	it("recovers a lost consume response when Google reports the purchase consumed", async () => {
+		const overrides = {
+			productPurchase: productPurchase(),
+			consumeError: new BillingError(
+				"Google Play purchase mutation failed",
+				"GOOGLE_PLAY_MUTATION_FAILED",
+				502,
+			),
+		};
+		const { service, calls, repositoryInputs } = serviceFixture(overrides);
+		const input = {
+			billingAccountId: "user_1",
+			purchaseKind: "consumable" as const,
+			purchaseToken: "purchase_token_2",
+			productId: "credits_10",
+		};
+
+		await expect(service.verifyPurchase(input)).rejects.toMatchObject({
+			code: "GOOGLE_PLAY_MUTATION_FAILED",
+			status: 502,
+		});
+		overrides.productPurchase = productPurchase("CONSUMPTION_STATE_CONSUMED");
+		await expect(service.verifyPurchase(input)).resolves.toEqual(snapshot);
+
+		expect(calls.filter((call) => call.startsWith("consume-product:"))).toEqual([
+			"consume-product:credits_10:purchase_token_2",
+		]);
+		expect(repositoryInputs).toHaveLength(2);
+	});
+
+	it("retries consume failures after durable recording while the purchase remains unconsumed", async () => {
 		const { service, calls } = serviceFixture({
 			consumeError: new BillingError(
 				"Google Play purchase mutation failed",
@@ -336,15 +390,22 @@ describe("GooglePlayBillingService", () => {
 			),
 		});
 
-		await expect(
-			service.verifyPurchase({
-				billingAccountId: "user_1",
-				purchaseKind: "consumable",
-				purchaseToken: "purchase_token_2",
-				productId: "credits_10",
-			}),
-		).rejects.toMatchObject({ code: "GOOGLE_PLAY_MUTATION_FAILED" });
-		expect(calls).toContain("record:purchase_token_2");
+		for (let attempt = 0; attempt < 2; attempt++) {
+			await expect(
+				service.verifyPurchase({
+					billingAccountId: "user_1",
+					purchaseKind: "consumable",
+					purchaseToken: "purchase_token_2",
+					productId: "credits_10",
+				}),
+			).rejects.toMatchObject({ code: "GOOGLE_PLAY_MUTATION_FAILED", status: 502 });
+		}
+		expect(calls.filter((call) => /^(record|consume-product):/.test(call))).toEqual([
+			"record:purchase_token_2",
+			"consume-product:credits_10:purchase_token_2",
+			"record:purchase_token_2",
+			"consume-product:credits_10:purchase_token_2",
+		]);
 	});
 
 	// capability: webhook.ingest
