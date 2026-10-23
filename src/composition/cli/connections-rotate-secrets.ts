@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/bun-sql";
 import { DomainEventDeliveryRepository } from "../../db/repository/domain-events";
 import type { TransactionalQueryExecutor } from "../../db/repository/types";
 import * as billingSchema from "../../db/schema";
+import { loadPostgresPreparedStatements } from "../../env";
 import { loadConnectionCipher } from "../../platform/connections/cipher";
 import { rotateConnectionSecrets } from "../../platform/connections/rotation";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
@@ -13,11 +14,19 @@ if (import.meta.main) {
 	await rotateSecrets();
 }
 
+export function openRotationDatabase(
+	source: Record<string, string | undefined> = process.env,
+	connect: (uri: string, options: { max: number; prepare: boolean }) => SQL = (uri, options) =>
+		new SQL(uri, options),
+): SQL {
+	const uri = source.POSTGRES_URI;
+	if (!uri) throw new Error("POSTGRES_URI is required");
+	return connect(uri, { max: 1, prepare: loadPostgresPreparedStatements(source) });
+}
+
 async function rotateSecrets(): Promise<void> {
 	const cipher = loadConnectionCipher();
-	const uri = process.env.POSTGRES_URI;
-	if (!uri) throw new Error("POSTGRES_URI is required");
-	const sql = new SQL(uri, { max: 1 });
+	const sql = openRotationDatabase();
 	try {
 		let count = 0;
 		for (;;) {

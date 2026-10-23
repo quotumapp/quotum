@@ -291,6 +291,8 @@ driver's existing connection-string behavior. The pool settings also apply to sh
 clients such as bootstrap, catalog provision, usage scopes and partition commands. Separate
 operator clients, secret rotation, migrations and test-only pools retain their existing settings.
 The prepared-statement switch remains `BILLING_POSTGRES_PREPARED_STATEMENTS`.
+Bootstrap, catalog provision and connection-secret rotation honor the same setting as the server;
+secret rotation keeps its single-connection pool.
 
 These values are read at startup; restart every service process to change its pool. No database
 migration is needed. The service bounds pooled sessions with these default limits:
