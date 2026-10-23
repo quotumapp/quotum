@@ -1,6 +1,7 @@
 import type { BillingProvider } from "../billing/types";
 import type {
 	ExpiredSubscriptionReconciliationResult,
+	PlanGrantReconciliationOptions,
 	PlanGrantReconciliationResult,
 	ProviderSubscriptionReconciliationRow,
 	TrialEndingNoticeResult,
@@ -42,7 +43,10 @@ export type SubscriptionReconciliationProviderSelector = (
 export interface SubscriptionReconciliationRepository {
 	reconcileExpiredSubscriptions(limit: number): Promise<ExpiredSubscriptionReconciliationResult>;
 	enqueueTrialEndingNotices(limit: number): Promise<TrialEndingNoticeResult>;
-	reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult>;
+	reconcilePlanGrants(
+		limit: number,
+		options?: PlanGrantReconciliationOptions,
+	): Promise<PlanGrantReconciliationResult>;
 	claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
@@ -72,6 +76,8 @@ export interface SubscriptionReconciliationWorkerOptions {
 	maxAttempts: number;
 	batchSize: number;
 	staleAfterMs: number;
+	defaultPlanScanSize?: number;
+	defaultPlanMaxBatches?: number;
 	repository: SubscriptionReconciliationRepository;
 	providers: SubscriptionReconciliationProviders | SubscriptionReconciliationProviderSelector;
 	projectContextResolver: ProjectInstanceContextResolver;
@@ -112,12 +118,15 @@ export class SubscriptionReconciliationWorker {
 	private readonly logger: BillingLogger;
 	private readonly metrics: BillingMetrics;
 	private readonly leaseHeartbeatIntervalMs: number;
+	private readonly defaultPlanOptions: PlanGrantReconciliationOptions | undefined;
 
 	constructor({
 		workerId,
 		maxAttempts,
 		batchSize,
 		staleAfterMs,
+		defaultPlanScanSize,
+		defaultPlanMaxBatches,
 		repository,
 		providers,
 		projectContextResolver,
@@ -131,6 +140,10 @@ export class SubscriptionReconciliationWorker {
 		this.maxAttempts = maxAttempts;
 		this.batchSize = batchSize;
 		this.staleAfterMs = staleAfterMs;
+		this.defaultPlanOptions =
+			defaultPlanScanSize === undefined && defaultPlanMaxBatches === undefined
+				? undefined
+				: { scanSize: defaultPlanScanSize, maxBatches: defaultPlanMaxBatches };
 		this.repository = repository;
 		this.providers = providers;
 		this.projectContextResolver = projectContextResolver;
@@ -187,7 +200,10 @@ export class SubscriptionReconciliationWorker {
 			const expired = await this.repository.reconcileExpiredSubscriptions(this.batchSize);
 			result.expiredSubscriptions = expired.expiredSubscriptions;
 			result.affectedCustomers = expired.affectedCustomers;
-			const grants = await this.repository.reconcilePlanGrants(this.batchSize);
+			const grants =
+				this.defaultPlanOptions === undefined
+					? await this.repository.reconcilePlanGrants(this.batchSize)
+					: await this.repository.reconcilePlanGrants(this.batchSize, this.defaultPlanOptions);
 			result.expiredPlanGrants = grants.expiredPlanGrants;
 			result.defaultPlanGrants = grants.defaultPlanGrants;
 			result.defaultPlanSkipped = grants.defaultPlanSkipped;

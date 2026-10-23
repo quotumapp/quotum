@@ -39,14 +39,14 @@ export function createStripeAppEvents(
 	repository: ConnectionRepository,
 	oauth: StripeOAuthPort,
 	persistence: MerchantSql,
-	options: { trustProxyHeaders?: boolean } = {},
+	options: { trustProxyHeaders?: boolean; batchSize?: number } = {},
 ) {
 	const events = new StripeAppEvents(persistence);
 	const resolver = new PostgresProjectInstanceContextResolver();
 	const connections = createRuntimeConnectionResolver(repository, persistence);
 	const billing = new BillingRepository();
 	const runOnce = async () => {
-		for (const event of await events.pending()) {
+		for (const event of await events.pending(options.batchSize)) {
 			const mapping = await events.mapping(event.account_id, event.livemode);
 			if (!mapping) continue; // Quarantined until a unique account/mode connection exists.
 			try {

@@ -122,6 +122,7 @@ import type {
 	GetStripeProviderCustomerInput,
 	GooglePlayRecordingResult,
 	LinkStripeProviderCustomerInput,
+	PlanGrantReconciliationOptions,
 	PlanGrantReconciliationResult,
 	PrepareStripeCheckoutRequestInput,
 	ProjectionSyncJobRow,
@@ -172,6 +173,7 @@ export type {
 	GetStripeProviderCustomerInput,
 	GooglePlayRecordingResult,
 	LinkStripeProviderCustomerInput,
+	PlanGrantReconciliationOptions,
 	PlanGrantReconciliationResult,
 	PrepareStripeCheckoutRequestInput,
 	ProjectionSyncJobRow,
@@ -541,8 +543,11 @@ export class BillingRepository {
 		};
 	}
 
-	async reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult> {
-		return await this.planGrants.reconcilePlanGrants(limit);
+	async reconcilePlanGrants(
+		limit: number,
+		options?: PlanGrantReconciliationOptions,
+	): Promise<PlanGrantReconciliationResult> {
+		return await this.planGrants.reconcilePlanGrants(limit, options);
 	}
 
 	async claimProviderSubscriptionReconciliations(

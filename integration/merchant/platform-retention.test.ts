@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import type { QuotumScheduledJob } from "../../src/composition/runtime-lifecycle";
+import type { BillingEnv } from "../../src/env";
 import type {
 	PlatformQuery,
 	PlatformQueryExecutor,
@@ -7,7 +8,7 @@ import type {
 import { PLATFORM_RETENTION_TABLES, PlatformRetentionSweep } from "../../src/platform/retention";
 import { createBillingRuntime } from "../../src/runtime";
 import { createIntegrationBillingEnv } from "../../tests/integration/helpers/local-postgres";
-import { merchantFixture, testConfig } from "./fixture";
+import { isolatedStripeOAuthPort, merchantFixture, testConfig } from "./fixture";
 
 const fixture = merchantFixture();
 const { sql } = fixture;
@@ -463,14 +464,24 @@ describe("runtime wiring", () => {
 		QUOTUM_AUTH_SECRET: testConfig.secret,
 	};
 
-	async function scheduledJobs(merchant: "merchant" | "headless"): Promise<QuotumScheduledJob[]> {
+	async function scheduledJobs(
+		merchant: "merchant" | "headless",
+		overrides: Partial<BillingEnv> = {},
+	): Promise<QuotumScheduledJob[]> {
 		const previous = Object.fromEntries(Object.keys(secrets).map((key) => [key, process.env[key]]));
 		Object.assign(process.env, secrets);
 		const jobs: QuotumScheduledJob[] = [];
 		const runtime = createBillingRuntime(
-			createIntegrationBillingEnv(process.env.POSTGRES_URI ?? ""),
+			createIntegrationBillingEnv(process.env.POSTGRES_URI ?? "", overrides),
 			{
-				merchant: merchant === "headless" ? null : { config: testConfig, mailer: fixture.mailer },
+				merchant:
+					merchant === "headless"
+						? null
+						: {
+								config: testConfig,
+								mailer: fixture.mailer,
+								stripeOAuth: isolatedStripeOAuthPort(),
+							},
 				scheduler: {
 					schedule(job) {
 						jobs.push(job);
@@ -490,6 +501,51 @@ describe("runtime wiring", () => {
 		}
 		return jobs;
 	}
+
+	it("passes independent worker intervals to the scheduler in both runtime modes", async () => {
+		const overrides = {
+			projectionSyncPollIntervalMs: 101,
+			eventDeliveryPollIntervalMs: 102,
+			storeEventReplayPollIntervalMs: 103,
+			subscriptionReconciliationPollIntervalMs: 104,
+			meteringMaintenancePollIntervalMs: 105,
+			recurringBillingPollIntervalMs: 106,
+			autoTopupPollIntervalMs: 107,
+			promotionMaintenancePollIntervalMs: 108,
+			customerErasurePollIntervalMs: 109,
+			providerOperationRecoveryPollIntervalMs: 110,
+			usagePartitionUpkeepPollIntervalMs: 111,
+			stripeAppEventsPollIntervalMs: 112,
+			platformRetentionPollIntervalMs: 113,
+			postgresMaxConnections: 2,
+		};
+		const expected = {
+			projection_sync: 101,
+			domain_event_delivery: 102,
+			store_event_replay: 103,
+			subscription_reconciliation: 104,
+			metering_maintenance: 105,
+			recurring_billing: 106,
+			auto_topup: 107,
+			promotion_maintenance: 108,
+			customer_erasure: 109,
+			provider_operation_recovery: 110,
+			usage_partition_upkeep: 111,
+		};
+		for (const mode of ["headless", "merchant"] as const) {
+			const jobs = await scheduledJobs(mode, overrides);
+			const intervals = Object.fromEntries(jobs.map((job) => [job.name, job.pollIntervalMs]));
+			expect(intervals).toMatchObject(expected);
+			if (mode === "merchant") {
+				expect(intervals.stripe_app_events).toBe(112);
+				expect(intervals.platform_retention).toBe(113);
+			} else {
+				expect(intervals).not.toHaveProperty("platform_retention");
+			}
+		}
+		const disabled = await scheduledJobs("headless", { ...overrides, usagePartitionUpkeep: false });
+		expect(disabled.map((job) => job.name)).not.toContain("usage_partition_upkeep");
+	});
 
 	it("schedules the sweep when the merchant platform is enabled and it deletes expired rows", async () => {
 		const jobs = await scheduledJobs("merchant");

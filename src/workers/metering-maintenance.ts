@@ -12,23 +12,29 @@ import {
 } from "../observability/metrics";
 
 export interface MeteringMaintenanceRepository {
-	runMeteringMaintenance(limit: number): Promise<MeteringMaintenanceResult>;
+	runMeteringMaintenance(
+		limit: number,
+		options?: { retentionBudgetMs?: number },
+	): Promise<MeteringMaintenanceResult>;
 }
 
 export class MeteringMaintenanceWorker {
 	private readonly repository: MeteringMaintenanceRepository;
 	private readonly batchSize: number;
+	private readonly retentionBudgetMs: number | undefined;
 	private readonly logger: BillingLogger;
 	private readonly metrics: BillingMetrics;
 
 	constructor({
 		repository,
 		batchSize = 250,
+		retentionBudgetMs,
 		logger = createNoopBillingLogger(),
 		metrics = createNoopBillingMetrics(),
 	}: {
 		repository: MeteringMaintenanceRepository;
 		batchSize?: number;
+		retentionBudgetMs?: number;
 		logger?: BillingLogger;
 		metrics?: BillingMetrics;
 	}) {
@@ -37,13 +43,19 @@ export class MeteringMaintenanceWorker {
 		}
 		this.repository = repository;
 		this.batchSize = batchSize;
+		this.retentionBudgetMs = retentionBudgetMs;
 		this.logger = logger;
 		this.metrics = metrics;
 	}
 
 	async runOnce(): Promise<MeteringMaintenanceResult> {
 		try {
-			const result = await this.repository.runMeteringMaintenance(this.batchSize);
+			const result = await this.repository.runMeteringMaintenance(
+				this.batchSize,
+				this.retentionBudgetMs === undefined
+					? undefined
+					: { retentionBudgetMs: this.retentionBudgetMs },
+			);
 			safelyIncrementBillingMetric(this.metrics, "billing_metering_maintenance_runs_total", {
 				result: "succeeded",
 			});

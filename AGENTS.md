@@ -166,8 +166,10 @@ their existing contract. Review `docs/metering.md` and the reservation cutover i
 - PostgreSQL 18 is the minimum ([docs/deployment.md](docs/deployment.md#postgres)). UUID keys
   default to `uuidv7()` in the billing baselines and to `gen_random_uuid()` in platform tables,
   whose ids `src/composition/project-instance-persistence.ts` matches against UUID versions 1 to
-  5; nothing installs `uuid-ossp`. `src/db/client.ts` ends a pooled transaction after two minutes
-  (`transaction_timeout`); a deliberate whole-table read lifts that with `startSnapshotRead`.
+  5; nothing installs `uuid-ossp`. Requests and workers share one pool, capped at 20 connections by
+  default. `BILLING_POSTGRES_*` overrides its size, idle/lifetime/connect timing and session limits;
+  `transaction_timeout` defaults to two minutes. A deliberate whole-table read lifts that limit with
+  `startSnapshotRead`. See [deployment](docs/deployment.md#postgres) for units, zero values and scope.
 - Bind JSON as text and cast on the server (the `jsonb()` helper in `src/db/repository/query.ts`);
   a bare `::jsonb` cast on a string parameter is encoded twice. Platform SQL writes
   `${JSON.stringify(value)}::text::jsonb`; `tests/platform/jsonb-binding.test.ts` rejects a bare
@@ -207,6 +209,13 @@ networks (`src/composition/projection-destinations.ts`). Provider credentials an
 projection secrets are encrypted, database-owned connections resolved per project by
 `RuntimeConnectionResolver`; there is no env-level customer list, and
 `BILLING_PROJECT_RUNTIME_JSON` / `BILLING_PROJECTS_JSON` are rejected on purpose.
+
+Worker throughput overrides are parsed centrally and passed through composition, never read from
+the environment inside a worker or repository. Per-worker polling overrides retain the existing
+shared-variable fallbacks when unset; batch, concurrency and work-budget defaults stay unchanged.
+Keep repository batch caps and lease/budget relationships enforced at startup. See
+[worker tuning](docs/deployment.md#worker-tuning); lease, heartbeat, retry and retention policies
+remain separate from throughput configuration.
 
 ### MCP
 

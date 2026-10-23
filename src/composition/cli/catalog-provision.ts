@@ -2,6 +2,7 @@ import type { ProjectCatalogImport } from "../../catalog/import-config";
 import { parseCatalogImports } from "../../catalog/import-config";
 import { syncConfiguredCatalog } from "../../catalog/provision";
 import { createBillingDatabaseConnection } from "../../db/client";
+import { loadPostgresPreparedStatements, loadPostgresSettings } from "../../env";
 import { createCliBillingLogger } from "../../observability/logger";
 import type { ProjectInstanceContextResolver } from "../../projects/context";
 import { PostgresProjectInstanceContextResolver } from "../project-instance-persistence";
@@ -14,7 +15,11 @@ async function provisionCatalog(): Promise<void> {
 	const logger = createCliBillingLogger();
 	const postgresUri = requiredEnvironmentValue("POSTGRES_URI");
 	const imports = parseCatalogImports(requiredEnvironmentValue("BILLING_CATALOG_IMPORT_JSON"));
-	const connection = createBillingDatabaseConnection({ postgresUri });
+	const connection = createBillingDatabaseConnection({
+		postgresUri,
+		...loadPostgresSettings(),
+		postgresPreparedStatements: loadPostgresPreparedStatements(),
+	});
 	try {
 		const resolver = new PostgresProjectInstanceContextResolver(connection.sql);
 		await assertDevelopmentCatalogImports(imports, resolver);

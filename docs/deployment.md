@@ -269,9 +269,32 @@ Quotum requires PostgreSQL 18 or newer: the billing baselines default their UUID
 `uuidv7()`. On an older server `quotum migrate` fails at the first billing baseline. The only
 extension is `pg_trgm`, which the platform baseline creates.
 
-The service bounds every pooled session with three limits:
+Requests and workers share one runtime pool, capped at 20 connections per process by default.
+Replicas each own a pool, so size their combined connection budget against the database's capacity
+and leave room for operators and other clients. These optional overrides keep the current defaults:
 
-| Setting | Limit | When it is exceeded |
+| Variable | Default | Range |
+| --- | --- | --- |
+| `BILLING_POSTGRES_MAX_CONNECTIONS` | `20` | 1–2147483647 |
+| `BILLING_POSTGRES_IDLE_TIMEOUT_SECONDS` | `60` | 0–2147483; zero disables idle connection expiry |
+| `BILLING_POSTGRES_MAX_LIFETIME_SECONDS` | `0` | 0–2147483; zero disables lifetime expiry |
+| `BILLING_POSTGRES_CONNECTION_TIMEOUT_SECONDS` | Driver default, 30 seconds | 1–2147483 |
+| `BILLING_POSTGRES_STATEMENT_TIMEOUT_MS` | `30000` | 0–2147483647 |
+| `BILLING_POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS` | `30000` | 0–2147483647 |
+| `BILLING_POSTGRES_TRANSACTION_TIMEOUT_MS` | `120000` | 0–2147483647 |
+
+Values are base-ten integers; surrounding whitespace is accepted, but blank, fractional, exponent,
+negative and out-of-range values fail startup. Zero disables a PostgreSQL session timeout.
+Unset connection-establishment timeout settings leave the Bun option unspecified, preserving the
+driver's existing connection-string behavior. The pool settings also apply to shared-factory
+clients such as bootstrap, catalog provision, usage scopes and partition commands. Separate
+operator clients, secret rotation, migrations and test-only pools retain their existing settings.
+The prepared-statement switch remains `BILLING_POSTGRES_PREPARED_STATEMENTS`.
+
+These values are read at startup; restart every service process to change its pool. No database
+migration is needed. The service bounds pooled sessions with these default limits:
+
+| Setting | Default limit | When it is exceeded |
 | --- | --- | --- |
 | `statement_timeout` | 30 seconds | The statement is cancelled; the session continues. |
 | `idle_in_transaction_session_timeout` | 30 seconds | The server ends the session. |
@@ -281,6 +304,11 @@ A session that the server ends reaches the service as a closed connection, and t
 rolls back; the Postgres log names the limit. `quotum usage scopes` reads whole tables in one
 snapshot and lifts the transaction limit for it. `quotum migrate` runs without a statement limit
 and sets no transaction limit.
+
+The three timeouts can be set independently. A nonzero `transaction_timeout` shorter than or equal
+to either other timeout takes precedence over that longer limit and ends the session; the default
+two-minute transaction limit leaves a slow statement's 30-second cancellation in control first.
+Partition maintenance retains its existing transaction-local DDL timeout overrides.
 
 The driver sends the three settings as startup parameters. PgBouncer refuses a connection that
 carries a startup parameter it does not track, with `unsupported startup parameter`, so list all
@@ -550,6 +578,8 @@ Defaults in parentheses.
   1.21 or one configured without `max_prepared_statements`; the hot path then runs its statements
   one round trip at a time. A pooler must also accept the [session limits](#postgres).
 - `BILLING_WORKER_ID` (generated).
+- Database pool and session overrides are listed under [Postgres](#postgres); per-worker throughput
+  overrides are listed under [Worker tuning](#worker-tuning).
 - `BILLING_WORKER_POLL_INTERVAL_MS` (`5000`).
 - `BILLING_PROJECTION_SYNC_MAX_ATTEMPTS` (`10`).
 - `BILLING_EVENT_DELIVERY_MAX_ATTEMPTS` (`12`, about 34 hours of retries) and
@@ -583,6 +613,65 @@ Defaults in parentheses.
 Removed and rejected when supplied: `BILLING_PROJECT_RUNTIME_JSON`, `BILLING_PROJECTS_JSON`, and
 `BILLING_PROJECTION_ADAPTER`. Provider and projection settings live in encrypted, versioned
 connections owned by the merchant platform.
+
+### Worker tuning
+
+Every override is optional and takes effect on restart. Defaults and shared polling fallbacks
+remain unchanged when a variable is absent. Workers parse no environment variables themselves;
+the runtime passes the validated settings through their existing ports.
+
+For each `BILLING_` worker prefix below, append `_POLL_INTERVAL_MS` or `_BATCH_SIZE`. Use
+`QUOTUM_PLATFORM_RETENTION` for the merchant retention sweep. Existing variables keep their names.
+
+| Prefix | Default interval (ms) | Default batch | Batch maximum |
+| --- | --- | --- | --- |
+| `BILLING_PROJECTION_SYNC` | 5000 | 25 | 100 |
+| `BILLING_EVENT_DELIVERY` | 5000 | 25 | 100 |
+| `BILLING_STORE_EVENT_REPLAY` | 5000 | 25 | 100 |
+| `BILLING_SUBSCRIPTION_RECONCILIATION` | 60000 | 25 | 100 |
+| `BILLING_METERING_MAINTENANCE` | 60000 | 250 | 1000 |
+| `BILLING_RECURRING_BILLING` | 60000 | 25 | 2147483647 |
+| `BILLING_AUTO_TOPUP` | 60000 | 25 | 100 |
+| `BILLING_PROMOTION_MAINTENANCE` | 60000 | 25 | 214748364 |
+| `BILLING_CUSTOMER_ERASURE` | 5000 | 500 | 5000 |
+| `BILLING_PROVIDER_OPERATION_RECOVERY` | 10000 | 10 | 100 |
+| `BILLING_USAGE_PARTITION_UPKEEP` | 900000 | — | — |
+| `BILLING_STRIPE_APP_EVENTS` | 5000 | 100 | 100 |
+| `QUOTUM_PLATFORM_RETENTION` | 900000 | 1000 | 2147483647 |
+
+Without a per-worker interval, projection delivery, outbound webhook delivery and customer erasure
+inherit `BILLING_WORKER_POLL_INTERVAL_MS`; recurring billing, automatic top-ups and promotion
+maintenance inherit `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`; Stripe App processing inherits
+`BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS`. An explicit per-worker interval takes precedence.
+The usage partition and merchant platform switches still decide whether their jobs are scheduled;
+Stripe App processing still requires Apps OAuth configuration.
+
+Additional independent throughput controls:
+
+| Variable | Default | Maximum |
+| --- | --- | --- |
+| `BILLING_PROJECTION_SYNC_CONCURRENCY` | 5 | 2147483647 |
+| `BILLING_EVENT_DELIVERY_CONCURRENCY` | 5 | 2147483647 |
+| `BILLING_EVENT_DELIVERY_DISPATCH_BATCH_SIZE` | 100 | 100 |
+| `BILLING_EVENT_DELIVERY_RETENTION_BATCH_SIZE` | 1000 | 1000 |
+| `BILLING_EVENT_DELIVERY_RETENTION_SWEEP_INTERVAL_MS` | 600000 | 2147483647 |
+| `BILLING_METERING_MAINTENANCE_RETENTION_BUDGET_MS` | 20000 | 2147483647 |
+| `BILLING_SUBSCRIPTION_RECONCILIATION_DEFAULT_PLAN_SCAN_SIZE` | 1000 | 2147483647 |
+| `BILLING_SUBSCRIPTION_RECONCILIATION_DEFAULT_PLAN_MAX_BATCHES` | 10 | 2147483647 |
+| `BILLING_CUSTOMER_ERASURE_BUDGET_MS` | 15000 | 299999; must stay below the unchanged 300-second lease |
+| `BILLING_CUSTOMER_ERASURE_MAX_CLAIMS` | 5 | 2147483647 |
+| `BILLING_CUSTOMER_ERASURE_SWEEP_INTERVAL_MS` | 60000 | 2147483647 |
+| `QUOTUM_PLATFORM_RETENTION_MAX_BATCHES_PER_TABLE` | 25 | 2147483647 |
+
+All worker settings require positive base-ten integers; zero, blanks and out-of-range settings fail
+startup instead of being silently clamped. The large integer ceilings are representation limits,
+not recommended production sizes. Promotion maintenance still releases up to ten times its batch
+size of expired reservations. Concurrency applies only to projection and outbound webhook delivery,
+and is bounded by the claimed batch; other workers keep their existing sequential execution.
+
+Lease durations, heartbeat timing, retry delays and retention windows remain unchanged. Start with
+the defaults, then tune against database capacity, request latency and worker backlog using the
+[load lane](load-testing.md). Increasing the pool or a batch alone does not establish more capacity.
 
 ### Rate limits
 

@@ -11,6 +11,7 @@ import {
 	type DomainEventDeliveryStore,
 	DomainEventDeliveryWorker,
 } from "../../src/workers/domain-event-delivery";
+import { createDeferred } from "../helpers/deferred";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const project = projectInstanceContext("acme");
@@ -118,6 +119,63 @@ function worker(
 }
 
 describe("domain event delivery worker", () => {
+	it("bounds active deliveries to its configured concurrency", async () => {
+		const { store: value } = store([delivery(), delivery(), delivery()]);
+		const started = createDeferred();
+		const release = createDeferred();
+		let active = 0;
+		let peak = 0;
+		const post: WebhookPost = async () => {
+			active += 1;
+			peak = Math.max(peak, active);
+			if (active === 2) started.resolve();
+			await release.promise;
+			active -= 1;
+			return { status: 200, body: "" };
+		};
+		const running = worker(value, post).runOnce();
+		await started.promise;
+		expect(active).toBe(2);
+		release.resolve();
+		expect((await running).succeeded).toBe(3);
+		expect(peak).toBe(2);
+	});
+
+	it("uses independent dispatch, claim and retention budgets and the sweep cadence", async () => {
+		const { calls, store: value } = store([]);
+		let clock = now.getTime();
+		const deliveryWorker = new DomainEventDeliveryWorker({
+			workerId: "tuned",
+			maxAttempts: 12,
+			retentionDays: 30,
+			batchSize: 3,
+			concurrency: 1,
+			dispatchBatchSize: 7,
+			retentionBatchSize: 11,
+			retentionSweepIntervalMs: 100,
+			store: value,
+			sealer: () => sealer([]),
+			post: recordingPost(200).post,
+			projectContextResolver: projectContextResolver({ contexts: [project] }),
+			now: () => new Date(clock),
+		});
+		await deliveryWorker.runOnce();
+		clock += 99;
+		await deliveryWorker.runOnce();
+		clock += 1;
+		await deliveryWorker.runOnce();
+		expect(
+			calls.filter((call) => call.method === "dispatchEvents").map((call) => call.args),
+		).toEqual([[7], [7], [7]]);
+		expect(calls.find((call) => call.method === "claimDeliveries")?.args).toEqual(["tuned", 3]);
+		expect(
+			calls.filter((call) => call.method === "deleteExpiredEvents").map((call) => call.args),
+		).toEqual([
+			[30, 11],
+			[30, 11],
+		]);
+	});
+
 	it("fans out, sends a signed envelope and marks the delivery delivered", async () => {
 		const { calls, store: value } = store([
 			delivery({ customerId: "customer-42", billingAccountId: "user_42" }),

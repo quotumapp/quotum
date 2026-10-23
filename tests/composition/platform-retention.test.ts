@@ -42,6 +42,21 @@ class ScriptedExecutor implements PlatformQueryExecutor {
 }
 
 describe("platform retention job wiring", () => {
+	it("forwards the poll interval and bounded sweep sizes", async () => {
+		const executor = new ScriptedExecutor(() => 100);
+		const [job] = platformRetentionJobs({
+			merchantEnabled: true,
+			executor,
+			logger: new RecordingLogger(),
+			pollIntervalMs: 1234,
+			options: { batchSize: 3, maxBatchesPerTable: 2 },
+		});
+		expect(job?.pollIntervalMs).toBe(1234);
+		await job?.runOnce();
+		expect(executor.calls).toHaveLength(PLATFORM_RETENTION_TABLES.length * 2);
+		for (const call of executor.calls) expect(call.values[1]).toBe(3);
+	});
+
 	it("schedules one sweep when the merchant platform is enabled", () => {
 		const jobs = platformRetentionJobs({
 			merchantEnabled: true,

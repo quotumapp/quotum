@@ -4,6 +4,7 @@ import type { BillingEnv } from "../env";
 import { loadEnv } from "../env";
 import { sqlstateOf } from "./postgres-errors";
 import * as schema from "./schema";
+import { type PostgresSettings, resolvePostgresSettings } from "./settings";
 
 export type BillingSchema = typeof schema;
 export type BillingDatabase = BunSQLDatabase<BillingSchema>;
@@ -19,28 +20,27 @@ export interface PostgresHealthSnapshot {
 	error?: string;
 }
 
-const postgresStatementTimeoutMs = 30_000;
-const postgresIdleInTransactionSessionTimeoutMs = 30_000;
-// Ends a transaction that keeps issuing short statements, which neither limit above does. It
-// stays above the statement timeout so that a slow statement is still cancelled on its own
-// instead of losing its session.
-const postgresTransactionTimeoutMs = 120_000;
+type DatabaseConfig = Pick<BillingEnv, "postgresUri"> &
+	Partial<Pick<BillingEnv, "postgresPreparedStatements">> &
+	PostgresSettings;
 
-export function createBillingDatabaseConnection(
-	env: Pick<BillingEnv, "postgresUri"> & Partial<Pick<BillingEnv, "postgresPreparedStatements">>,
-) {
+export function createBillingDatabaseConnection(env: DatabaseConfig) {
+	const settings = resolvePostgresSettings(env);
 	const sql = new SQL(env.postgresUri, {
-		max: 20,
-		idleTimeout: 60,
-		maxLifetime: 0,
+		max: settings.postgresMaxConnections,
+		idleTimeout: settings.postgresIdleTimeoutSeconds,
+		maxLifetime: settings.postgresMaxLifetimeSeconds,
+		...(settings.postgresConnectionTimeoutSeconds === undefined
+			? {}
+			: { connectionTimeout: settings.postgresConnectionTimeoutSeconds }),
 		// Named prepared statements let the driver pipeline the independent statements the
 		// metering path issues together. Disable only behind a transaction-mode pooler that
 		// cannot hold them.
 		prepare: env.postgresPreparedStatements ?? true,
 		connection: {
-			statement_timeout: postgresStatementTimeoutMs,
-			idle_in_transaction_session_timeout: postgresIdleInTransactionSessionTimeoutMs,
-			transaction_timeout: postgresTransactionTimeoutMs,
+			statement_timeout: settings.postgresStatementTimeoutMs,
+			idle_in_transaction_session_timeout: settings.postgresIdleInTransactionSessionTimeoutMs,
+			transaction_timeout: settings.postgresTransactionTimeoutMs,
 		},
 	});
 
@@ -51,25 +51,31 @@ export function createBillingDatabaseConnection(
 }
 
 let defaultConnection: BillingDatabaseConnection | null = null;
-let defaultConnectionConfig: { postgresUri: string; postgresPreparedStatements: boolean } | null =
-	null;
+let defaultConnectionConfig:
+	| (ReturnType<typeof resolvePostgresSettings> & {
+			postgresUri: string;
+			postgresPreparedStatements: boolean;
+	  })
+	| null = null;
 
 /** Composition selects the one process-owned database before constructing repositories. */
-export function configureDefaultConnection(
-	env: Pick<BillingEnv, "postgresUri" | "postgresPreparedStatements">,
-): void {
+export function configureDefaultConnection(env: DatabaseConfig): void {
+	const config = {
+		...resolvePostgresSettings(env),
+		postgresUri: env.postgresUri,
+		postgresPreparedStatements: env.postgresPreparedStatements ?? true,
+	};
+	const previous = defaultConnectionConfig;
 	if (
-		defaultConnectionConfig &&
-		(defaultConnectionConfig.postgresUri !== env.postgresUri ||
-			defaultConnectionConfig.postgresPreparedStatements !== env.postgresPreparedStatements)
+		previous &&
+		Object.keys({ ...previous, ...config }).some(
+			(key) => Reflect.get(previous, key) !== Reflect.get(config, key),
+		)
 	) {
 		throw new Error("The process database is already configured differently");
 	}
-	defaultConnectionConfig = {
-		postgresUri: env.postgresUri,
-		postgresPreparedStatements: env.postgresPreparedStatements,
-	};
 	defaultConnection ??= createBillingDatabaseConnection(env);
+	defaultConnectionConfig = config;
 }
 
 function getDefaultConnection(): BillingDatabaseConnection {

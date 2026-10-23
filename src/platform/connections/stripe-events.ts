@@ -11,10 +11,10 @@ export class StripeAppEvents {
 		await this
 			.sql`INSERT INTO platform_stripe_app_events(event_id,account_id,livemode,payload) VALUES(${event.event_id},${event.account_id},${event.livemode},${JSON.stringify(event.payload)}::text::jsonb) ON CONFLICT(event_id) DO NOTHING`;
 	}
-	async pending() {
+	async pending(limit = 100) {
 		return this.sql<
 			SavedStripeAppEvent[]
-		>`SELECT e.event_id,e.account_id,e.livemode,e.payload FROM platform_stripe_app_events e JOIN platform_connections c ON c.stripe_account_id=e.account_id AND c.stripe_livemode=e.livemode JOIN platform_connection_versions v ON v.id=c.active_version_id AND v.connection_id=c.id WHERE v.settings->>'authMethod'='oauth' AND e.processed_at IS NULL AND e.next_attempt_at<=now() ORDER BY e.next_attempt_at,e.created_at LIMIT 100`;
+		>`SELECT e.event_id,e.account_id,e.livemode,e.payload FROM platform_stripe_app_events e JOIN platform_connections c ON c.stripe_account_id=e.account_id AND c.stripe_livemode=e.livemode JOIN platform_connection_versions v ON v.id=c.active_version_id AND v.connection_id=c.id WHERE v.settings->>'authMethod'='oauth' AND e.processed_at IS NULL AND e.next_attempt_at<=now() ORDER BY e.next_attempt_at,e.created_at LIMIT ${limit}`;
 	}
 	async defer(id: string) {
 		await this

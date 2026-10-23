@@ -39,6 +39,7 @@ export interface MerchantRequestScope extends RequestScope {
 }
 
 export interface MerchantRuntimeOptions {
+	stripeAppEventsBatchSize?: number;
 	onMcpUnexpectedError?: (error: unknown, report: McpUnexpectedErrorReport) => void;
 	registerBackground?: (worker: { runOnce(): Promise<void> }) => void;
 	config?: MerchantConfig;
@@ -111,6 +112,7 @@ export function attachMerchantRuntime(
 		persistence,
 		oauth,
 		registerBackground: options.registerBackground,
+		stripeAppEventsBatchSize: options.stripeAppEventsBatchSize,
 		trustProxyHeaders: options.trustProxyHeaders,
 		logger: options.logger,
 	});
@@ -141,7 +143,7 @@ export function attachMerchantRuntime(
  */
 export function attachHeadlessRuntime(
 	staff: Elysia,
-	options: Pick<MerchantRuntimeOptions, "registerBackground"> & {
+	options: Pick<MerchantRuntimeOptions, "registerBackground" | "stripeAppEventsBatchSize"> & {
 		staffRequestScope?: RequestScope;
 		/** `BILLING_TRUST_PROXY_HEADERS`: key the setup ingress limiters on the forwarded client. */
 		trustProxyHeaders?: boolean;
@@ -157,6 +159,7 @@ export function attachHeadlessRuntime(
 			persistence,
 			oauth: createStripeOAuthPort(),
 			registerBackground: options.registerBackground,
+			stripeAppEventsBatchSize: options.stripeAppEventsBatchSize,
 			trustProxyHeaders: options.trustProxyHeaders,
 			logger: options.logger,
 		}),
@@ -169,6 +172,7 @@ function createConnectionIngress(input: {
 	persistence: MerchantSql;
 	oauth: StripeOAuthPort | null;
 	registerBackground?: MerchantRuntimeOptions["registerBackground"];
+	stripeAppEventsBatchSize?: number;
 	trustProxyHeaders?: boolean;
 	logger?: BillingLogger;
 }): AppElysia[] {
@@ -179,6 +183,7 @@ function createConnectionIngress(input: {
 	if (input.oauth) {
 		const events = createStripeAppEvents(input.repository, input.oauth, input.persistence, {
 			trustProxyHeaders,
+			batchSize: input.stripeAppEventsBatchSize,
 		});
 		ingress.push(events.app);
 		input.registerBackground?.(events);

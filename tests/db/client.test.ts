@@ -1,12 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { SQL } from "bun";
 import {
 	checkPostgresHealth,
+	closePool,
+	configureDefaultConnection,
+	createBillingDatabaseConnection,
 	getPostgresStartupHealth,
 	initializePostgresHealth,
 } from "../../src/db/client";
+import { postgresIntegerSettings } from "../../src/db/settings";
 
 type CountingSqlClient = ((
 	strings: TemplateStringsArray,
@@ -28,13 +30,65 @@ function asSqlClient(client: CountingSqlClient): SQL {
 }
 
 describe("billing database client", () => {
-	it("configures bounded Postgres session timeouts", () => {
-		const source = readFileSync(join(process.cwd(), "src/db/client.ts"), "utf8");
+	it("constructs a lazy pool with current defaults and applies pool overrides in driver units", async () => {
+		const base = { postgresUri: "postgres://test:fake@127.0.0.1:1/test" };
+		const original = createBillingDatabaseConnection(base);
+		const tuned = createBillingDatabaseConnection({
+			...base,
+			postgresMaxConnections: 3,
+			postgresIdleTimeoutSeconds: 7,
+			postgresMaxLifetimeSeconds: 120,
+			postgresConnectionTimeoutSeconds: 4,
+			postgresPreparedStatements: false,
+		});
+		try {
+			expect(original.sql.options).toMatchObject({
+				max: 20,
+				idleTimeout: 60_000,
+				maxLifetime: 0,
+				prepare: true,
+			});
+			expect(original.sql.options.connectionTimeout).toBeUndefined();
+			expect(tuned.sql.options).toMatchObject({
+				max: 3,
+				idleTimeout: 7000,
+				maxLifetime: 120_000,
+				connectionTimeout: 4000,
+				prepare: false,
+			});
+		} finally {
+			await original.sql.close();
+			await tuned.sql.close();
+		}
+	});
 
-		expect(source).toContain("connection:");
-		expect(source).toContain("statement_timeout");
-		expect(source).toContain("idle_in_transaction_session_timeout");
-		expect(source).toContain("transaction_timeout: postgresTransactionTimeoutMs");
+	it("rejects changing any process-owned database setting and accepts equivalent defaults", async () => {
+		const base = {
+			postgresUri: "postgres://test:fake@127.0.0.1:1/test",
+			postgresPreparedStatements: true,
+		};
+		try {
+			configureDefaultConnection(base);
+			expect(() =>
+				configureDefaultConnection({ ...base, postgresMaxConnections: 20 }),
+			).not.toThrow();
+			for (const field of Object.keys(postgresIntegerSettings)) {
+				expect(() => configureDefaultConnection({ ...base, [field]: 1 })).toThrow(
+					"already configured differently",
+				);
+			}
+			expect(() =>
+				configureDefaultConnection({ ...base, postgresPreparedStatements: false }),
+			).toThrow("already configured differently");
+			expect(() =>
+				configureDefaultConnection({ ...base, postgresUri: `${base.postgresUri}2` }),
+			).toThrow("already configured differently");
+			await closePool();
+			configureDefaultConnection({ ...base, postgresConnectionTimeoutSeconds: 3 });
+			expect(() => configureDefaultConnection(base)).toThrow("already configured differently");
+		} finally {
+			await closePool();
+		}
 	});
 
 	it("caches a healthy startup check", async () => {

@@ -316,23 +316,25 @@ configured secret.
 
 ## Workers
 
-One process runs the HTTP API and all workers. Each polls on the interval shown:
+One process runs the HTTP API and all workers, sharing the configured database pool. Each polls
+on the interval shown; unset per-worker overrides preserve the shared fallbacks documented in
+[worker tuning](deployment.md#worker-tuning). Every default remains unchanged:
 
 | Worker | Interval variable |
 | --- | --- |
-| Projection delivery | `BILLING_WORKER_POLL_INTERVAL_MS` |
-| [Outbound webhook delivery](webhooks.md) (fan-out, signed deliveries, event retention) | `BILLING_WORKER_POLL_INTERVAL_MS` |
+| Projection delivery | `BILLING_PROJECTION_SYNC_POLL_INTERVAL_MS` (falls back to `BILLING_WORKER_POLL_INTERVAL_MS`) |
+| [Outbound webhook delivery](webhooks.md) (fan-out, signed deliveries, event retention) | `BILLING_EVENT_DELIVERY_POLL_INTERVAL_MS` (falls back to `BILLING_WORKER_POLL_INTERVAL_MS`) |
 | Provider event replay | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
 | Subscription reconciliation (provider reads, subscription and plan grant expiry, default-plan passes, trial-ending notices) | `BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS` |
 | Metering maintenance (reservation expiry, reset-window subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
-| Recurring billing | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
-| Automatic top-ups | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
-| Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
-| [Provider operation recovery](#provider-write-recovery-foundation) | Fixed, every 10 seconds |
-| [Customer erasure](#customer-erasure) | `BILLING_WORKER_POLL_INTERVAL_MS` |
-| Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS` |
-| [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | Fixed, every 15 minutes |
-| [Merchant platform retention](#merchant-platform-retention), only when `QUOTUM_CONSOLE_ENABLED=true` | Fixed, every 15 minutes |
+| Recurring billing | `BILLING_RECURRING_BILLING_POLL_INTERVAL_MS` (falls back to `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`) |
+| Automatic top-ups | `BILLING_AUTO_TOPUP_POLL_INTERVAL_MS` (falls back to `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`) |
+| Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_PROMOTION_MAINTENANCE_POLL_INTERVAL_MS` (falls back to `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`) |
+| [Provider operation recovery](#provider-write-recovery-foundation) | `BILLING_PROVIDER_OPERATION_RECOVERY_POLL_INTERVAL_MS` (10000) |
+| [Customer erasure](#customer-erasure) | `BILLING_CUSTOMER_ERASURE_POLL_INTERVAL_MS` (falls back to `BILLING_WORKER_POLL_INTERVAL_MS`) |
+| Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STRIPE_APP_EVENTS_POLL_INTERVAL_MS` (falls back to `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS`) |
+| [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | `BILLING_USAGE_PARTITION_UPKEEP_POLL_INTERVAL_MS` (900000) |
+| [Merchant platform retention](#merchant-platform-retention), only when `QUOTUM_CONSOLE_ENABLED=true` | `QUOTUM_PLATFORM_RETENTION_POLL_INTERVAL_MS` (900000) |
 
 Automatic top-up and recurring billing renew every outstanding claim in their current batch,
 including jobs waiting behind a provider call. The heartbeat runs every 60 seconds against the
@@ -342,8 +344,11 @@ provider call already in flight cannot be recalled, so completion markers remain
 retries keep their existing job-scoped idempotency keys. Heartbeats prevent live-job reclamation;
 they do not extend Stripe's idempotency retention or guarantee recovery after a prolonged outage.
 Provider event replay and subscription reconciliation also renew their claims. Projection delivery
-claims up to 25 jobs per poll from a candidate set bounded by the batch size and delivers five
-concurrently with bounded HTTP timeouts.
+defaults to claiming up to 25 jobs per poll from a candidate set bounded by the batch size and
+delivering five concurrently with bounded HTTP timeouts. Batches, existing delivery concurrency,
+scan sizes and per-run budgets have optional overrides in [worker tuning](deployment.md#worker-tuning).
+The existing repository caps are enforced at startup. Lease, heartbeat, retry and retention policies
+keep their current behavior.
 Usage-driven projections are one job per billing account whose payload is built when it is first
 delivered and kept for retries, so the backlog is bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
 in [deployment.md](deployment.md#optional-variables).
@@ -366,7 +371,7 @@ Raw usage is partitioned monthly. Technical retention uses `metering_settings.ra
 retention guarantee or an implemented versioned privacy policy.
 
 The metering maintenance worker deletes expired raw usage per project, in batches of its batch
-size that each commit on their own, and keeps going for up to 20 seconds while batches come back
+size that each commit on their own, and by default keeps going for up to 20 seconds while batches come back
 full, so a backlog drains within a poll. Expired idempotency claims and stored outcomes, worker
 delivery claims and old catalog previews are swept the same way. Reservation expiry, allocation
 periods, rollovers and rollup close commit first and are not rolled back by a failing sweep.
@@ -421,7 +426,7 @@ circuit reset. Use replay/retry routes for durable work; do not manually advance
 
 The merchant platform keeps short-lived operational rows that nothing else prunes. A runtime that
 serves the merchant platform (`QUOTUM_CONSOLE_ENABLED=true`) schedules the `platform_retention` job
-every 15 minutes; a headless process writes none of these tables and does not. Each run deletes
+every 15 minutes by default; a headless process writes none of these tables and does not. Each run deletes
 rows older than these windows:
 
 | Table | Deleted once | Window |
@@ -440,7 +445,7 @@ rejected, and a deleted idempotency record only ends replay of an answer older t
 MCP connection whose row is gone answers like a revoked one, `MCP_AUTHORIZATION_REVOKED`. Audit
 events, memberships, sessions, credentials and connections are never touched.
 
-A run deletes at most 1,000 rows per statement and 25 statements per table, each its own short
+A run defaults to at most 1,000 rows per statement and 25 statements per table, each its own short
 transaction that locks only the rows it removes and skips rows a request holds, so replicas share
 the work and a sweep never blocks a request. A larger backlog drains over later runs. A run that
 deleted anything logs `Platform retention sweep deleted expired rows` with the total (`deleted`),
@@ -526,8 +531,9 @@ Every account without a paid base plan holds a default-plan grant: one grant row
 entitlement row per key. Allowance rows exist only for the windows the account wrote in, so an
 idle free account costs no rows and sends no projection when its allowance resets. A publish that
 changes the default plan queues one pass over the project's customers. The subscription
-reconciliation worker runs it after grant expiry: it scans 1,000 customers per slice, changes up to
-its batch size of them, and spends at most ten slices per poll. Reads and writes do not wait for
+reconciliation worker runs it after grant expiry: by default it scans 1,000 customers per slice,
+changes up to its batch size of them, and spends at most ten slices per poll. Scan size and slice
+count can be tuned independently, and a small scan resumes from its stored cursor. Reads and writes do not wait for
 it (see [Default plan](grants.md#default-plan)); it keeps grants, entitlement rows and projections
 current for accounts that neither read nor write. Each changed account gets a stored projection
 job. Plan the delivery backlog for large free tiers: a first default plan enqueues one job per
@@ -562,7 +568,7 @@ and database-clock deadlines fence stale local completion. Credential rotation m
 original receipt; changing the provider account cannot.
 
 Paddle sandbox customer and checkout creation use this ledger. The `provider_operation_recovery`
-worker polls every ten seconds, selecting at most ten expired in-flight or reconciling operations.
+worker defaults to polling every ten seconds, selecting at most ten expired in-flight or reconciling operations.
 Each observation claims a fresh 60-second lease, renewed every 20 seconds, and uses the recorded
 connection version. Transient failures back off exponentially from ten seconds, capped at one hour;
 after ten recovery attempts they require review. Ambiguous, absent or mismatched remote effects

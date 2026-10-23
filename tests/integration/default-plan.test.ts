@@ -696,6 +696,35 @@ localDescribe("default plan", () => {
 		expect(rows.map((row) => [Number(row.consumed), row.live])).toEqual([[30, true]]);
 	});
 
+	it("resumes default-plan scans when configured scan and per-run batch budgets are small", async () => {
+		await publish(catalog(null));
+		for (let index = 0; index < 5; index += 1) {
+			await context.repository.usageApi.createAccount(project, `tuned-pass-${index}`);
+		}
+		await publish(catalog(freePlan(1, "100")));
+		const first = await context.repository.reconcilePlanGrants(10, { scanSize: 2, maxBatches: 1 });
+		expect(first.defaultPlanGrants).toBeLessThanOrEqual(2);
+		expect(first.defaultPlanGrants).toBeGreaterThan(0);
+		const [progress] = await context.sql<{ checked: number; status: string }[]>`
+			SELECT customers_checked::int AS checked, status FROM default_plan_reconciliations
+			WHERE project_id = ${project.projectInstanceId}
+				AND catalog_revision_id = (SELECT published_catalog_revision_id FROM projects WHERE id = ${project.projectInstanceId})`;
+		expect(progress).toMatchObject({ checked: 2, status: "pending" });
+		for (let pass = 0; pass < 10; pass += 1) {
+			await context.repository.reconcilePlanGrants(10, { scanSize: 2, maxBatches: 1 });
+		}
+		const [finished] = await context.sql<{ status: string }[]>`
+			SELECT status FROM default_plan_reconciliations
+			WHERE project_id = ${project.projectInstanceId}
+				AND catalog_revision_id = (SELECT published_catalog_revision_id FROM projects WHERE id = ${project.projectInstanceId})`;
+		expect(finished?.status).toBe("completed");
+		for (let index = 0; index < 5; index += 1) {
+			expect(await grants(`tuned-pass-${index}`)).toMatchObject([
+				{ origin: "default", status: "active" },
+			]);
+		}
+	});
+
 	it("creates no allowance until the account spends, however many resets pass", async () => {
 		await publish(catalog(null));
 		await seedCustomers(["idle_user"]);
