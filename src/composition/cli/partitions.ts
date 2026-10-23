@@ -6,7 +6,7 @@ import {
 	type UsagePartitionUpkeepResult,
 	type UsagePartitionUpkeepStatus,
 } from "../../db/repository/usage-partitions";
-import { loadPostgresPreparedStatements } from "../../env";
+import { loadPostgresPreparedStatements, loadPostgresSettings } from "../../env";
 import {
 	CliUsageError,
 	type CommandOutput,
@@ -111,6 +111,7 @@ async function withDatabase<T>(
 	if (!postgresUri) throw new Error("POSTGRES_URI is required");
 	// A transaction-mode pooler needs BILLING_POSTGRES_PREPARED_STATEMENTS=false here as well.
 	const connection = createBillingDatabaseConnection({
+		...loadPostgresSettings(env),
 		postgresUri,
 		postgresPreparedStatements: loadPostgresPreparedStatements(env),
 	});

@@ -1,8 +1,12 @@
 import { isIP } from "node:net";
 import { z } from "zod";
+import { loadPostgresSettings, type PostgresSettings } from "./db/settings";
 import { type BillingLogLevel, billingLogLevelSchema } from "./observability/log-level";
 import { type ErasureKeyring, erasureKeyFromBase64 } from "./shared/erasure-digest";
 import { type DestinationPolicy, parseAllowedNetworks } from "./shared/safe-http";
+import { loadWorkerSettings, type WorkerSettings } from "./workers/settings";
+
+export { loadPostgresSettings } from "./db/settings";
 
 export type AppleEnvironmentName = "sandbox" | "production";
 export type BillingRuntimeEnvironment = "development" | "test" | "production";
@@ -80,7 +84,7 @@ export interface StripeBillingEnv {
 	integrationIdentifier?: string;
 }
 
-export interface BillingEnv {
+export interface BillingEnv extends PostgresSettings, WorkerSettings {
 	logLevel?: BillingLogLevel;
 	postgresUri: string;
 	postgresPreparedStatements: boolean;
@@ -231,6 +235,8 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
 	const erasure = parseErasureEnv(parsed);
 
 	return {
+		...loadPostgresSettings(source),
+		...loadWorkerSettings(source),
 		logLevel: parsed.BILLING_LOG_LEVEL,
 		postgresUri: parsed.POSTGRES_URI,
 		postgresPreparedStatements: parsed.BILLING_POSTGRES_PREPARED_STATEMENTS !== "false",

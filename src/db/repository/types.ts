@@ -82,6 +82,11 @@ export interface ExpiredSubscriptionReconciliationResult {
 	projectionJobs: number;
 }
 
+export interface PlanGrantReconciliationOptions {
+	scanSize?: number;
+	maxBatches?: number;
+}
+
 export interface PlanGrantReconciliationResult {
 	expiredPlanGrants: number;
 	/** Default-plan grants started, moved, ended or superseded by publish-triggered passes. */

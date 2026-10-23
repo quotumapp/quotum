@@ -32,7 +32,11 @@ import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entit
 import { applyDefaultPlan, ensureCustomer } from "./identities";
 import { clampPlanGrantAllocations } from "./plan-grant-windows";
 import { executeOne, executeRows, jsonb } from "./query";
-import type { PlanGrantReconciliationResult, QueryExecutor } from "./types";
+import type {
+	PlanGrantReconciliationOptions,
+	PlanGrantReconciliationResult,
+	QueryExecutor,
+} from "./types";
 import { formatUtcTimestamp, requirePositiveLimit } from "./validation";
 
 interface PlanGrantRow {
@@ -319,8 +323,20 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 	 * then applies a changed default plan to the accounts of projects that published one, over
 	 * several transactions. Allowances need no pass: a write creates its window's allowance.
 	 */
-	async reconcilePlanGrants(limit: number): Promise<PlanGrantReconciliationResult> {
+	async reconcilePlanGrants(
+		limit: number,
+		options: PlanGrantReconciliationOptions = {},
+	): Promise<PlanGrantReconciliationResult> {
 		const cappedLimit = requirePositiveLimit(limit);
+		const scanSize = options.scanSize ?? defaultPlanScanSize;
+		const maxBatches = options.maxBatches ?? maxWorkerBatches;
+		if (
+			!Number.isSafeInteger(scanSize) ||
+			scanSize < 1 ||
+			!Number.isSafeInteger(maxBatches) ||
+			maxBatches < 1
+		)
+			throw new Error("Default-plan scan size and batch count must be positive integers");
 		const expired = await this.transaction((tx) =>
 			expirePlanGrantsWhere(tx, drizzleSql`true`, cappedLimit),
 		);
@@ -330,8 +346,8 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 			defaultPlanSkipped: 0,
 			defaultPlanFailedSlices: 0,
 		};
-		for (let batch = 0; batch < maxWorkerBatches; batch += 1) {
-			const slice = await this.reconcileDefaultPlanBatch(cappedLimit);
+		for (let batch = 0; batch < maxBatches; batch += 1) {
+			const slice = await this.reconcileDefaultPlanBatch(cappedLimit, scanSize);
 			if (slice === null) break;
 			result.defaultPlanGrants += slice.changed;
 			result.defaultPlanSkipped += slice.skipped;
@@ -345,7 +361,10 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 	 * is due. A slice that fails as a whole rolls back and its pass retries with backoff from where
 	 * it stood, while this run moves on to the next due pass.
 	 */
-	private async reconcileDefaultPlanBatch(limit: number): Promise<DefaultPlanSlice | null> {
+	private async reconcileDefaultPlanBatch(
+		limit: number,
+		scanSize: number,
+	): Promise<DefaultPlanSlice | null> {
 		const due = await executeOne<DefaultPlanJob>(
 			this.database,
 			drizzleSql`
@@ -358,7 +377,7 @@ export class PlanGrantRepository extends RepositoryModule implements TrialServic
 		);
 		if (due === null) return null;
 		try {
-			return await this.transaction((tx) => reconcileDefaultPlanSlice(tx, due, limit));
+			return await this.transaction((tx) => reconcileDefaultPlanSlice(tx, due, limit, scanSize));
 		} catch (error) {
 			await this.transaction((tx) => recordDefaultPlanFailure(tx, due, error));
 			return { changed: 0, skipped: 0, failed: true };
@@ -862,6 +881,7 @@ async function reconcileDefaultPlanSlice(
 	executor: QueryExecutor,
 	due: DefaultPlanJob,
 	limit: number,
+	scanSize: number,
 ): Promise<DefaultPlanSlice> {
 	// Another worker holding the pass, or a publish that superseded it, leaves nothing to do here.
 	const job = await executeOne<DefaultPlanJob & { after_customer_id: string | null }>(
@@ -885,7 +905,7 @@ async function reconcileDefaultPlanSlice(
 			WHERE c.project_id = ${projectId}
 				AND (${job.after_customer_id}::uuid IS NULL OR c.id > ${job.after_customer_id}::uuid)
 			ORDER BY c.id
-			LIMIT ${defaultPlanScanSize}
+			LIMIT ${scanSize}
 		`,
 	);
 	const candidates =
@@ -929,7 +949,7 @@ async function reconcileDefaultPlanSlice(
 	// More candidates than one slice takes: resume after the last one handled, not the scan end.
 	const cursor =
 		candidates.length > limit ? (handled.at(-1)?.id ?? null) : (scanned.at(-1)?.id ?? null);
-	const completed = candidates.length <= limit && scanned.length < defaultPlanScanSize;
+	const completed = candidates.length <= limit && scanned.length < scanSize;
 	await executeOne(
 		executor,
 		drizzleSql`

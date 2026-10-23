@@ -6,6 +6,7 @@ import {
 } from "./composition/cli/operator-context";
 import { BunPlatformUnitOfWork } from "./composition/project-instance-persistence";
 import { createBillingDatabaseConnection } from "./db/client";
+import { loadPostgresPreparedStatements, loadPostgresSettings } from "./env";
 import {
 	type PlatformBootstrapManifest,
 	parsePlatformBootstrapManifest,
@@ -46,7 +47,9 @@ export async function runPlatformBootstrapCommand(
 		const manifest = parsePlatformBootstrapManifest(
 			requireEnvironmentValue(env, "BILLING_PLATFORM_BOOTSTRAP_JSON"),
 		);
-		const { service, close } = (dependencies.openService ?? openBootstrapService)(postgresUri);
+		const { service, close } = dependencies.openService
+			? dependencies.openService(postgresUri)
+			: openBootstrapService(postgresUri, env);
 		try {
 			const inspection = await service.inspect(manifest);
 			if (mode.kind === "check") {
@@ -70,8 +73,12 @@ export async function runPlatformBootstrapCommand(
 	}
 }
 
-function openBootstrapService(postgresUri: string) {
-	const connection = createBillingDatabaseConnection({ postgresUri });
+function openBootstrapService(postgresUri: string, env: Environment) {
+	const connection = createBillingDatabaseConnection({
+		postgresUri,
+		...loadPostgresSettings(env),
+		postgresPreparedStatements: loadPostgresPreparedStatements(env),
+	});
 	return {
 		service: new PlatformBootstrapService(new BunPlatformUnitOfWork(connection.sql)),
 		close: () => connection.sql.close(),

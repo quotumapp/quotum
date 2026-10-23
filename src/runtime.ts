@@ -77,6 +77,7 @@ import { PromotionMaintenanceWorker } from "./workers/promotion-maintenance";
 import { ProviderOperationRecoveryWorker } from "./workers/provider-operation-recovery";
 import { RecurringBillingWorker } from "./workers/recurring-billing";
 import { startPollingRuntime } from "./workers/runtime";
+import { resolveWorkerSettings } from "./workers/settings";
 import { StoreEventReplayWorker } from "./workers/store-event-replay";
 import { SubscriptionReconciliationWorker } from "./workers/subscription-reconciliation";
 import { UsagePartitionUpkeepWorker } from "./workers/usage-partition-upkeep";
@@ -109,6 +110,7 @@ function resolveMerchantConfig(options: MerchantRuntimeOptions | null | undefine
 }
 
 function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDependencies = {}) {
+	const tuning = resolveWorkerSettings(env);
 	const merchantConfig = resolveMerchantConfig(dependencies.merchant);
 	const jobs: QuotumScheduledJob[] = [];
 	const billingRepository = new BillingRepository();
@@ -157,8 +159,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		workerId: env.workerId,
 		maxAttempts: env.eventDeliveryMaxAttempts ?? 12,
 		retentionDays: env.eventRetentionDays ?? 30,
-		batchSize: 25,
-		concurrency: 5,
+		batchSize: tuning.eventDeliveryBatchSize,
+		concurrency: tuning.eventDeliveryConcurrency,
+		dispatchBatchSize: tuning.eventDeliveryDispatchBatchSize,
+		retentionBatchSize: tuning.eventDeliveryRetentionBatchSize,
+		retentionSweepIntervalMs: tuning.eventDeliveryRetentionSweepIntervalMs,
 		store: billingRepository.domainEventDeliveries,
 		sealer: webhookSecretSealer,
 		post: dependencies.webhookPost ?? createWebhookPost({ policy: projectionPolicy }),
@@ -190,8 +195,8 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const projectionSyncWorker = new ProjectionSyncWorker({
 		workerId: env.workerId,
 		maxAttempts: env.projectionSyncMaxAttempts,
-		batchSize: 25,
-		concurrency: 5,
+		batchSize: tuning.projectionSyncBatchSize,
+		concurrency: tuning.projectionSyncConcurrency,
 		repository: projectionSyncRepository,
 		delivery: projectionDelivery,
 		projectContextResolver,
@@ -201,7 +206,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const storeEventReplayWorker = new StoreEventReplayWorker({
 		workerId: env.workerId,
 		maxAttempts: env.storeEventReplayMaxAttempts,
-		batchSize: 25,
+		batchSize: tuning.storeEventReplayBatchSize,
 		repository: storeEventReplayRepository,
 		providers: workerProviders.storeEventReplay,
 		projectContextResolver,
@@ -211,7 +216,9 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const subscriptionReconciliationWorker = new SubscriptionReconciliationWorker({
 		workerId: env.workerId,
 		maxAttempts: env.subscriptionReconciliationMaxAttempts,
-		batchSize: 25,
+		batchSize: tuning.subscriptionReconciliationBatchSize,
+		defaultPlanScanSize: tuning.subscriptionReconciliationDefaultPlanScanSize,
+		defaultPlanMaxBatches: tuning.subscriptionReconciliationDefaultPlanMaxBatches,
 		staleAfterMs: env.providerReconciliationStaleAfterMs,
 		repository: subscriptionReconciliationRepository,
 		providers: workerProviders.subscriptionReconciliation,
@@ -220,11 +227,17 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		metrics,
 	});
 	const meteringMaintenanceWorker = new MeteringMaintenanceWorker({
+		batchSize: tuning.meteringMaintenanceBatchSize,
+		retentionBudgetMs: tuning.meteringMaintenanceRetentionBudgetMs,
 		repository: billingRepository,
 		logger,
 		metrics,
 	});
 	const customerErasureWorker = new CustomerErasureWorker({
+		batchSize: tuning.customerErasureBatchSize,
+		budgetMs: tuning.customerErasureBudgetMs,
+		maxClaims: tuning.customerErasureMaxClaims,
+		sweepIntervalMs: tuning.customerErasureSweepIntervalMs,
 		workerId: env.workerId,
 		repository: billingRepository.customerErasures,
 		logger,
@@ -235,6 +248,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		metrics,
 	});
 	const recurringBillingWorker = new RecurringBillingWorker({
+		batchSize: tuning.recurringBillingBatchSize,
 		workerId: env.workerId,
 		repository: billingRepository,
 		projectContextResolver,
@@ -243,6 +257,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		metrics,
 	});
 	const autoTopupWorker = new AutoTopupWorker({
+		batchSize: tuning.autoTopupBatchSize,
 		workerId: env.workerId,
 		repository: billingRepository,
 		projectContextResolver,
@@ -251,6 +266,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		metrics,
 	});
 	const promotionMaintenanceWorker = new PromotionMaintenanceWorker({
+		batchSize: tuning.promotionMaintenanceBatchSize,
 		workerId: env.workerId,
 		repository: {
 			releaseExpiredPromotionReservations: (limit) =>
@@ -299,6 +315,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	};
 
 	const operationRecoveryWorker = new ProviderOperationRecoveryWorker({
+		batchSize: tuning.providerOperationRecoveryBatchSize,
 		repository: billingRepository.providerOperations,
 		projects: projectContextResolver,
 		resolve: resolveProviderOperation,
@@ -306,7 +323,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	jobs.push({
 		name: "provider_operation_recovery",
 		runOnce: () => operationRecoveryWorker.runOnce(),
-		pollIntervalMs: 10_000,
+		pollIntervalMs: tuning.providerOperationRecoveryPollIntervalMs,
 	});
 	const adminOperations = new BillingAdminOperations({
 		replayWorker: storeEventReplayWorker,
@@ -318,12 +335,12 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	jobs.push({
 		name: "projection_sync",
 		runOnce: () => projectionSyncWorker.runOnce(),
-		pollIntervalMs: env.workerPollIntervalMs,
+		pollIntervalMs: tuning.projectionSyncPollIntervalMs,
 	});
 	jobs.push({
 		name: "domain_event_delivery",
 		runOnce: () => domainEventDeliveryWorker.runOnce(),
-		pollIntervalMs: env.workerPollIntervalMs,
+		pollIntervalMs: tuning.eventDeliveryPollIntervalMs,
 	});
 	jobs.push({
 		name: "store_event_replay",
@@ -346,29 +363,29 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 			runOnce: () => usagePartitionUpkeepWorker.runOnce(),
 			// The horizon is a year ahead, so a slow cadence suffices; it still runs on processes
 			// that restart more often than an hourly job's first poll.
-			pollIntervalMs: 15 * 60_000,
+			pollIntervalMs: tuning.usagePartitionUpkeepPollIntervalMs,
 		});
 	jobs.push({
 		name: "recurring_billing",
 		runOnce: () => recurringBillingWorker.runOnce(),
-		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
+		pollIntervalMs: tuning.recurringBillingPollIntervalMs,
 	});
 	jobs.push({
 		name: "auto_topup",
 		runOnce: () => autoTopupWorker.runOnce(),
-		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
+		pollIntervalMs: tuning.autoTopupPollIntervalMs,
 	});
 	jobs.push({
 		name: "customer_erasure",
 		runOnce: () => customerErasureWorker.runOnce(),
 		// Erasure is rare and its batches are bounded, so the fast worker cadence keeps one moving
 		// without a long wait between claims.
-		pollIntervalMs: env.workerPollIntervalMs,
+		pollIntervalMs: tuning.customerErasurePollIntervalMs,
 	});
 	jobs.push({
 		name: "promotion_maintenance",
 		runOnce: () => promotionMaintenanceWorker.runOnce(),
-		pollIntervalMs: env.meteringMaintenancePollIntervalMs,
+		pollIntervalMs: tuning.promotionMaintenancePollIntervalMs,
 	});
 
 	// The merchant platform writes rate limits, links, step-up grants and MCP rows that nothing else
@@ -378,6 +395,11 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 			merchantEnabled: merchantConfig !== null,
 			executor: persistence,
 			logger,
+			pollIntervalMs: tuning.platformRetentionPollIntervalMs,
+			options: {
+				batchSize: tuning.platformRetentionBatchSize,
+				maxBatchesPerTable: tuning.platformRetentionMaxBatchesPerTable,
+			},
 		}),
 	);
 
@@ -427,11 +449,12 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		jobs.push({
 			name: "stripe_app_events",
 			runOnce: () => worker.runOnce(),
-			pollIntervalMs: env.storeEventReplayPollIntervalMs,
+			pollIntervalMs: tuning.stripeAppEventsPollIntervalMs,
 		});
 	};
 	if (merchantConfig === null) {
 		const app = attachHeadlessRuntime(staff, {
+			stripeAppEventsBatchSize: tuning.stripeAppEventsBatchSize,
 			registerBackground,
 			staffRequestScope: sentryRequestScope,
 			trustProxyHeaders: env.rateLimit.trustProxyHeaders,
@@ -454,6 +477,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	});
 	const app = attachMerchantRuntime(staff, merchantBilling, {
 		...dependencies.merchant,
+		stripeAppEventsBatchSize: tuning.stripeAppEventsBatchSize,
 		config: merchantConfig,
 		trustProxyHeaders: env.rateLimit.trustProxyHeaders,
 		stripeWritePermissionProbes: env.stripeWritePermissionProbes,
@@ -506,6 +530,7 @@ export function createBillingRuntime(
 			};
 		},
 		async initialize() {
+			resolveWorkerSettings(env);
 			configureDefaultConnection(env);
 			if (dependencies.sentry) initializeSentry(dependencies.sentry, env.sentry);
 			await initializePostgresHealth();

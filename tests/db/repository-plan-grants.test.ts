@@ -44,6 +44,18 @@ describe("plan grant ending notices", () => {
 });
 
 describe("default-plan passes", () => {
+	it("rejects invalid scan and batch budgets before executing SQL", async () => {
+		const database = new FakeDatabase([], { strict: true });
+		const repository = new PlanGrantRepository(database as never);
+		await expect(repository.reconcilePlanGrants(25, { scanSize: 0 })).rejects.toThrow(
+			"positive integers",
+		);
+		await expect(repository.reconcilePlanGrants(25, { maxBatches: 1.5 })).rejects.toThrow(
+			"positive integers",
+		);
+		expect(database.queries).toHaveLength(0);
+	});
+
 	it("backs a pass off by its own id and project after a slice fails, and moves on", async () => {
 		const writes: string[] = [];
 		const database = {

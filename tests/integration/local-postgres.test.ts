@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { createApp } from "../../src/app";
 import { syncConfiguredCatalog } from "../../src/catalog/provision";
 import { createBillingReadinessCheck } from "../../src/composition/runtime-readiness";
-import { checkPostgresHealth } from "../../src/db/client";
+import { checkPostgresHealth, createBillingDatabaseConnection } from "../../src/db/client";
 import { testRequest } from "../helpers/openapi";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
@@ -69,6 +69,33 @@ localDescribe("local Postgres billing integration", () => {
 		`;
 
 		expect(limits).toEqual([{ statement: "30s", idle: "30s", transaction: "2min" }]);
+	});
+
+	it("applies configured session timeouts, including zero, to reused pooled sessions", async () => {
+		for (const value of [1234, 0]) {
+			const connection = createBillingDatabaseConnection({
+				...context.env,
+				postgresMaxConnections: 1,
+				postgresStatementTimeoutMs: value,
+				postgresIdleInTransactionSessionTimeoutMs: value,
+				postgresTransactionTimeoutMs: value,
+			});
+			try {
+				const settings = () => connection.sql<
+					{ pid: number; statement: number; idle: number; transaction: number }[]
+				>`
+					SELECT pg_backend_pid() AS pid,
+						(extract(epoch FROM current_setting('statement_timeout')::interval) * 1000)::int AS statement,
+						(extract(epoch FROM current_setting('idle_in_transaction_session_timeout')::interval) * 1000)::int AS idle,
+						(extract(epoch FROM current_setting('transaction_timeout')::interval) * 1000)::int AS transaction`;
+				const [first] = await settings();
+				const [again] = await settings();
+				expect(first).toMatchObject({ statement: value, idle: value, transaction: value });
+				expect(again).toEqual(first);
+			} finally {
+				await connection.sql.close();
+			}
+		}
 	});
 
 	it("generates billing keys as UUIDv7 and platform keys as random UUIDs", async () => {

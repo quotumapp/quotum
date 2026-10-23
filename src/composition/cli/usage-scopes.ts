@@ -20,7 +20,7 @@ import {
 	type UsageScopesVerification,
 	verifyUsageScopesTransition,
 } from "../../db/repository/usage-scopes-transition";
-import { loadPostgresPreparedStatements } from "../../env";
+import { loadPostgresPreparedStatements, loadPostgresSettings } from "../../env";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import {
 	CliUsageError,
@@ -228,6 +228,7 @@ async function withDatabase<T>(
 	const postgresUri = env.POSTGRES_URI?.trim();
 	if (!postgresUri) throw new Error("POSTGRES_URI is required");
 	const connection = createBillingDatabaseConnection({
+		...loadPostgresSettings(env),
 		postgresUri,
 		postgresPreparedStatements: loadPostgresPreparedStatements(env),
 	});

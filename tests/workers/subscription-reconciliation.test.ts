@@ -144,6 +144,30 @@ function createRecordingLogger() {
 }
 
 describe("SubscriptionReconciliationWorker", () => {
+	it("forwards bounded default-plan scans and passes to the repository", async () => {
+		const { repository } = createRepository({});
+		const calls: unknown[] = [];
+		const worker = new SubscriptionReconciliationWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "tuned",
+			maxAttempts: 10,
+			batchSize: 7,
+			staleAfterMs: 300_000,
+			defaultPlanScanSize: 11,
+			defaultPlanMaxBatches: 2,
+			repository: {
+				...repository,
+				async reconcilePlanGrants(limit, options) {
+					calls.push([limit, options]);
+					return repository.reconcilePlanGrants(limit);
+				},
+			},
+			providers: { apple: null, google: null, stripe: null },
+		});
+		await worker.runOnce();
+		expect(calls).toEqual([[7, { scanSize: 11, maxBatches: 2 }]]);
+	});
+
 	it("reconciles local expirations and claims stale provider subscriptions", async () => {
 		const { calls, repository } = createRepository({
 			noticeResult: { noticedTrials: 3, affectedCustomers: 2, projectionJobs: 3 },

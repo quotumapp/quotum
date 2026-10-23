@@ -24,6 +24,7 @@ export function platformRetentionJobs(input: {
 	executor: PlatformQueryExecutor;
 	logger: BillingLogger;
 	options?: PlatformRetentionOptions;
+	pollIntervalMs?: number;
 }): QuotumScheduledJob[] {
 	return input.merchantEnabled ? [createPlatformRetentionJob(input)] : [];
 }
@@ -32,11 +33,12 @@ export function createPlatformRetentionJob(input: {
 	executor: PlatformQueryExecutor;
 	logger: BillingLogger;
 	options?: PlatformRetentionOptions;
+	pollIntervalMs?: number;
 }): QuotumScheduledJob {
 	const sweep = new PlatformRetentionSweep(input.executor, input.options);
 	return {
 		name: PLATFORM_RETENTION_JOB_NAME,
-		pollIntervalMs: PLATFORM_RETENTION_POLL_INTERVAL_MS,
+		pollIntervalMs: input.pollIntervalMs ?? PLATFORM_RETENTION_POLL_INTERVAL_MS,
 		async runOnce() {
 			const result = await sweep.runOnce();
 			const total = Object.values(result.deleted).reduce((sum, count) => sum + count, 0);

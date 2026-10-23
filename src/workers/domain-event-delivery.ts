@@ -46,6 +46,9 @@ export interface DomainEventDeliveryWorkerOptions {
 	retentionDays: number;
 	batchSize: number;
 	concurrency?: number;
+	dispatchBatchSize?: number;
+	retentionBatchSize?: number;
+	retentionSweepIntervalMs?: number;
 	store: DomainEventDeliveryStore;
 	/** Resolved on first use, so a process with no endpoints never needs the secrets key. */
 	sealer: () => WebhookSecretSealer;
@@ -92,6 +95,9 @@ export class DomainEventDeliveryWorker {
 			now: () => new Date(),
 			jitterMs: () => Math.floor(Math.random() * 1000),
 			...options,
+			dispatchBatchSize: options.dispatchBatchSize ?? options.batchSize * 4,
+			retentionBatchSize: options.retentionBatchSize ?? 1000,
+			retentionSweepIntervalMs: options.retentionSweepIntervalMs ?? retentionIntervalMs,
 			concurrency,
 			logger: options.logger ?? createNoopBillingLogger(),
 			metrics: options.metrics ?? createNoopBillingMetrics(),
@@ -101,7 +107,7 @@ export class DomainEventDeliveryWorker {
 	async runOnce(): Promise<DomainEventDeliveryRunResult> {
 		const { store, workerId, batchSize, logger } = this.options;
 		try {
-			const dispatched = await store.dispatchEvents(batchSize * 4);
+			const dispatched = await store.dispatchEvents(this.options.dispatchBatchSize);
 			const deliveries = await store.claimDeliveries(workerId, batchSize);
 			const counts = await this.deliverAll(deliveries);
 			const expired = await this.deleteExpiredEvents();
@@ -122,9 +128,12 @@ export class DomainEventDeliveryWorker {
 
 	private async deleteExpiredEvents(): Promise<number> {
 		const now = this.options.now().getTime();
-		if (now - this.lastRetentionAt < retentionIntervalMs) return 0;
+		if (now - this.lastRetentionAt < this.options.retentionSweepIntervalMs) return 0;
 		this.lastRetentionAt = now;
-		return await this.options.store.deleteExpiredEvents(this.options.retentionDays, 1000);
+		return await this.options.store.deleteExpiredEvents(
+			this.options.retentionDays,
+			this.options.retentionBatchSize,
+		);
 	}
 
 	private async deliverAll(

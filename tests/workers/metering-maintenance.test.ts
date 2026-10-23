@@ -33,6 +33,22 @@ function recordingLogger() {
 }
 
 describe("MeteringMaintenanceWorker", () => {
+	it("forwards a configured retention time budget without changing its batch size", async () => {
+		const calls: unknown[] = [];
+		const worker = new MeteringMaintenanceWorker({
+			batchSize: 12,
+			retentionBudgetMs: 500,
+			repository: {
+				async runMeteringMaintenance(...args) {
+					calls.push(args);
+					return maintenanceResult;
+				},
+			},
+		});
+		await worker.runOnce();
+		expect(calls).toEqual([[12, { retentionBudgetMs: 500 }]]);
+	});
+
 	it("runs bounded maintenance and records success observability", async () => {
 		const calls: number[] = [];
 		const metrics = createInMemoryBillingMetrics();

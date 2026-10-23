@@ -33,6 +33,8 @@ export class CustomerErasureWorker {
 	private readonly budgetMs: number;
 	private readonly leaseSeconds: number;
 	private readonly maxClaims: number;
+	private readonly sweepIntervalMs: number;
+	private readonly now: () => number;
 	private readonly logger: BillingLogger;
 	private lastSweepAt = 0;
 
@@ -43,6 +45,8 @@ export class CustomerErasureWorker {
 		budgetMs = 15_000,
 		leaseSeconds = 300,
 		maxClaims = 5,
+		sweepIntervalMs = 60_000,
+		now = () => Date.now(),
 		logger = createNoopBillingLogger(),
 	}: {
 		repository: CustomerErasureRepository;
@@ -51,6 +55,8 @@ export class CustomerErasureWorker {
 		budgetMs?: number;
 		leaseSeconds?: number;
 		maxClaims?: number;
+		sweepIntervalMs?: number;
+		now?: () => number;
 		logger?: BillingLogger;
 	}) {
 		if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 5000) {
@@ -65,6 +71,8 @@ export class CustomerErasureWorker {
 		this.budgetMs = budgetMs;
 		this.leaseSeconds = leaseSeconds;
 		this.maxClaims = maxClaims;
+		this.sweepIntervalMs = sweepIntervalMs;
+		this.now = now;
 		this.logger = logger;
 	}
 
@@ -87,8 +95,9 @@ export class CustomerErasureWorker {
 				});
 			}
 			// Expiry is measured in days, so a minute's resolution is plenty and an idle poll stays cheap.
-			if (Date.now() - this.lastSweepAt >= 60_000) {
-				this.lastSweepAt = Date.now();
+			const now = this.now();
+			if (now - this.lastSweepAt >= this.sweepIntervalMs) {
+				this.lastSweepAt = now;
 				result.swept = await this.repository.sweepCustomerErasures(this.batchSize);
 			}
 			return result;

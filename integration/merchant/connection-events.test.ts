@@ -379,6 +379,35 @@ describe("connection-event webhook verification", () => {
 });
 
 describe("Stripe App webhook verification", () => {
+	it("processes only the configured number of pending App events per pass", async () => {
+		const browser = new MerchantBrowser(f);
+		await onboard(browser);
+		const provider = isolatedStripeOAuthPort();
+		await authorizeStripeApp(f, browser, provider, stubConnectionValidation());
+		const events = createStripeAppEvents(f.connectionRepository, provider, f.sql, { batchSize: 1 });
+		const app = withOpenApiAssertions(events.app);
+		for (let index = 0; index < 3; index += 1) {
+			expect(
+				(
+					await postStripeApp(
+						app,
+						stripeAppEvent("account.application.deauthorized", `evt_batch_${index}`),
+						"test",
+					)
+				).status,
+			).toBe(200);
+		}
+		await events.runOnce();
+		const [first] = await f.sql<{ count: number }[]>`
+			SELECT count(*)::int AS count FROM platform_stripe_app_events WHERE processed_at IS NOT NULL`;
+		expect(first?.count).toBe(1);
+		await events.runOnce();
+		const [second] = await f.sql<{ count: number }[]>`
+			SELECT count(*)::int AS count FROM platform_stripe_app_events WHERE processed_at IS NOT NULL`;
+		expect(second?.count).toBe(2);
+		expect(await new StripeAppEvents(f.sql).pending()).toHaveLength(1);
+	});
+
 	it("deauthorizes, defers invoice.paid, and rejects bad signatures and unknown paths", async () => {
 		const browser = new MerchantBrowser(f);
 		await onboard(browser);

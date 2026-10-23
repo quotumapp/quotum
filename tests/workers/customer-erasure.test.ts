@@ -69,6 +69,26 @@ describe("CustomerErasureWorker", () => {
 		expect(fake.calls.sweeps).toBe(1);
 	});
 
+	it("uses the configured sweep interval, claim budget and batch", async () => {
+		const fake = repository([]);
+		let now = 10_000;
+		const worker = new CustomerErasureWorker({
+			repository: fake.repository,
+			workerId: "w1",
+			batchSize: 7,
+			budgetMs: 100,
+			sweepIntervalMs: 10,
+			now: () => now,
+		});
+		await worker.runOnce();
+		await worker.runOnce();
+		expect(fake.calls.sweeps).toBe(1);
+		now += 10;
+		await worker.runOnce();
+		expect(fake.calls.sweeps).toBe(2);
+		expect(fake.calls.options[0]).toMatchObject({ batchSize: 7, budgetMs: 100, leaseSeconds: 300 });
+	});
+
 	it("rejects a lease that does not outlast its budget", () => {
 		expect(
 			() =>
