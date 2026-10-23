@@ -277,6 +277,10 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
 - `bun run platform:bootstrap`, `catalog:provision` and `catalog` for operator workflows (see
   [docs/quickstart.md](docs/quickstart.md)); `bun run connections:rotate-secrets` re-encrypts
   stored connection secrets with the active key.
+- `bun run quotum repair apple-refund-reversals report <instance>` previews historical stranded
+  Apple credits; `apply <instance> <store-event-id> --actor <name>` restores attributed allocations
+  and queues a balance projection. See [docs/operations.md](docs/operations.md#apple-refund-reversal-repairs)
+  for eligibility, paging and member overrides; do not reset processed store events to replay them.
 - `bun run quotum catalog bindings list` and `catalog bindings adopt <file>` inspect/adopt existing
   Stripe products and prices before or after catalog publication; adoption requires operator
   authentication and records an immutable actor-attributed receipt. `--instance <key>` runs the

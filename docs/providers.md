@@ -310,6 +310,18 @@ and renewal-status changes still apply. A subscription Quotum has never recorded
 reports a product other than the recorded one, still need a mapping that is on sale and answer
 `404 BILLING_PRODUCT_NOT_FOUND`. Refunds and revocations always followed the recorded purchase.
 
+`REFUND_REVERSED` restores the purchase and the existing allocations that its refund invalidated.
+Top-ups regain their original grant less recorded consumption and holds. Subscription allowances
+keep any existing quantity reversals, including administrative debits; only markers attributable
+to that transaction's refund are cleared. Original expiry and reset windows remain in force, so
+an expired allowance does not become spendable. Duplicate notifications never replenish a grant.
+Before restoring state, Quotum checks the recorded invalidations under the account lock. The latest
+invalidation must be a refund of that transaction; a revocation or a later refund of another payment
+in the subscription prevents restoration. A reversal without a recorded matching refund also leaves
+state unchanged. These notifications are recorded as processed without emitting a purchase projection.
+For reversals processed by an older service that restored purchase state without restoring credits,
+use the [targeted repair procedure](operations.md#apple-refund-reversal-repairs).
+
 A transaction whose `offerDiscountType` is `FREE_TRIAL`, under any offer type (introductory,
 promotional, offer code or win-back), records its purchase date and transaction expiry as the
 subscription's trial. A billing grace period after the trial does not move the trial end. Later

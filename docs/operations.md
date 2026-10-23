@@ -739,6 +739,39 @@ need an operator:
 refusals and what the unlink leaves in place. Do not edit `provider_customers` rows by hand: the
 unlink is the only change that leaves a receipt.
 
+### Apple refund reversal repairs
+
+Older Apple recording restored purchase and subscription state after `REFUND_REVERSED` while
+leaving credit allocations reversed. Deploy the corrected service before repairing historical
+events. This repair changes data in the existing schema; it requires no migration or event replay.
+
+1. Run `quotum repair apple-refund-reversals report <instance>`. It opens the database directly
+   using `POSTGRES_URI`, `QUOTUM_AUTH_SECRET` and `QUOTUM_SECRETS_KEY_ID`/`QUOTUM_SECRETS_KEY_BASE64`,
+   as the connection commands do. Reports are read-only and return at most 100 processed reversal
+   events; use `--limit <1-500>` and pass `nextAfter` as `--after <event-id>` to continue.
+2. Inspect each event's `status`, allocation IDs, feature keys and `availableDelta`. `ready` means
+   the original allocation can be restored; `unchanged` means no attributed reversed row remains.
+   Expired rows may be restored with a zero balance delta. `blocked` includes a `reason`, such as
+   `purchase_invalidated`, `later_invalidation` or `allocation_attribution_missing`.
+3. Apply one selected event with
+   `quotum repair apple-refund-reversals apply <instance> <store-event-id> --actor <name>`.
+   `QUOTUM_ACTOR` may supply the actor. While the merchant platform runs, an organization with
+   members also requires `--member-override-reason <why>`. Acceptance is recorded in the platform
+   audit trail as `billing.action_accepted`, with `metadata.action = apple.refund_reversal.repair`
+   and the store event ID.
+4. Check `restoredAllocationIds`, the account's balance and delivery of its new `usage_changed`
+   projection. Apply locks the account and rechecks eligibility, so its result can differ from an
+   earlier report. It preserves consumption, reservations and original expiry. Repeating an
+   applied repair changes no credits and queues no extra projection.
+
+Reports or applications containing blocked events exit `2`; invalid arguments exit `64`, and
+database or other operational failures exit `1`. Review `unattributedAllocationIds` manually:
+subscription attribution compares the recorded refund's transaction timestamp with the allocation's
+invalidation marker, retaining database microseconds. Missing history cannot be inferred safely.
+An independent invalidation is left in place. A repair never changes store event processing status,
+re-emits a purchase fact, or overrides a later refund or revocation. It does not run automatically
+at startup. Resolve ambiguous history with provider evidence before making a separate correction.
+
 ### Customer erasure
 
 An operator erases a billing account on the merchant's instruction, such as a data subject request.

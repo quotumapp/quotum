@@ -95,6 +95,25 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => args[0] === "status" || args[0] === "ensure",
 	},
 	{
+		path: ["repair", "apple-refund-reversals"],
+		file: "composition/cli/apple-refund-reversals.ts",
+		usage: "repair apple-refund-reversals report|apply <instance> ...",
+		summary: "Inspect and restore credits stranded by processed Apple refund reversals",
+		environment:
+			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET, optional QUOTUM_ACTOR",
+		details: [
+			"  repair apple-refund-reversals report <instance> [--after <event-id>] [--limit <n>]",
+			"  repair apple-refund-reversals apply <instance> <store-event-id> --actor <name>",
+			"      [--member-override-reason <why>]",
+			"report is read-only, defaults to 100 events (at most 500), and returns nextAfter for paging.",
+			"apply restores only attributed allocations and queues a fresh balance projection. It is",
+			"repeatable, names the operator (--actor or QUOTUM_ACTOR), and is audited. An organization",
+			"whose members manage it needs --member-override-reason <why>. Exit 2 means blocked rows",
+			"need manual review; processed store events are never replayed or reset.",
+		],
+		accepts: (args) => args[0] === "report" || args[0] === "apply",
+	},
+	{
 		path: ["usage", "scopes"],
 		file: "composition/cli/usage-scopes.ts",
 		usage: "usage scopes report|snapshot|verify",

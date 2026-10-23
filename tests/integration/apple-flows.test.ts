@@ -526,6 +526,13 @@ localDescribe("Apple route flows integration", () => {
 
 	// capability: refund.sync
 	it("restores durable Apple subscription and purchase state after REFUND_REVERSED", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		const balance = () =>
+			context.repository.getMeteringBalance(
+				integrationProjectContext(),
+				"integration_user",
+				"ai_credits",
+			);
 		const purchasedAt = new Date("2026-05-31T00:00:00.000Z");
 		const expiresAt = new Date("2099-06-30T00:00:00.000Z");
 		const invalidatedAt = new Date("2026-06-01T00:00:00.000Z");
@@ -558,6 +565,8 @@ localDescribe("Apple route flows integration", () => {
 				projectionIdempotencyKey: "apple:purchase",
 			},
 		);
+		expect(await balance()).toMatchObject({ granted: "1000", available: "1000" });
+		const allocations = await context.sql`SELECT id, quantity, expires_at FROM balance_allocations`;
 		await context.repository.recordStoreKitTransactionAndEnqueueProjection(
 			integrationProjectContext(),
 			{
@@ -573,6 +582,7 @@ localDescribe("Apple route flows integration", () => {
 				projectionIdempotencyKey: "apple:refund",
 			},
 		);
+		expect(await balance()).toMatchObject({ granted: "0", available: "0" });
 		await context.repository.recordStoreKitTransactionAndEnqueueProjection(
 			integrationProjectContext(),
 			{
@@ -587,6 +597,10 @@ localDescribe("Apple route flows integration", () => {
 				externalEventId: "apple_refund_reversed_event",
 				projectionIdempotencyKey: "apple:refund_reversed",
 			},
+		);
+		expect(await balance()).toMatchObject({ granted: "1000", available: "1000" });
+		expect(await context.sql`SELECT id, quantity, expires_at FROM balance_allocations`).toEqual(
+			allocations,
 		);
 
 		await expectApplePurchaseRows(context.sql, {
