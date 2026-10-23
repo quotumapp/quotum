@@ -23,6 +23,10 @@ describe("repository domain adapters", () => {
 				calls.push({ method: "claimProjectionSyncJobs", workerId, limit });
 				return Promise.resolve(rows);
 			},
+			prepareProjectionSyncJobDelivery(projectId, jobId, workerId) {
+				calls.push({ method: "prepareProjectionSyncJobDelivery", projectId, jobId, workerId });
+				return Promise.resolve("ready");
+			},
 			markProjectionSyncJobSucceeded(projectId, jobId, workerId) {
 				calls.push({ method: "markProjectionSyncJobSucceeded", projectId, jobId, workerId });
 				return Promise.resolve();
@@ -41,6 +45,9 @@ describe("repository domain adapters", () => {
 		});
 
 		expect(await adapter.claimProjectionSyncJobs("worker-a", 5)).toBe(rows);
+		expect(await adapter.prepareProjectionSyncJobDelivery("project_1", "job_1", "worker-a")).toBe(
+			"ready",
+		);
 		await adapter.markProjectionSyncJobSucceeded("project_1", "job_1", "worker-a");
 		await adapter.markProjectionSyncJobFailed(
 			"project_1",
@@ -52,6 +59,12 @@ describe("repository domain adapters", () => {
 
 		expect(calls).toEqual([
 			{ method: "claimProjectionSyncJobs", workerId: "worker-a", limit: 5 },
+			{
+				method: "prepareProjectionSyncJobDelivery",
+				projectId: "project_1",
+				jobId: "job_1",
+				workerId: "worker-a",
+			},
 			{
 				method: "markProjectionSyncJobSucceeded",
 				projectId: "project_1",

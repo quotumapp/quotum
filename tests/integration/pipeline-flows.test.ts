@@ -54,7 +54,7 @@ localDescribe("Pipeline flows integration", () => {
 			const result = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(1, 1000);
 
-			expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+			expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 			expect(receiver.requests).toHaveLength(1);
 			expect(receiver.requests[0]).toMatchObject({ bearerOk: true, signatureOk: true });
 			expect(receiver.requests[0].body).toMatchObject({
@@ -112,7 +112,7 @@ localDescribe("Pipeline flows integration", () => {
 
 			const checkoutRun = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(1, 1000);
-			expect(checkoutRun).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+			expect(checkoutRun).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 			expect(receiver.requests[0].body).toMatchObject({
 				idempotencyKey: "stripe:payment:pi_integration:projection",
 				purchase: expect.objectContaining({
@@ -131,7 +131,7 @@ localDescribe("Pipeline flows integration", () => {
 
 			const refundRun = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(2, 1000);
-			expect(refundRun).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+			expect(refundRun).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 			expect(receiver.requests[1].body).toMatchObject({
 				idempotencyKey: "stripe:refund:re_integration:reversal",
 				reversal: expect.objectContaining({
@@ -203,7 +203,7 @@ localDescribe("Pipeline flows integration", () => {
 			const run = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(2, 1000);
 
-			expect(run).toEqual({ claimed: 2, succeeded: 2, failed: 0 });
+			expect(run).toEqual({ claimed: 2, succeeded: 2, failed: 0, skipped: 0 });
 			expect(receiver.requests.map((request) => request.body.idempotencyKey)).toContain(
 				"stripe:refund:re_integration:reversal",
 			);
@@ -232,7 +232,7 @@ localDescribe("Pipeline flows integration", () => {
 			await acmeReceiver.waitForRequests(1, 1000);
 			await globexReceiver.waitForRequests(1, 1000);
 
-			expect(result).toEqual({ claimed: 2, succeeded: 2, failed: 0 });
+			expect(result).toEqual({ claimed: 2, succeeded: 2, failed: 0, skipped: 0 });
 			expect(acmeReceiver.requests).toHaveLength(1);
 			expect(globexReceiver.requests).toHaveLength(1);
 			expect(acmeReceiver.requests[0]).toMatchObject({

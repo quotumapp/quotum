@@ -156,6 +156,7 @@ describe("public metric labels", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () =>
 					tenantKeys.map((projectKey, index) => syncJob(projectKey, syncJobIds[index] ?? "")),
 				markProjectionSyncJobSucceeded: async () => {},
@@ -170,7 +171,7 @@ describe("public metric labels", () => {
 			jitterMs: () => 0,
 			metrics,
 		});
-		expect(await syncWorker.runOnce()).toEqual({ claimed: 2, succeeded: 1, failed: 1 });
+		expect(await syncWorker.runOnce()).toEqual({ claimed: 2, succeeded: 1, failed: 1, skipped: 0 });
 
 		// Store event replay worker: one processed event and one failure for each tenant.
 		const replayWorker = new StoreEventReplayWorker({

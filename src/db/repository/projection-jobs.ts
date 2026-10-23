@@ -19,6 +19,13 @@ const usageJob = drizzleSql`(jobs.idempotency_key = ${drizzleSql.raw(usageKeySql
 /** A flagged follow-up restarts a non-usage job at once; a usage job keeps its payload and backoff. */
 const restartsAtOnce = drizzleSql`(jobs.reprojection_requested AND NOT ${usageJob})`;
 
+/** Filter before bounding candidates so erased accounts cannot hide another project's work. */
+const activeCustomer = drizzleSql`EXISTS (
+	SELECT 1 FROM customers customer
+	WHERE customer.project_id = jobs.project_id AND customer.id = jobs.customer_id
+		AND customer.erased_at IS NULL
+)`;
+
 export class ProjectionJobBillingRepository extends RepositoryModule {
 	async claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]> {
 		requireNonBlank(workerId, "p_worker_id");
@@ -37,6 +44,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 					SELECT jobs.id, jobs.project_id, jobs.next_attempt_at AS due_at, jobs.created_at
 					FROM projection_sync_jobs jobs
 					WHERE jobs.status = 'pending' AND jobs.next_attempt_at <= now()
+						AND ${activeCustomer}
 					ORDER BY jobs.next_attempt_at ASC, jobs.created_at ASC
 					LIMIT ${candidateLimit}
 				)
@@ -45,6 +53,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 					SELECT jobs.id, jobs.project_id, jobs.locked_at AS due_at, jobs.created_at
 					FROM projection_sync_jobs jobs
 					WHERE jobs.status = 'processing' AND jobs.locked_at <= now() - INTERVAL '5 minutes'
+						AND ${activeCustomer}
 					ORDER BY jobs.locked_at ASC, jobs.created_at ASC
 					LIMIT ${candidateLimit}
 				)
@@ -64,14 +73,15 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				SELECT jobs.id
 				FROM projection_sync_jobs jobs
 				JOIN ranked_jobs ranked ON ranked.id = jobs.id
-				WHERE (
+				WHERE ((
 						jobs.status = 'pending'
 						AND jobs.next_attempt_at <= now()
 					)
 					OR (
 						jobs.status = 'processing'
 						AND jobs.locked_at <= now() - INTERVAL '5 minutes'
-					)
+					))
+					AND ${activeCustomer}
 				ORDER BY ranked.project_rank ASC, ranked.due_at ASC, ranked.created_at ASC
 				LIMIT ${cappedLimit}
 				FOR UPDATE OF jobs SKIP LOCKED
@@ -84,6 +94,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				updated_at = now()
 			FROM due_jobs
 			WHERE jobs.id = due_jobs.id
+				AND ${activeCustomer}
 				AND (
 					(jobs.status = 'pending' AND jobs.next_attempt_at <= now())
 					OR (jobs.status = 'processing' AND jobs.locked_at <= now() - INTERVAL '5 minutes')
@@ -94,6 +105,53 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 		`,
 		);
 		return rows.map(parseProjectionSyncJobRow);
+	}
+
+	/**
+	 * Serializes delivery admission with the erasure request's account lock and in-flight check.
+	 * If admission wins, the request sees this processing job and refuses to freeze; if erasure
+	 * wins, this check sees the frozen account. No account lock is held during HTTP delivery.
+	 */
+	async prepareProjectionSyncJobDelivery(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+	): Promise<"ready" | "skipped"> {
+		return await this.transaction(async (tx) => {
+			const customer = await executeOne<{ id: string; erased_at: Date | string | null }>(
+				tx,
+				drizzleSql`
+					SELECT customer.id, customer.erased_at
+					FROM customers customer
+					JOIN projection_sync_jobs jobs
+						ON jobs.project_id = customer.project_id AND jobs.customer_id = customer.id
+					WHERE jobs.project_id = ${projectId} AND jobs.id = ${jobId}
+					FOR SHARE OF customer
+				`,
+			);
+			if (customer === null) return "skipped";
+			// Read ownership after the account lock: the lock may have waited for a freeze, while
+			// another worker reclaimed the job or the erasure deleted it in the meantime.
+			const owned = await executeOne<{ id: string }>(
+				tx,
+				drizzleSql`
+					SELECT id FROM projection_sync_jobs
+					WHERE project_id = ${projectId} AND customer_id = ${customer.id} AND id = ${jobId}
+						AND status = 'processing' AND locked_by = ${workerId}
+					FOR UPDATE
+				`,
+			);
+			if (owned === null) return "skipped";
+			if (customer.erased_at === null) return "ready";
+			await tx.execute(drizzleSql`
+				UPDATE projection_sync_jobs
+				SET status = 'pending', next_attempt_at = 'infinity', locked_at = NULL,
+					locked_by = NULL, updated_at = now()
+				WHERE project_id = ${projectId} AND customer_id = ${customer.id} AND id = ${jobId}
+					AND status = 'processing' AND locked_by = ${workerId}
+			`);
+			return "skipped";
+		});
 	}
 
 	/** Builds a usage-driven projection at delivery time and advances the customer's sequence. */

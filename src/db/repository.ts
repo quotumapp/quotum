@@ -432,6 +432,14 @@ export class BillingRepository {
 		return await this.projectionJobs.claimProjectionSyncJobs(workerId, limit);
 	}
 
+	async prepareProjectionSyncJobDelivery(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+	): Promise<"ready" | "skipped"> {
+		return await this.projectionJobs.prepareProjectionSyncJobDelivery(projectId, jobId, workerId);
+	}
+
 	async buildUsageProjection(
 		projectId: string,
 		customerId: string,

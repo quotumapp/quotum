@@ -58,7 +58,7 @@ localDescribe("usage projection coalescing", () => {
 				repository: context.repository,
 				fetch: first.fetch,
 			}),
-		).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(first.requests).toHaveLength(1);
 		expect(first.requests[0]?.body).toMatchObject({
 			reason: "usage_changed",
@@ -203,7 +203,7 @@ localDescribe("usage projection coalescing", () => {
 				repository: context.repository,
 				fetch: recording.fetch,
 			}),
-		).resolves.toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+		).resolves.toEqual({ claimed: 0, succeeded: 0, failed: 0, skipped: 0 });
 	});
 
 	it("marks usage jobs succeeded without delivering when the connection turns them off", async () => {
@@ -235,7 +235,7 @@ localDescribe("usage projection coalescing", () => {
 				repository: context.repository,
 				fetch: recording.fetch,
 			}),
-		).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(recording.requests).toHaveLength(0);
 		expect((await usageJobs(billingAccountId))[0]).toMatchObject({ status: "succeeded" });
 	});
