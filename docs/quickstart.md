@@ -196,7 +196,7 @@ In this shell, reuse the sandbox credential and choose a fresh account:
 ```sh
 export QUOTUM_BASE_URL=http://localhost:3000
 export QUOTUM_API_KEY="$TOKEN"
-export QUOTUM_ACCOUNT_ID=sdk-example
+export QUOTUM_ACCOUNT_ID="sdk-example-$(date +%s)"
 ```
 
 Then follow the SDK's build and run commands from its checkout. The example creates the account,
