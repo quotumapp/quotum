@@ -301,7 +301,8 @@ A decision that crosses invoice materialization before it commits records a late
 process clock skew cannot select another billing period. The base plan's limit anchors it: the window,
 the overage policy and any overage price are the base plan's (the newest base plan's, should an
 account hold several), or the newest add-on's when no base plan caps the feature. An add-on's
-limit adds its quantity when both are hard caps (`overagePolicy: "blocked"`) with the same reset,
+limit adds its quantity when both are hard caps (`overagePolicy: "blocked"`) with the same reset
+cadence, including equivalent spellings such as `quarter` × 1 and `month` × 3,
 and counts from the moment the add-on is active. Postpaid overage is invoiced against one item's own
 quantity, so a limit that allows it never adds up. Catalog preview and publication therefore refuse
 a catalog with `400 INVALID_REQUEST` once an add-on caps a feature that another plan caps with

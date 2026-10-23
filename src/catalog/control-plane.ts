@@ -2845,8 +2845,12 @@ function assertMeterLimitsCombine(
 		const combinable = onFeature.every(
 			({ item }) =>
 				item.overagePolicy === "blocked" &&
-				item.resetInterval === first.item.resetInterval &&
-				item.resetIntervalCount === first.item.resetIntervalCount,
+				isCadenceUnit(item.resetInterval) &&
+				isCadenceUnit(first.item.resetInterval) &&
+				sameCadence(
+					{ unit: item.resetInterval, count: item.resetIntervalCount ?? 1 },
+					{ unit: first.item.resetInterval, count: first.item.resetIntervalCount ?? 1 },
+				),
 		);
 		if (!combinable) {
 			throw new InvalidRequestError(

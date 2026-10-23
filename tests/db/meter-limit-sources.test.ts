@@ -96,6 +96,24 @@ describe("combined meter limits", () => {
 
 	it("joins only hard caps with the same reset and declared scope", () => {
 		expect(meterLimitsJoin(base, addOn)).toBe(true);
+		expect(
+			meterLimitsJoin(
+				{ ...base, reset_interval: "quarter", reset_interval_count: 1 },
+				{ ...addOn, reset_interval: "month", reset_interval_count: 3 },
+			),
+		).toBe(true);
+		expect(
+			meterLimitsJoin(
+				{ ...base, reset_interval: "week", reset_interval_count: 1 },
+				{ ...addOn, reset_interval: "day", reset_interval_count: 7 },
+			),
+		).toBe(true);
+		expect(
+			meterLimitsJoin(
+				{ ...base, reset_interval: "month", reset_interval_count: 1 },
+				{ ...addOn, reset_interval: "day", reset_interval_count: 30 },
+			),
+		).toBe(false);
 		expect(meterLimitsJoin(base, { ...addOn, reset_interval: "week" })).toBe(false);
 		expect(meterLimitsJoin(base, { ...addOn, allocation_scope: "entity" })).toBe(false);
 		// An add-on with another scope leaves the anchor's quantity alone.
