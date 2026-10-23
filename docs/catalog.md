@@ -8,12 +8,31 @@ and operator authentication plus `X-Billing-Actor`. Provider bindings adopt pre-
 products and must all be ready before the active pointer advances. Previously active features,
 plans, top-ups and gifts must be retained or listed explicitly for retirement; omission is not
 deletion.
-Retiring a plan removes it from new selection without rewriting pinned subscriptions.
-Those subscriptions still hold the plan's features, so a feature cannot be retired while a live
-subscription is pinned to a version that grants it: preview and publish answer
-`409 FEATURE_RETIREMENT_BLOCKED` naming the feature, the plan versions and how many subscriptions
-hold it. Move them with a [catalog migration](#catalog-migrations), or retire the feature after
-they end.
+Retiring a plan removes it from new selection without rewriting pinned subscriptions, trials or
+promotional plan grants, including redeemed gifts. A feature cannot be retired while any of those
+live sources grants it through its pinned version or a plan grant's copied entitlement keys. It
+also cannot be retired while a redeemed `feature_grant` promotion has unexpired, unreversed credits
+remaining, including credits held by reservations. Archiving a promotion stops new redemptions but
+leaves these existing holders protected. Fully consumed, revoked or expired promotion credits and
+ended, superseded or expired plan grants do not block retirement; expiry uses the database clock
+without waiting for maintenance. Default-plan grants follow the catalog's current marker and
+version, so their stored references do not block removing features from the default plan.
+
+Preview and publish both answer `409 FEATURE_RETIREMENT_BLOCKED` for a held feature. The message
+names the holder types and sources; `error.details` contains `featureKey` and a `holders` array:
+
+- `kind: "subscription"`: `planKey`, `planVersion` and `count` of distinct live subscriptions.
+- `kind: "plan_grant"`: `origin` (`trial` or `promotion`), `planKey`, `planVersion` and `count` of
+  distinct live grants. Gift redemptions have origin `promotion`.
+- `kind: "promotion_feature_grant"`: `promotionKey` and `count` of distinct redemptions with
+  remaining credits for the feature.
+
+When several retired features have holders, the error describes the first feature in key order.
+Move subscriptions with a [catalog migration](#catalog-migrations), end or let plan grants expire,
+and consume, revoke or let promotion credits expire before retiring the feature. Publish checks
+again so a grant created after preview blocks retirement too. This guard prevents new unsafe
+retirements; it does not reactivate features retired by an earlier revision.
+
 Preview refuses what publish would refuse against the database, so a revision it accepts is one
 publish can write: a plan version number that already exists, or one below a version the plan
 already has (`409 PLAN_VERSION_CONFLICT`), a

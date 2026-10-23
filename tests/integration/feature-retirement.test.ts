@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import type { ProjectInstanceContext } from "../../src/projects/context";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -82,13 +83,13 @@ localDescribe("retiring a feature", () => {
 		await context.sql.close();
 	});
 
-	function operator() {
+	function operator(projectKey = "acme") {
 		const { app, authHeaders } = createIntegrationApp({
 			env: { ...context.env, rateLimit: { ...context.env.rateLimit, adminLimit: 1_000_000 } },
 			repository: context.repository,
 		});
 		const headers = {
-			...(authHeaders() as Record<string, string>),
+			...(authHeaders(projectKey) as Record<string, string>),
 			"content-type": "application/json",
 			"x-billing-actor": "retirement-test",
 			"x-billing-operator-key": context.env.operatorApiKey ?? "",
@@ -108,13 +109,13 @@ localDescribe("retiring a feature", () => {
 		};
 	}
 
-	async function subscribe(): Promise<void> {
+	async function subscribe(billingAccountId = "subscriber"): Promise<void> {
 		const start = new Date();
 		const end = new Date(start.getTime() + 30 * 86_400_000);
 		await context.repository.recordStripeSubscriptionAndEnqueueProjection(project, {
-			billingAccountId: "subscriber",
-			stripeCustomerId: "cus_subscriber",
-			stripeSubscriptionId: "sub_subscriber",
+			billingAccountId,
+			stripeCustomerId: `cus_${billingAccountId}`,
+			stripeSubscriptionId: `sub_${billingAccountId}`,
 			invoiceId: null,
 			externalProductId: "prod_stripe_premium",
 			externalPriceId: "price_premium_monthly",
@@ -127,11 +128,94 @@ localDescribe("retiring a feature", () => {
 			autoRenew: true,
 			rawPayload: {},
 			eventType: "customer.subscription.updated",
-			externalEventId: "evt_subscriber",
+			externalEventId: `evt_${billingAccountId}`,
 			projectionReason: "provider_webhook",
-			projectionIdempotencyKey: "evt_subscriber:projection",
+			projectionIdempotencyKey: `evt_${billingAccountId}:projection`,
 			providerEventCreated: 1,
 		});
+	}
+
+	async function publishInitial(catalog: Json = sold, projectKey = "acme") {
+		const api = operator(projectKey);
+		const preview = await api.preview(catalog, null);
+		expect(preview.status).toBe(200);
+		expect((await api.publish(catalog, preview.body.data.previewToken, null)).status).toBe(200);
+		return api;
+	}
+
+	function trial(billingAccountId = "trial", target: ProjectInstanceContext = project) {
+		return context.repository.planGrants.startTrial(target, {
+			billingAccountId,
+			planKey: "premium",
+			durationDays: 14,
+			metadata: {},
+			idempotencyKey: `start:${billingAccountId}`,
+			actor: "retirement-test",
+		});
+	}
+
+	function createPromotion(
+		kind: "plan_grant" | "feature_grant",
+		expiresAfterSeconds: number | null = 86_400,
+		target: ProjectInstanceContext = project,
+	) {
+		return context.repository.promotions.createPromotion(target, {
+			key: kind,
+			name: kind,
+			effect:
+				kind === "plan_grant"
+					? { kind, planKey: "premium", durationUnit: "day", durationCount: 14 }
+					: { kind, items: [{ featureKey: "ai_credits", quantity: "25", expiresAfterSeconds }] },
+			codes: [{ code: kind.replaceAll("_", "-") }],
+			allowedChannels: ["web"],
+			actor: "retirement-test",
+		});
+	}
+
+	function redeem(code: string, billingAccountId = code, target: ProjectInstanceContext = project) {
+		return context.repository.promotions.redeemPromotionCode(target, {
+			billingAccountId,
+			code: code.replaceAll("_", "-"),
+			channel: "web",
+			idempotencyKey: `redeem:${billingAccountId}`,
+			actor: "retirement-test",
+		});
+	}
+
+	function check(billingAccountId: string) {
+		return context.repository.usageApi.check(project, {
+			billingAccountId,
+			featureId: "ai_credits",
+			value: "1",
+		});
+	}
+
+	function consume(billingAccountId: string, value = "1") {
+		return context.repository.usageApi.consume(project, {
+			billingAccountId,
+			featureId: "ai_credits",
+			value,
+			operationId: `consume:${billingAccountId}`,
+		});
+	}
+
+	function planHolder(origin: "trial" | "promotion", count = 1, planVersion = 1) {
+		return { kind: "plan_grant", origin, planKey: "premium", planVersion, count };
+	}
+
+	async function expectBlocked(
+		api: ReturnType<typeof operator>,
+		holders: Json[],
+		catalog: Json = retired,
+		revision = 1,
+	) {
+		const result = await api.preview(catalog, revision);
+		expect(result.status).toBe(409);
+		expect(result.body.error).toMatchObject({
+			code: "FEATURE_RETIREMENT_BLOCKED",
+			details: { featureKey: "ai_credits", holders },
+		});
+		return result;
 	}
 
 	it("is refused while a live subscription still holds it, and allowed once it has ended", async () => {
@@ -148,6 +232,10 @@ localDescribe("retiring a feature", () => {
 			code: "FEATURE_RETIREMENT_BLOCKED",
 			message:
 				"Feature ai_credits cannot be retired: 1 live subscription still holds it through plan premium version 1; migrate them to a version without it, or retire it after they end",
+			details: {
+				featureKey: "ai_credits",
+				holders: [{ kind: "subscription", planKey: "premium", planVersion: 1, count: 1 }],
+			},
 		};
 		const refusedPreview = await preview(retired, 1);
 		expect(refusedPreview.status).toBe(409);
@@ -180,4 +268,306 @@ localDescribe("retiring a feature", () => {
 		expect(lastPreview.status).toBe(200);
 		expect((await publish(featureOnly, lastPreview.body.data.previewToken, 2)).status).toBe(200);
 	});
+
+	for (const origin of ["trial", "promotion"] as const) {
+		for (const itemKind of ["allocation", "meter_limit", "unlimited_usage"] as const) {
+			it(`protects a ${origin} grant's ${itemKind}, including after plan-only retirement`, async () => {
+				const item = {
+					itemKind,
+					featureKey: "ai_credits",
+					...(itemKind === "unlimited_usage"
+						? {}
+						: { quantity: "1000", reset: { interval: "month", intervalCount: 1 } }),
+				};
+				const catalog = { ...sold, plans: [{ ...sold.plans[0], items: [item] }] };
+				const api = await publishInitial(catalog);
+				if (origin === "trial") await trial(origin);
+				else {
+					await createPromotion("plan_grant");
+					await redeem("plan_grant", origin);
+				}
+				expect((await check(origin)).allowed).toBe(true);
+				const blocked = await expectBlocked(api, [planHolder(origin)]);
+				expect(blocked.body.error.message).toContain(`1 live ${origin} plan grant`);
+				expect((await consume(origin)).allowed).toBe(true);
+
+				const planOnly = { ...catalog, plans: [], retiredPlanKeys: ["premium"] };
+				const preview = await api.preview(planOnly, 1);
+				expect(preview.status).toBe(200);
+				expect((await api.publish(planOnly, preview.body.data.previewToken, 1)).status).toBe(200);
+				expect((await check(origin)).allowed).toBe(true);
+				await expectBlocked(api, [planHolder(origin)], { ...retired, retiredPlanKeys: [] }, 2);
+			});
+		}
+	}
+
+	it("protects a copied boolean entitlement even without a plan item", async () => {
+		const boolean = { ...feature("premium"), kind: "boolean", meterKind: null, creditScale: 0 };
+		const catalog = { ...sold, features: [...sold.features, boolean] };
+		const api = await publishInitial(catalog);
+		await createPromotion("plan_grant");
+		await redeem("plan_grant");
+		const input = { billingAccountId: "plan_grant", featureId: "premium" };
+		expect(await context.repository.usageApi.check(project, input)).toMatchObject({
+			allowed: true,
+		});
+		const result = await api.preview({ ...sold, retiredFeatureKeys: ["premium"] }, 1);
+		expect(result.status).toBe(409);
+		expect(result.body.error.details).toEqual({
+			featureKey: "premium",
+			holders: [planHolder("promotion")],
+		});
+		expect(await context.repository.usageApi.check(project, input)).toMatchObject({
+			allowed: true,
+		});
+	});
+
+	it("protects the grant's pinned older version after its plan is republished", async () => {
+		const api = await publishInitial();
+		await trial();
+		const changed = {
+			...sold,
+			features: [...sold.features, feature("other_credits")],
+			plans: [
+				{
+					...sold.plans[0],
+					version: 2,
+					items: [{ ...sold.plans[0].items[0], featureKey: "other_credits" }],
+				},
+			],
+		};
+		const preview = await api.preview(changed, 1);
+		expect(preview.status).toBe(200);
+		expect((await api.publish(changed, preview.body.data.previewToken, 1)).status).toBe(200);
+		await expectBlocked(
+			api,
+			[planHolder("trial")],
+			{
+				...changed,
+				features: [feature("other_credits")],
+				retiredFeatureKeys: ["ai_credits"],
+			},
+			2,
+		);
+		expect((await check("trial")).allowed).toBe(true);
+	});
+
+	for (const kind of ["trial", "plan_grant", "feature_grant"] as const) {
+		it(`rechecks a ${kind} created after preview before publishing`, async () => {
+			const api = await publishInitial();
+			const preview = await api.preview(retired, 1);
+			expect(preview.status).toBe(200);
+			if (kind === "trial") await trial(kind);
+			else {
+				await createPromotion(kind);
+				await redeem(kind);
+			}
+			const result = await api.publish(retired, preview.body.data.previewToken, 1);
+			expect(result.status).toBe(409);
+			expect(result.body.error.code).toBe("FEATURE_RETIREMENT_BLOCKED");
+			expect(result.body.error.details.holders).toEqual([
+				kind === "feature_grant"
+					? { kind: "promotion_feature_grant", promotionKey: "feature_grant", count: 1 }
+					: planHolder(kind === "trial" ? "trial" : "promotion"),
+			]);
+			expect((await check(kind)).allowed).toBe(true);
+			expect((await consume(kind)).allowed).toBe(true);
+			const [state] = await context.sql`
+				SELECT active, (SELECT max(revision)::int FROM catalog_revisions
+					WHERE project_id = ${project.projectInstanceId}) AS revision
+				FROM features WHERE project_id = ${project.projectInstanceId} AND key = 'ai_credits'
+			`;
+			expect(state).toEqual({ active: true, revision: 1 });
+		});
+	}
+
+	for (const state of ["expired", "ended", "superseded", "elapsed"] as const) {
+		it(`allows retirement after a grant is ${state}, without relying on maintenance`, async () => {
+			const api = await publishInitial();
+			const billingAccountId = state === "superseded" ? "subscriber" : "trial";
+			const started = await trial(billingAccountId);
+			if (state === "ended") {
+				await context.repository.planGrants.endTrial(project, {
+					billingAccountId,
+					trialId: started.trial.id,
+					reason: "Finished",
+					idempotencyKey: "end",
+					actor: "retirement-test",
+				});
+			} else if (state === "superseded") {
+				await subscribe();
+				await context.sql`UPDATE subscriptions SET status = 'expired' WHERE project_id = ${project.projectInstanceId}`;
+			} else if (state === "elapsed") {
+				await context.sql`
+					UPDATE plan_grants SET starts_at = now() - interval '2 days', ends_at = now()
+					WHERE project_id = ${project.projectInstanceId}
+				`;
+			} else {
+				await context.sql`
+					UPDATE plan_grants SET status = 'expired', starts_at = now() - interval '2 days',
+						ends_at = now(), ended_at = now()
+					WHERE project_id = ${project.projectInstanceId}
+				`;
+			}
+			const [grant] = await context.sql`
+				SELECT status FROM plan_grants WHERE project_id = ${project.projectInstanceId}
+			`;
+			expect(grant?.status).toBe(state === "elapsed" ? "active" : state);
+			const preview = await api.preview(retired, 1);
+			expect(preview.status).toBe(200);
+			expect((await api.publish(retired, preview.body.data.previewToken, 1)).status).toBe(200);
+		});
+	}
+
+	for (const expiresAfterSeconds of [null, 86_400]) {
+		it(`protects ${expiresAfterSeconds === null ? "permanent" : "unexpired"} promotion credits, including archived and fully held ones`, async () => {
+			const api = await publishInitial();
+			await createPromotion("feature_grant", expiresAfterSeconds);
+			await redeem("feature_grant");
+			const holders = [
+				{ kind: "promotion_feature_grant", promotionKey: "feature_grant", count: 1 },
+			];
+			const blocked = await expectBlocked(api, holders);
+			expect(blocked.body.error.message).toContain(
+				"1 redeemed feature grant from promotion feature_grant",
+			);
+			await context.repository.promotions.archivePromotion(
+				project,
+				"feature_grant",
+				"retirement-test",
+			);
+			expect((await consume("feature_grant", "5")).allowed).toBe(true);
+			const reservation = await context.repository.usageApi.reserve(project, {
+				billingAccountId: "feature_grant",
+				featureId: "ai_credits",
+				value: "20",
+				operationId: "hold-promotion",
+			});
+			expect(reservation.allowed).toBe(true);
+			await expectBlocked(api, holders);
+		});
+	}
+
+	for (const state of ["unredeemed", "expired", "consumed", "revoked"] as const) {
+		it(`ignores ${state} feature promotions`, async () => {
+			const api = await publishInitial();
+			await createPromotion("feature_grant");
+			if (state !== "unredeemed") {
+				const result = await redeem("feature_grant");
+				if (state === "expired") {
+					await context.sql`
+						UPDATE balance_allocations SET expires_at = now()
+						WHERE project_id = ${project.projectInstanceId}
+					`;
+				} else if (state === "consumed") {
+					expect((await consume("feature_grant", "25")).allowed).toBe(true);
+				} else {
+					await context.repository.promotions.revokePromotionRedemption(project, {
+						redemptionId: result.redemption?.id ?? "",
+						reason: "Withdrawn",
+						idempotencyKey: "revoke",
+						actor: "retirement-test",
+					});
+				}
+			}
+			const preview = await api.preview(retired, 1);
+			expect(preview.status).toBe(200);
+			expect((await api.publish(retired, preview.body.data.previewToken, 1)).status).toBe(200);
+		});
+	}
+
+	it("reports distinct mixed holders in stable order for the first retired feature", async () => {
+		const catalog = {
+			...sold,
+			features: [...sold.features, feature("z_credits")],
+			plans: [
+				{
+					...sold.plans[0],
+					items: [...sold.plans[0].items, { ...sold.plans[0].items[0], featureKey: "z_credits" }],
+				},
+			],
+		};
+		const api = await publishInitial(catalog);
+		await subscribe();
+		await subscribe("another-subscriber");
+		await trial("first");
+		await trial("second");
+		await createPromotion("plan_grant");
+		await redeem("plan_grant");
+		// Matching both a copied entitlement and an item must still count each grant only once.
+		await context.sql`
+			UPDATE plan_grants SET entitlement_keys = ARRAY['ai_credits', 'z_credits']
+			WHERE project_id = ${project.projectInstanceId}
+		`;
+		await createPromotion("feature_grant");
+		await redeem("feature_grant", "bonus-first");
+		await redeem("feature_grant", "bonus-second");
+		const result = await expectBlocked(
+			api,
+			[
+				planHolder("promotion"),
+				planHolder("trial", 2),
+				{ kind: "promotion_feature_grant", promotionKey: "feature_grant", count: 2 },
+				{ kind: "subscription", planKey: "premium", planVersion: 1, count: 2 },
+			],
+			{ ...retired, retiredFeatureKeys: ["z_credits", "ai_credits"] },
+		);
+		expect(result.body.error.message).toContain("2 live trial plan grants");
+		expect(result.body.error.message).toContain("2 redeemed feature grants");
+	});
+
+	it("does not count holders belonging to another project", async () => {
+		const api = await publishInitial();
+		await publishInitial(sold, "globex");
+		const other = integrationProjectContext("globex");
+		await trial("other-trial", other);
+		await createPromotion("plan_grant", 86_400, other);
+		await redeem("plan_grant", "other-promotion", other);
+		await createPromotion("feature_grant", 86_400, other);
+		await redeem("feature_grant", "other-credits", other);
+		const preview = await api.preview(retired, 1);
+		expect(preview.status).toBe(200);
+		expect((await api.publish(retired, preview.body.data.previewToken, 1)).status).toBe(200);
+		expect(
+			await context.repository.usageApi.check(other, {
+				billingAccountId: "other-trial",
+				featureId: "ai_credits",
+				value: "1",
+			}),
+		).toMatchObject({ allowed: true });
+	});
+
+	for (const removeMarker of [false, true]) {
+		it(`preserves default-plan ${removeMarker ? "removal" : "feature updates"} before reconciliation`, async () => {
+			const free = { ...sold.plans[0], basePrice: null, providerPriced: null };
+			const catalog = {
+				...sold,
+				features: [...sold.features, feature("other_credits")],
+				plans: [free],
+				defaultPlan: { planKey: "premium", entitlementKeys: ["free_tier"] },
+			};
+			const api = await publishInitial(catalog);
+			await context.repository.usageApi.createAccount(project, "free-holder");
+			const changed = removeMarker
+				? retired
+				: {
+						...catalog,
+						features: [feature("other_credits")],
+						plans: [
+							{ ...free, version: 2, items: [{ ...free.items[0], featureKey: "other_credits" }] },
+						],
+						retiredFeatureKeys: ["ai_credits"],
+					};
+			const preview = await api.preview(changed, 1);
+			expect(preview.status).toBe(200);
+			expect((await api.publish(changed, preview.body.data.previewToken, 1)).status).toBe(200);
+			const [grant] = await context.sql`
+				SELECT origin, status FROM plan_grants WHERE project_id = ${project.projectInstanceId}
+			`;
+			expect(grant).toEqual({ origin: "default", status: "active" });
+			expect(
+				(await context.repository.getEntitlementSnapshot(project, "free-holder")).entitlements,
+			).toMatchObject([{ key: "free_tier", active: !removeMarker }]);
+		});
+	}
 });
