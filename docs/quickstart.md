@@ -187,6 +187,24 @@ output unchanged creates nothing. `bun run catalog format examples/quickstart/ca
 starter catalog the same way, rewriting its legacy `expiresAfterSeconds: null` as
 `expiry: { "mode": "forever" }`.
 
+## 9. Continue with the JavaScript SDK (optional)
+
+Keep the server running to try the
+[`@quotum/sdk` reservation example](https://github.com/quotumapp/quotum-js#ai-reservation-reference-application).
+In this shell, reuse the sandbox credential and choose a fresh account:
+
+```sh
+export QUOTUM_BASE_URL=http://localhost:3000
+export QUOTUM_API_KEY="$TOKEN"
+export QUOTUM_ACCOUNT_ID="sdk-example-$(date +%s)"
+```
+
+Then follow the SDK's build and run commands from its checkout. The example creates the account,
+which receives 100 monthly AI credits from the free plan published in step 8. It uses `api_calls`,
+reserves 3 units, and confirms 2; replaying the same job does not charge again. A custom meter can
+be selected with `QUOTUM_FEATURE_ID` after publishing and funding it. These fixtures do not define
+`model_tokens`.
+
 ## Clean up
 
 ```sh
