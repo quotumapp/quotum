@@ -551,7 +551,7 @@
     {
       "code": "FEATURE_RETIREMENT_BLOCKED",
       "sources": [
-        "src/catalog/control-plane.ts"
+        "src/catalog/feature-retirement.ts"
       ]
     },
     {

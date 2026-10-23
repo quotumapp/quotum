@@ -212,6 +212,48 @@ localDescribe("Gift purchases integration", () => {
 		await context.sql.close();
 	});
 
+	it("blocks feature retirement while a redeemed gift still grants its pinned plan", async () => {
+		await buy();
+		const [code] = await codes();
+		expect(code).toBeDefined();
+		const redeemed = await api().redeem("recipient", code?.code ?? "", "redeem-gift");
+		expect(redeemed.status).toBe(200);
+		expect(redeemed.body.data).toMatchObject({ kind: "plan_granted", duplicate: false });
+		await expect(
+			context.repository.previewCatalog(project, {
+				expectedRevision: revision,
+				actor: "gift-purchases",
+				catalog: {
+					features: aiCreditsCatalog.features.filter((feature) => feature.key !== "ai_credits"),
+					plans: [],
+					topups: [],
+					rateCards: [],
+					gifts: [],
+					retiredFeatureKeys: ["ai_credits"],
+					retiredPlanKeys: ["premium"],
+					retiredTopupKeys: ["ai_credits_10"],
+					retiredGiftKeys: [gift.key],
+				},
+			}),
+		).rejects.toMatchObject({
+			code: "FEATURE_RETIREMENT_BLOCKED",
+			status: 409,
+			details: {
+				featureKey: "ai_credits",
+				holders: [
+					{ kind: "plan_grant", origin: "promotion", planKey: "premium", planVersion: 1, count: 1 },
+				],
+			},
+		});
+		expect(
+			await context.repository.usageApi.check(project, {
+				billingAccountId: "recipient",
+				featureId: "ai_credits",
+				value: "1",
+			}),
+		).toMatchObject({ allowed: true });
+	});
+
 	it("mints a purchase's codes once, however many events report it completed", async () => {
 		await buy();
 
