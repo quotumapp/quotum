@@ -377,8 +377,9 @@ cadence than the one it replaced, a republished plan's limit and a contract limi
 from a plan default all start there, and a replacing limit that counts the same window keeps the
 higher of that and the count of the one it replaced. The count is read once, when a write opens the
 window, from the same events a usage alert starts from, and `check` and `GET /controls` read it the
-same way before then; a lifetime window reads the feature's whole history for the customer at that
-point. A spend limit has no recorded charge to read back from usage: it counts the spend charged
+same way before then. Lifetime controls and alerts read net durable monthly rollups, including
+closed months and later corrections, so pruning raw events cannot restore lifetime allowance.
+Existing lifetime windows catch up from that history before authorizing new usage. A spend limit has no recorded charge to read back from usage: it counts the spend charged
 after it took effect, and a replacing spend limit with the same window keeps the count of the one it
 replaced. Usage that a confirmation charged to an earlier window of the same cadence, the one its
 hold was taken in, does not count again in the window it was recorded in; a window of another

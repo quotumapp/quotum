@@ -19,6 +19,7 @@ import {
 	controlWindowBounds,
 	eventInControlReachSql,
 	openingControlConsumptionSql,
+	readAlertWindowUsage,
 	readControlClock,
 	recordedControlConsumptionSql,
 	resolveControlLimits,
@@ -952,7 +953,22 @@ export async function recordUsageAlertDelta(
 		// The alert keeps no count for a window it has left, so a correction of its usage changes nothing.
 		if (correcting && !sameWindow) continue;
 		const currentUnits = sameWindow ? signedDecimalToUnits(String(state.current_value), 9) : 0n;
-		const nextUnits = currentUnits + deltaUnits > 0n ? currentUnits + deltaUnits : 0n;
+		const aggregateUnits =
+			alert.interval === "lifetime"
+				? decimalToUnits(
+						await readAlertWindowUsage(executor, {
+							projectId: input.projectId,
+							customerId: input.customerId,
+							entityId: alert.entity_id === null ? null : String(alert.entity_id),
+							featureId: input.featureId,
+							start: bounds.start,
+							end: null,
+						}),
+						9,
+					)
+				: currentUnits + deltaUnits;
+		// The transaction has already updated the rollup; its lifetime total includes this delta.
+		const nextUnits = aggregateUnits > 0n ? aggregateUnits : 0n;
 		const thresholdUnits = decimalToUnits(threshold, 9);
 		const nextCrossed = nextUnits >= thresholdUnits;
 		const priorCrossed = sameWindow && state.crossed;

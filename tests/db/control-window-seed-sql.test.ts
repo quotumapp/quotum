@@ -29,10 +29,23 @@ describe("the usage a limit's new window starts from", () => {
 	});
 
 	it("leaves a plain consumption out of the lookup and keeps it for the rest", () => {
-		const seed = renderDrizzleSql(recordedControlConsumptionSql(scope, drizzleSql`false`));
+		const seed = renderDrizzleSql(
+			recordedControlConsumptionSql(
+				{ ...scope, windowEndAt: "2026-02-01T00:00:00.000Z" },
+				drizzleSql`false`,
+			),
+		);
 		expect(seed).toContain(
 			"event.operation = 'consume' OR NOT (policy.interval <> 'lifetime' AND EXISTS (",
 		);
 		expect(seed).toContain("policy.control_kind = 'usage_limit'");
+	});
+	it("uses retained aggregates for lifetime windows even when a window already exists", () => {
+		const seed = renderDrizzleSql(
+			recordedControlConsumptionSql({ ...scope, windowEndAt: null }, drizzleSql`true`),
+		);
+		expect(seed).toContain("JOIN usage_event_rollups event");
+		expect(seed).not.toContain("JOIN usage_events event");
+		expect(seed).not.toContain("CASE WHEN true");
 	});
 });

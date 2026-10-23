@@ -1250,6 +1250,19 @@ export async function readAlertWindowUsage(
 		end: Date | null;
 	},
 ): Promise<string> {
+	if (input.end === null) {
+		const row = await executeOne<{ used: unknown }>(
+			executor,
+			drizzleSql`
+			SELECT GREATEST(COALESCE(sum(quantity), 0), 0)::text AS used
+			FROM usage_event_rollups
+			WHERE project_id = ${input.projectId} AND customer_id = ${input.customerId}
+				AND meter_feature_id = ${input.featureId}::bigint
+				AND (${input.entityId}::bigint IS NULL OR entity_id = ${input.entityId}::bigint)
+		`,
+		);
+		return databaseDecimal(row?.used ?? "0", "lifetime alert usage");
+	}
 	const row = await executeOne<{ used: unknown }>(
 		executor,
 		drizzleSql`
@@ -1438,6 +1451,21 @@ export function recordedControlConsumptionSql(
 	},
 	windowExists: DrizzleSQL,
 ): DrizzleSQL {
+	// Lifetime history survives raw-event retention. Re-read it for an existing window too,
+	// so a window opened by an older release catches up before authorizing another mutation.
+	if (input.windowEndAt === null)
+		return drizzleSql`COALESCE((
+		SELECT GREATEST(COALESCE(sum(event.quantity), 0), 0)
+		FROM control_policies policy
+		${controlReachSql(input)}
+		JOIN usage_event_rollups event
+			ON event.project_id = policy.project_id AND event.meter_feature_id = policy.feature_id
+		WHERE policy.project_id = ${input.projectId} AND policy.id = ${input.policyId}::bigint
+			AND policy.control_kind = 'usage_limit'
+			AND event.customer_id = ${input.customerId}
+			AND (policy.entity_id IS NULL OR event.entity_id = policy.entity_id)
+			AND ${eventInControlReachSql()}
+	), 0)`;
 	return drizzleSql`CASE WHEN ${windowExists} THEN 0 ELSE COALESCE((
 		SELECT GREATEST(COALESCE(sum(event.quantity), 0), 0)
 		FROM control_policies policy
