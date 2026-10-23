@@ -64,7 +64,7 @@ import {
 } from "./controls-runtime";
 import { defaultPlanAllowanceResumableSql } from "./default-plan-sql";
 import { enqueueUsageProjection } from "./entitlements";
-import { ensureCustomer } from "./identities";
+import { ensureCustomer, resolveUsageCustomer } from "./identities";
 import { shrinkKeptLevels } from "./kept-levels";
 import { queryMeterLimitRows } from "./meter-limit-sources";
 import { storedCadence } from "./meter-limit-windows";
@@ -205,7 +205,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 			idempotencyKey: input.operationId,
 		};
 		return this.transaction(async (tx) => {
-			await requireBillingAccount(tx, projectId, input.billingAccountId);
+			await resolveUsageCustomer(tx, projectId, input.billingAccountId);
 			return runUsageOperation<UsageConsumeResult, { feature: FeatureRow }>(
 				tx,
 				project,

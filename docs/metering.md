@@ -51,7 +51,8 @@ Identifiers are exact, case-sensitive strings of 1–200 characters without surr
 Usage checks, usage mutations and entity creation require an existing account: for an account
 that was never created they answer `404 BILLING_ACCOUNT_NOT_FOUND`; for an id that a
 [customer erasure](operations.md#customer-erasure) removed, `consume` and `reserve` answer
-`409 BILLING_ACCOUNT_ERASED` for the length of its tombstone. Balance, billing-summary and
+`409 BILLING_ACCOUNT_ERASED` for the length of its tombstone, including on the public HTTP routes.
+Ordinary account reads continue to answer `404 BILLING_ACCOUNT_NOT_FOUND`. Balance, billing-summary and
 controls reads still answer such an account from the catalog's
 [default plan](grants.md#default-plan), without recording it; creating the account records it with
 its default-plan grant. The `/billing-account` child resource remains the provider-specific Stripe

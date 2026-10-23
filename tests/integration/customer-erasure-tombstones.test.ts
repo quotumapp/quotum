@@ -85,6 +85,44 @@ localDescribe("customer erasure tombstones", () => {
 		return { customerId: customer.id as string, erasureId: erasure.id as string };
 	}
 
+	it.each(["consume", "reservations"] as const)(
+		"returns the tombstone error through public usage/%s without changing ordinary reads",
+		async (operation) => {
+			await eraseAccount(erasedId, keyNew);
+			configureErasureKeyring({ current: keyNew, previous: null });
+			const { app, authHeaders } = createIntegrationApp({
+				env: context.env,
+				repository: context.repository,
+			});
+			for (const [accountId, status, code] of [
+				[erasedId, 409, "BILLING_ACCOUNT_ERASED"],
+				["never-created", 404, "BILLING_ACCOUNT_NOT_FOUND"],
+			] as const) {
+				const response = await testRequest(
+					app,
+					`/v1/billing-accounts/${encodeURIComponent(accountId)}/usage/${operation}`,
+					{
+						method: "POST",
+						headers: {
+							...authHeaders("acme"),
+							"content-type": "application/json",
+							"idempotency-key": `tombstone-${operation}`,
+						},
+						body: JSON.stringify({ featureId: "not-present", value: "1" }),
+					},
+				);
+				expect(response.status).toBe(status);
+				expect(await response.json()).toMatchObject({ error: { code } });
+			}
+			const ordinaryRead = await testRequest(
+				app,
+				`/v1/billing-accounts/${encodeURIComponent(erasedId)}`,
+				{ headers: authHeaders("acme") },
+			);
+			expect(ordinaryRead.status).toBe(404);
+		},
+	);
+
 	const accountRows = async (projectId: string, id: string) =>
 		await context.sql`SELECT id FROM customers WHERE project_id = ${projectId} AND billing_account_id = ${id}`;
 

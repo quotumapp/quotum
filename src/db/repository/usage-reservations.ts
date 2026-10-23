@@ -20,7 +20,7 @@ import {
 } from "../../billing/usage-api";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { RepositoryModule } from "./base";
-import { requireBillingAccount } from "./billing-accounts";
+import { resolveUsageCustomer } from "./identities";
 import {
 	confirmWithinTransaction,
 	releaseWithinTransaction,
@@ -124,7 +124,7 @@ export class UsageReservationRepository extends RepositoryModule {
 			expiresInSeconds,
 		};
 		return this.transaction(async (tx) => {
-			await requireBillingAccount(tx, projectId, input.billingAccountId);
+			await resolveUsageCustomer(tx, projectId, input.billingAccountId);
 			return runUsageOperation<UsageReserveResult, FeatureRow>(
 				tx,
 				project,
