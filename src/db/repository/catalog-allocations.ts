@@ -1,5 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type { SubscriptionStatus } from "../../billing/types";
+import { lockCustomerAllocationRows } from "./allocation-order";
 import {
 	expiresAtSql,
 	expiresSql,
@@ -434,6 +435,9 @@ export async function materializeSubscriptionAllocations(
 			? version.previousPlanVersionId
 			: null;
 
+	if (outgoingPlanVersionId !== null)
+		await lockCustomerAllocationRows(executor, input.projectId, input.customerId);
+
 	if (!allocationFundingStatuses.has(input.status)) {
 		if (input.status === "refunded" || input.status === "revoked") {
 			await executeRows(
@@ -615,6 +619,7 @@ export async function materializeSubscriptionAllocations(
 		// Carry needs the incoming allowances granted and the outgoing ones still live.
 		if (version.carryOver !== null && version.changeId !== null) {
 			await carryOverAllowances(executor, {
+				allocationsLocked: true,
 				projectId: input.projectId,
 				customerId: input.customerId,
 				subscriptionId: input.subscriptionId,

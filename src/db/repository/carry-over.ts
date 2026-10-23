@@ -1,6 +1,7 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { databaseDecimal, decimalToUnits, unitsToDecimal } from "../../billing/decimal";
 import type { CadenceUnit } from "../../shared/cadence";
+import { lockCustomerAllocationRows } from "./allocation-order";
 import { lifetimeItemSql } from "./cadence-sql";
 import { planGrantWindowBounds, storedCadence } from "./meter-limit-windows";
 import { executeOne, executeRows, jsonb } from "./query";
@@ -10,6 +11,8 @@ import type { QueryExecutor } from "./types";
 const allocationScale = 9;
 
 export interface CarryOverInput {
+	/** The enclosing version switch already locked existing allocations in spend order. */
+	allocationsLocked?: boolean;
 	projectId: string;
 	customerId: string;
 	subscriptionId: string;
@@ -30,6 +33,9 @@ export async function carryOverAllowances(
 	executor: QueryExecutor,
 	input: CarryOverInput,
 ): Promise<void> {
+	if (input.balances.length === 0 && input.usages.length === 0) return;
+	if (!input.allocationsLocked)
+		await lockCustomerAllocationRows(executor, input.projectId, input.customerId);
 	if (input.balances.length > 0) await carryOverBalances(executor, input);
 	if (input.usages.length > 0) await carryOverUsage(executor, input);
 }
