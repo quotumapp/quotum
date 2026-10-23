@@ -12,6 +12,7 @@ import { toIso } from "../../shared/date";
 import { RepositoryModule } from "./base";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
+import { workerRetryAtSql, workerStaleBeforeSql } from "./worker-clock";
 
 type Timestamp = Date | string;
 
@@ -72,7 +73,7 @@ export interface PromotionMaintenanceCounts {
  * predicate of `idx_billing_promotion_provider_objects_due`: Postgres uses a partial index only
  * when the query implies the predicate, and otherwise every poll scans the table.
  */
-export function dueStripePromotionObjectsSql(limit: number, staleBefore: Date): DrizzleSQL {
+export function dueStripePromotionObjectsSql(limit: number, staleAfterMs: number): DrizzleSQL {
 	return drizzleSql`
 		SELECT o.project_id, o.id
 		FROM promotion_provider_objects o
@@ -82,7 +83,7 @@ export function dueStripePromotionObjectsSql(limit: number, staleBefore: Date): 
 			ON c.project_id = o.project_id AND c.id = o.promotion_code_id
 		WHERE o.provider = 'stripe'
 			AND o.next_attempt_at <= now()
-			AND (o.locked_at IS NULL OR o.locked_at < ${staleBefore.toISOString()})
+			AND (o.locked_at IS NULL OR o.locked_at < ${workerStaleBeforeSql(staleAfterMs)})
 			AND (
 				o.status = 'pending'
 				OR (
@@ -217,7 +218,7 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 	async claimStripeObjects(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<PromotionStripeSyncJob[]> {
 		if (workerId.trim() === "") throw new Error("Promotion worker id is required");
 		return await this.transaction(async (tx) => {
@@ -225,7 +226,7 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 				tx,
 				drizzleSql`
 					WITH due AS (
-						${dueStripePromotionObjectsSql(limit, staleBefore)}
+						${dueStripePromotionObjectsSql(limit, staleAfterMs)}
 					)
 					UPDATE promotion_provider_objects o
 					SET locked_at = now(), locked_by = ${workerId}, attempts = o.attempts + 1, updated_at = now()
@@ -295,7 +296,7 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 	): Promise<PromotionStripeSyncJob | null> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
-			const staleBefore = new Date(Date.now() - 5 * 60_000).toISOString();
+			const staleAfterMs = 5 * 60_000;
 			const claimed = await executeOne<{ project_id: string; id: string }>(
 				tx,
 				drizzleSql`
@@ -305,7 +306,7 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 						AND id = ${objectId}
 						AND provider = 'stripe'
 						AND status = 'pending'
-						AND (locked_at IS NULL OR locked_at < ${staleBefore}::timestamptz)
+						AND (locked_at IS NULL OR locked_at < ${workerStaleBeforeSql(staleAfterMs)})
 					RETURNING project_id, id
 				`,
 			);
@@ -320,8 +321,8 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 		outcome:
 			| { kind: "ready"; externalId: string; providerActive: boolean }
 			| { kind: "retired"; externalId: string | null }
-			| { kind: "failed"; error: string; nextAttemptAt: Date | null }
-			| { kind: "deferred"; error: string; nextAttemptAt: Date },
+			| { kind: "failed"; error: string; retryDelayMs: number | null }
+			| { kind: "deferred"; error: string; retryDelayMs: number },
 	): Promise<void> {
 		const updated = await executeOne<{ id: string }>(
 			this.database,
@@ -348,16 +349,16 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 						? drizzleSql`
 							UPDATE promotion_provider_objects
 							SET attempts = GREATEST(attempts - 1, 0), error = ${outcome.error.slice(0, 2000)},
-								next_attempt_at = ${outcome.nextAttemptAt.toISOString()}, locked_at = NULL,
+								next_attempt_at = ${workerRetryAtSql(outcome.retryDelayMs)}, locked_at = NULL,
 								locked_by = NULL, updated_at = now()
 							WHERE project_id = ${projectId} AND id = ${objectId} AND locked_by = ${workerId}
 							RETURNING id
 						`
 						: drizzleSql`
 							UPDATE promotion_provider_objects
-							SET status = CASE WHEN ${outcome.nextAttemptAt === null} THEN 'failed' ELSE status END,
+							SET status = CASE WHEN ${outcome.retryDelayMs === null} THEN 'failed' ELSE status END,
 								error = ${outcome.error.slice(0, 2000)},
-								next_attempt_at = COALESCE(${outcome.nextAttemptAt?.toISOString() ?? null}::timestamptz, next_attempt_at),
+								next_attempt_at = COALESCE(${workerRetryAtSql(outcome.retryDelayMs)}, next_attempt_at),
 								locked_at = NULL, locked_by = NULL, updated_at = now()
 							WHERE project_id = ${projectId} AND id = ${objectId} AND locked_by = ${workerId}
 							RETURNING id

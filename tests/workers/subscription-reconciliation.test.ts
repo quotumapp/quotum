@@ -80,12 +80,16 @@ function createRepository({
 				}
 				return Promise.resolve(noticeResult);
 			},
-			claimProviderSubscriptionReconciliations(workerId: string, limit: number, staleBefore: Date) {
+			claimProviderSubscriptionReconciliations(
+				workerId: string,
+				limit: number,
+				staleAfterMs: number,
+			) {
 				calls.push({
 					method: "claimProviderSubscriptionReconciliations",
 					workerId,
 					limit,
-					staleBefore: staleBefore.toISOString(),
+					staleAfterMs: staleAfterMs,
 				});
 				return Promise.resolve(subscriptions);
 			},
@@ -108,14 +112,14 @@ function createRepository({
 				_projectId: string,
 				subscriptionId: string,
 				error: string,
-				nextAttemptAt: Date,
+				retryDelayMs: number,
 				workerId: string,
 			) {
 				calls.push({
 					method: "markProviderSubscriptionReconciliationFailed",
 					subscriptionId,
 					error,
-					nextAttemptAt: nextAttemptAt.toISOString(),
+					retryDelayMs: retryDelayMs,
 					workerId,
 				});
 				if (failError !== undefined) {
@@ -209,7 +213,7 @@ describe("SubscriptionReconciliationWorker", () => {
 				method: "claimProviderSubscriptionReconciliations",
 				workerId: "worker-a",
 				limit: 10,
-				staleBefore: "2026-05-31T00:05:00.000Z",
+				staleAfterMs: 300000,
 			},
 			{ method: "reconcileExpiredSubscriptions", limit: 10 },
 			{ method: "reconcilePlanGrants", limit: 10 },
@@ -377,7 +381,7 @@ describe("SubscriptionReconciliationWorker", () => {
 					method: "claimProviderSubscriptionReconciliations",
 					workerId: "worker-a",
 					limit: 10,
-					staleBefore: "2026-05-31T00:05:00.000Z",
+					staleAfterMs: 300000,
 				},
 				{
 					method: "markProviderSubscriptionReconciliationSucceeded",
@@ -445,14 +449,14 @@ describe("SubscriptionReconciliationWorker", () => {
 			method: "markProviderSubscriptionReconciliationFailed",
 			subscriptionId: "subscription_missing",
 			error: "Subscription reconciliation provider is not configured: stripe",
-			nextAttemptAt: "2026-05-31T00:11:00.000Z",
+			retryDelayMs: 60000,
 			workerId: "worker-a",
 		});
 		expect(calls).toContainEqual({
 			method: "markProviderSubscriptionReconciliationFailed",
 			subscriptionId: "subscription_error",
 			error: "Google API unavailable",
-			nextAttemptAt: "2026-05-31T00:12:00.000Z",
+			retryDelayMs: 120000,
 			workerId: "worker-a",
 		});
 		expect(metrics.renderPrometheus()).toContain(
@@ -507,7 +511,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			method: "markProviderSubscriptionReconciliationFailed",
 			subscriptionId: "subscription_final",
 			error: "Apple API unavailable",
-			nextAttemptAt: "2026-06-01T00:10:00.000Z",
+			retryDelayMs: 86400000,
 			workerId: "worker-a",
 		});
 	});
@@ -559,7 +563,7 @@ describe("SubscriptionReconciliationWorker", () => {
 			method: "markProviderSubscriptionReconciliationFailed",
 			subscriptionId: "subscription_failed",
 			error: "Apple API unavailable",
-			nextAttemptAt: "2026-05-31T00:11:00.000Z",
+			retryDelayMs: 60000,
 			workerId: "worker-a",
 		});
 		expect(calls).toContainEqual({

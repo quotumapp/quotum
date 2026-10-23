@@ -13,7 +13,7 @@ import {
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
-import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { calculateRetryDelayMs, normalizeWorkerError } from "./backoff";
 import { startLeaseHeartbeat } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
@@ -80,7 +80,7 @@ export interface StoreEventReplayRepository {
 		projectId: string,
 		eventId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void>;
 	/** Ends a job whose account was erased, blanking the payload instead of retrying it. */
@@ -125,7 +125,6 @@ export class StoreEventReplayWorker {
 	private readonly repository: StoreEventReplayRepository;
 	private readonly providers: StoreEventReplayProviders | StoreEventReplayProviderSelector;
 	private readonly projectContextResolver: ProjectInstanceContextResolver;
-	private readonly now: () => Date;
 	private readonly jitterMs: () => number;
 	private readonly logger: BillingLogger;
 	private readonly metrics: BillingMetrics;
@@ -138,7 +137,6 @@ export class StoreEventReplayWorker {
 		repository,
 		providers,
 		projectContextResolver,
-		now = () => new Date(),
 		jitterMs = () => Math.floor(Math.random() * 1000),
 		logger = createNoopBillingLogger(),
 		metrics = createNoopBillingMetrics(),
@@ -150,7 +148,6 @@ export class StoreEventReplayWorker {
 		this.repository = repository;
 		this.providers = providers;
 		this.projectContextResolver = projectContextResolver;
-		this.now = now;
 		this.jitterMs = jitterMs;
 		this.logger = logger;
 		this.metrics = metrics;
@@ -351,10 +348,9 @@ export class StoreEventReplayWorker {
 			);
 			return;
 		}
-		const nextAttemptAt = calculateNextAttemptAt({
+		const retryDelayMs = calculateRetryDelayMs({
 			attempts: event.attempts,
 			maxAttempts: this.maxAttempts,
-			now: this.now(),
 			jitterMs: this.jitterMs(),
 		});
 
@@ -362,7 +358,7 @@ export class StoreEventReplayWorker {
 			event.project_id,
 			event.id,
 			normalizeWorkerError(error),
-			nextAttemptAt,
+			retryDelayMs,
 			this.workerId,
 		);
 	}

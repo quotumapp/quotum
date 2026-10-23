@@ -974,11 +974,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			external_price_id: "price_credits_10",
 		});
 
-		const [job] = await context.repository.claimAutoTopupJobs(
-			"auto-worker",
-			10,
-			new Date(Date.now() - 300_000),
-		);
+		const [job] = await context.repository.claimAutoTopupJobs("auto-worker", 10, 300_000);
 		expect(job).toMatchObject({
 			billingAccountId: "topup-account",
 			externalCustomerId: "cus_auto_topup",
@@ -987,13 +983,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			maximumChargeMinor: 1000,
 			currency: "USD",
 		});
-		expect(
-			await context.repository.claimAutoTopupJobs(
-				"other-worker",
-				10,
-				new Date(Date.now() - 300_000),
-			),
-		).toEqual([]);
+		expect(await context.repository.claimAutoTopupJobs("other-worker", 10, 300_000)).toEqual([]);
 		const [reserved] = await context.sql<
 			Array<{ purchases: number; spend: string; reserved: boolean }>
 		>`
@@ -1104,11 +1094,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			actor: "integration-test",
 		});
 		await consume("topup-account", "6", "topup:trigger");
-		const [job] = await context.repository.claimAutoTopupJobs(
-			"auto-worker",
-			10,
-			new Date(Date.now() - 300_000),
-		);
+		const [job] = await context.repository.claimAutoTopupJobs("auto-worker", 10, 300_000);
 		if (job === undefined) throw new Error("Expected a claimed auto top-up job");
 
 		// Tax raises the settled charge above the 499 list price.
@@ -1281,17 +1267,12 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			actor: "integration-test",
 		});
 		await consume("failure-account", "6", "failure:trigger");
-		const [first] = await context.repository.claimAutoTopupJobs(
-			"auto-worker",
-			10,
-			new Date(Date.now() - 300_000),
-		);
-		const retryAt = new Date((await databaseNow(context.sql)).getTime() - 1_000);
+		const [first] = await context.repository.claimAutoTopupJobs("auto-worker", 10, 300_000);
 		expect(
 			await context.repository.markAutoTopupFailed(first.projectId, first.jobId, "auto-worker", {
 				kind: "retryable",
 				error: "temporary network failure",
-				nextAttemptAt: retryAt,
+				retryDelayMs: 0,
 			}),
 		).toEqual({ retryScheduled: true, circuitOpened: false });
 		const [afterRetry] = await context.sql<
@@ -1302,16 +1283,12 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		`;
 		expect(afterRetry).toEqual({ purchases: 0, spend: "0", failures: 1, status: "cooldown" });
 
-		const [second] = await context.repository.claimAutoTopupJobs(
-			"auto-worker",
-			10,
-			new Date(Date.now() - 300_000),
-		);
+		const [second] = await context.repository.claimAutoTopupJobs("auto-worker", 10, 300_000);
 		expect(
 			await context.repository.markAutoTopupFailed(second.projectId, second.jobId, "auto-worker", {
 				kind: "action_required",
 				error: "saved payment method requires authentication",
-				nextAttemptAt: null,
+				retryDelayMs: null,
 				externalInvoiceId: "in_action",
 				externalPaymentId: "pi_action",
 			}),
@@ -1376,16 +1353,12 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			actor: "integration-test",
 		});
 		await consume("failed-account", "6", "failed:trigger");
-		const [job] = await context.repository.claimAutoTopupJobs(
-			"auto-worker",
-			10,
-			new Date(Date.now() - 300_000),
-		);
+		const [job] = await context.repository.claimAutoTopupJobs("auto-worker", 10, 300_000);
 
 		await context.repository.markAutoTopupFailed(job.projectId, job.jobId, "auto-worker", {
 			kind: "retryable",
 			error: "card declined",
-			nextAttemptAt: null,
+			retryDelayMs: null,
 		});
 
 		const events = await recordedEvents(context.sql, project.projectInstanceId);
@@ -1418,16 +1391,12 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			actor: "integration-test",
 		});
 		await consume("budget-account", "6", "budget:trigger");
-		const [job] = await context.repository.claimAutoTopupJobs(
-			"auto-worker",
-			10,
-			new Date(Date.now() - 300_000),
-		);
+		const [job] = await context.repository.claimAutoTopupJobs("auto-worker", 10, 300_000);
 
 		await context.repository.markAutoTopupFailed(job.projectId, job.jobId, "auto-worker", {
 			kind: "safety_limit_exceeded",
 			error: "Provider charge exceeded the configured auto top-up safety budget",
-			nextAttemptAt: null,
+			retryDelayMs: null,
 			externalInvoiceId: "in_over_budget",
 		});
 
@@ -1501,11 +1470,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 		expect(await consumeAs("team-b", "10", "entity-topup:b")).toMatchObject({ allowed: true });
 		expect(await scheduled()).toEqual([{ policy_id: account.id }, { policy_id: teamB.id }]);
 
-		const jobs = await context.repository.claimAutoTopupJobs(
-			"auto-worker",
-			10,
-			new Date(Date.now() - 300_000),
-		);
+		const jobs = await context.repository.claimAutoTopupJobs("auto-worker", 10, 300_000);
 		expect(jobs.map((job) => job.policyId).sort()).toEqual([account.id, teamB.id].sort());
 		for (const job of jobs) {
 			await context.repository.markAutoTopupSucceeded(job.projectId, job.jobId, "auto-worker", {

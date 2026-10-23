@@ -13,6 +13,7 @@ import { enqueueProjectionSyncJob, recomputeCustomerEntitlements } from "./entit
 import { upsertPurchase } from "./mutations";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
+import { readWorkerClock, workerRetryAtSql, workerStaleBeforeSql } from "./worker-clock";
 
 type AutoTopupFailureKind = "retryable" | "action_required" | "safety_limit_exceeded";
 
@@ -62,7 +63,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 	async claimAutoTopupJobs(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<AutoTopupJob[]> {
 		if (workerId.trim() === "") throw new Error("Auto top-up worker id is required");
 		if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
@@ -75,7 +76,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 				SELECT id
 				FROM auto_topup_jobs
 				WHERE (status = 'pending' AND next_attempt_at <= now())
-					OR (status = 'processing' AND locked_at < ${staleBefore.toISOString()})
+					OR (status = 'processing' AND locked_at < ${workerStaleBeforeSql(staleAfterMs)})
 				ORDER BY next_attempt_at, created_at, id
 				LIMIT ${limit}
 				FOR UPDATE SKIP LOCKED
@@ -100,7 +101,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 		const row = await executeOne(
 			this.database,
 			drizzleSql`
-			UPDATE auto_topup_jobs SET locked_at = now(), updated_at = now()
+			UPDATE auto_topup_jobs SET locked_at = clock_timestamp(), updated_at = now()
 			WHERE project_id = ${projectId} AND id = ${jobId}::uuid
 				AND status = 'processing' AND locked_by = ${workerId}
 			RETURNING id
@@ -134,7 +135,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 			}
 			requireProcessingLock(job, workerId);
 
-			const now = new Date();
+			const now = await readWorkerClock(tx);
 			const state = await normalizeInterval(tx, job, now);
 			const reservationIsCurrent = sameInstant(
 				job.budget_interval_started_at,
@@ -267,7 +268,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 		input: {
 			kind: AutoTopupFailureKind;
 			error: string;
-			nextAttemptAt: Date | null;
+			retryDelayMs: number | null;
 			externalInvoiceId?: string | null;
 			externalPaymentId?: string | null;
 		},
@@ -276,7 +277,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 			const job = await lockJobForCompletion(tx, projectId, jobId);
 			if (job === null) throw new Error(`Auto top-up job ${jobId} was not found`);
 			requireProcessingLock(job, workerId);
-			const now = new Date();
+			const now = await readWorkerClock(tx);
 			const state = await normalizeInterval(tx, job, now);
 			const reserved = sameInstant(job.budget_interval_started_at, state.intervalStartedAt);
 			const expected = safeMinor(job.amount_minor, "scheduled auto top-up amount");
@@ -285,14 +286,14 @@ export class AutoTopupJobRepository extends RepositoryModule {
 			const failures = job.consecutive_failures + 1;
 			const terminalKind = input.kind !== "retryable";
 			const circuitOpened = terminalKind || failures >= job.max_consecutive_failures;
-			const retryScheduled = !circuitOpened && input.nextAttemptAt !== null;
+			const retryScheduled = !circuitOpened && input.retryDelayMs !== null;
 			const error = input.error.trim().slice(0, 2_000) || "Auto top-up failed";
 			await executeOne(
 				tx,
 				drizzleSql`
 				UPDATE auto_topup_jobs
 				SET status = ${retryScheduled ? "pending" : input.kind === "retryable" ? "failed" : "provider_action_required"},
-					next_attempt_at = ${input.nextAttemptAt?.toISOString() ?? now.toISOString()},
+					next_attempt_at = COALESCE(${workerRetryAtSql(input.retryDelayMs)}, clock_timestamp()),
 					external_invoice_id = COALESCE(${input.externalInvoiceId ?? null}, external_invoice_id),
 					external_payment_id = COALESCE(${input.externalPaymentId ?? null}, external_payment_id),
 					last_error = ${error}, completed_at = ${retryScheduled ? null : now.toISOString()},
@@ -382,7 +383,7 @@ async function prepareClaimedJob(
 	row: ClaimedJobRow,
 	workerId: string,
 ): Promise<AutoTopupJob | null> {
-	const now = new Date();
+	const now = await readWorkerClock(executor);
 	const normalized = await normalizeInterval(executor, row, now);
 	if (!row.policy_active || row.state_status === "suspended") {
 		await terminateUnclaimableJob(
@@ -430,7 +431,7 @@ async function prepareClaimedJob(
 		executor,
 		drizzleSql`
 		UPDATE auto_topup_jobs
-		SET status = 'processing', attempts = attempts + 1, locked_at = ${now.toISOString()},
+		SET status = 'processing', attempts = attempts + 1, locked_at = clock_timestamp(),
 			locked_by = ${workerId}, budget_reserved_at = COALESCE(budget_reserved_at, ${now.toISOString()}),
 			budget_interval_started_at = ${normalized.intervalStartedAt.toISOString()}, updated_at = now()
 		WHERE project_id = ${row.project_id} AND id = ${row.id}

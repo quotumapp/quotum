@@ -7,7 +7,7 @@ import {
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderAdapter } from "../providers/contract";
-import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { calculateRetryDelayMs, normalizeWorkerError } from "./backoff";
 import { JobLeaseRenewalError, jobHeartbeatInterval, startJobLeases } from "./job-leases";
 import type { LeaseHeartbeatTimers } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
@@ -20,7 +20,7 @@ export interface PromotionMaintenanceRepository {
 	claimStripeObjects(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<PromotionStripeSyncJob[]>;
 	markStripeObjectOutcome(
 		projectId: string,
@@ -29,8 +29,8 @@ export interface PromotionMaintenanceRepository {
 		outcome:
 			| { kind: "ready"; externalId: string; providerActive: boolean }
 			| { kind: "retired"; externalId: string | null }
-			| { kind: "failed"; error: string; nextAttemptAt: Date | null }
-			| { kind: "deferred"; error: string; nextAttemptAt: Date },
+			| { kind: "failed"; error: string; retryDelayMs: number | null }
+			| { kind: "deferred"; error: string; retryDelayMs: number },
 	): Promise<void>;
 }
 
@@ -105,11 +105,11 @@ export class PromotionMaintenanceWorker {
 			deferred: 0,
 			leaseSkipped: 0,
 		};
-		const staleBefore = new Date(Date.now() - (this.dependencies.staleAfterMs ?? 5 * 60_000));
+		const staleAfterMs = this.dependencies.staleAfterMs ?? 5 * 60_000;
 		const jobs = await repository.claimStripeObjects(
 			this.dependencies.workerId,
 			batchSize,
-			staleBefore,
+			staleAfterMs,
 		);
 		result.claimed = jobs.length;
 		const leases = startJobLeases({
@@ -168,7 +168,7 @@ export class PromotionMaintenanceWorker {
 				await repository.markStripeObjectOutcome(job.projectId, job.objectId, workerId, {
 					kind: "deferred",
 					error: "Stripe is not configured for this environment",
-					nextAttemptAt: new Date(Date.now() + NOT_CONFIGURED_RETRY_MS),
+					retryDelayMs: NOT_CONFIGURED_RETRY_MS,
 				});
 				return "deferred";
 			}
@@ -198,9 +198,9 @@ export class PromotionMaintenanceWorker {
 		error: string,
 		terminal: boolean,
 	): Promise<"retryScheduled" | "failed"> {
-		const nextAttemptAt = terminal
+		const retryDelayMs = terminal
 			? null
-			: calculateNextAttemptAt({
+			: calculateRetryDelayMs({
 					attempts: job.attempts - 1,
 					maxAttempts: this.dependencies.maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
 				});
@@ -208,9 +208,9 @@ export class PromotionMaintenanceWorker {
 			job.projectId,
 			job.objectId,
 			this.dependencies.workerId,
-			{ kind: "failed", error, nextAttemptAt },
+			{ kind: "failed", error, retryDelayMs },
 		);
-		return nextAttemptAt === null ? "failed" : "retryScheduled";
+		return retryDelayMs === null ? "failed" : "retryScheduled";
 	}
 
 	private record(objectKind: string, result: string): void {

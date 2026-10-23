@@ -60,7 +60,7 @@ localDescribe("Subscription reconciliation index use", () => {
 	});
 
 	it("claims due subscriptions through the reconciliation index, expired ones included", async () => {
-		const claim = await plan(dueProviderReconciliationsSql(100, new Date()));
+		const claim = await plan(dueProviderReconciliationsSql(100, 60_000));
 
 		expect(claim).toContain("idx_billing_subscriptions_provider_reconciliation_due");
 	});

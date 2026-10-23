@@ -18,7 +18,7 @@ import {
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
-import { calculateNextRetryAt, normalizeWorkerError } from "./backoff";
+import { calculateNextRetryDelayMs, normalizeWorkerError } from "./backoff";
 import { startLeaseHeartbeat } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
@@ -50,7 +50,7 @@ export interface SubscriptionReconciliationRepository {
 	claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<ProviderSubscriptionReconciliationRow[]>;
 	markProviderSubscriptionReconciliationSucceeded(
 		projectId: string,
@@ -61,7 +61,7 @@ export interface SubscriptionReconciliationRepository {
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void>;
 	renewProviderSubscriptionReconciliationLease?(
@@ -113,7 +113,6 @@ export class SubscriptionReconciliationWorker {
 		| SubscriptionReconciliationProviders
 		| SubscriptionReconciliationProviderSelector;
 	private readonly projectContextResolver: ProjectInstanceContextResolver;
-	private readonly now: () => Date;
 	private readonly jitterMs: () => number;
 	private readonly logger: BillingLogger;
 	private readonly metrics: BillingMetrics;
@@ -130,7 +129,6 @@ export class SubscriptionReconciliationWorker {
 		repository,
 		providers,
 		projectContextResolver,
-		now = () => new Date(),
 		jitterMs = () => Math.floor(Math.random() * 1000),
 		logger = createNoopBillingLogger(),
 		metrics = createNoopBillingMetrics(),
@@ -147,7 +145,6 @@ export class SubscriptionReconciliationWorker {
 		this.repository = repository;
 		this.providers = providers;
 		this.projectContextResolver = projectContextResolver;
-		this.now = now;
 		this.jitterMs = jitterMs;
 		this.logger = logger;
 		this.metrics = metrics;
@@ -156,12 +153,11 @@ export class SubscriptionReconciliationWorker {
 
 	async runOnce(): Promise<SubscriptionReconciliationRunResult> {
 		try {
-			const now = this.now();
-			const staleBefore = new Date(now.getTime() - this.staleAfterMs);
+			const staleAfterMs = this.staleAfterMs;
 			const subscriptions = await this.repository.claimProviderSubscriptionReconciliations(
 				this.workerId,
 				this.batchSize,
-				staleBefore,
+				staleAfterMs,
 			);
 			const result: SubscriptionReconciliationRunResult = {
 				outcome: "succeeded",
@@ -330,10 +326,9 @@ export class SubscriptionReconciliationWorker {
 	): Promise<void> {
 		// Reconciliation is what recovers a lost webhook, so it never parks: after maxAttempts the
 		// subscription is retried once a day for as long as the provider keeps failing.
-		const nextAttemptAt = calculateNextRetryAt({
+		const retryDelayMs = calculateNextRetryDelayMs({
 			attempts: subscription.provider_reconciliation_attempts,
 			maxAttempts: this.maxAttempts,
-			now: this.now(),
 			jitterMs: this.jitterMs(),
 		});
 
@@ -341,7 +336,7 @@ export class SubscriptionReconciliationWorker {
 			subscription.project_id,
 			subscription.id,
 			normalizeWorkerError(error),
-			nextAttemptAt,
+			retryDelayMs,
 			this.workerId,
 		);
 	}

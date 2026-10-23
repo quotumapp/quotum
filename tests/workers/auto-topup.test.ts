@@ -206,7 +206,7 @@ describe("AutoTopupWorker", () => {
 			{
 				kind: "action_required",
 				error: "authentication required",
-				nextAttemptAt: null,
+				retryDelayMs: null,
 				externalInvoiceId: "in_1",
 				externalPaymentId: "pi_1",
 			},
@@ -214,7 +214,7 @@ describe("AutoTopupWorker", () => {
 	});
 
 	it("retries transient failures and lets the repository open the circuit at the limit", async () => {
-		const attempts: Array<Date | null> = [];
+		const attempts: Array<number | null> = [];
 		const worker = new AutoTopupWorker({
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
@@ -229,8 +229,8 @@ describe("AutoTopupWorker", () => {
 					throw new Error("unexpected success");
 				},
 				async markAutoTopupFailed(_projectId, _jobId, _workerId, input) {
-					attempts.push(input.nextAttemptAt);
-					return { retryScheduled: input.nextAttemptAt !== null, circuitOpened: false };
+					attempts.push(input.retryDelayMs);
+					return { retryScheduled: input.retryDelayMs !== null, circuitOpened: false };
 				},
 			},
 			adapterForJob() {
@@ -248,7 +248,7 @@ describe("AutoTopupWorker", () => {
 		const result = await worker.runOnce();
 		expect(result.failed).toBe(1);
 		expect(result.retryScheduled).toBe(1);
-		expect(attempts[0]).toBeInstanceOf(Date);
+		expect(attempts[0]).toBeNumber();
 
 		const finalWorker = new AutoTopupWorker({
 			projectContextResolver: workerProjectResolver,
@@ -264,7 +264,7 @@ describe("AutoTopupWorker", () => {
 					throw new Error("unexpected success");
 				},
 				async markAutoTopupFailed(_projectId, _jobId, _workerId, input) {
-					expect(input.nextAttemptAt).toBeNull();
+					expect(input.retryDelayMs).toBeNull();
 					return { retryScheduled: false, circuitOpened: true };
 				},
 			},

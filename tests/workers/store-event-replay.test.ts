@@ -103,14 +103,14 @@ function createRepository(
 				_projectId: string,
 				eventId: string,
 				error: string,
-				nextAttemptAt: Date | null,
+				retryDelayMs: number | null,
 				workerId: string,
 			) => {
 				calls.push({
 					method: "markStoreEventReplayJobFailed",
 					eventId,
 					error,
-					nextAttemptAt: nextAttemptAt?.toISOString() ?? null,
+					retryDelayMs: retryDelayMs,
 					workerId,
 				});
 				if (options.failError !== undefined) {
@@ -410,7 +410,7 @@ describe("StoreEventReplayWorker", () => {
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_1",
 			error: "apple_customer_unresolved",
-			nextAttemptAt: "2026-05-31T00:02:00.000Z",
+			retryDelayMs: 120000,
 			workerId: "worker-a",
 		});
 	});
@@ -446,14 +446,14 @@ describe("StoreEventReplayWorker", () => {
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_google",
 			error: "Store event replay provider is not configured: google",
-			nextAttemptAt: "2026-05-31T00:01:00.000Z",
+			retryDelayMs: 60000,
 			workerId: "worker-a",
 		});
 		expect(calls).toContainEqual({
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_unknown",
 			error: "Unsupported store event replay provider: unknown",
-			nextAttemptAt: "2026-05-31T00:01:00.000Z",
+			retryDelayMs: 60000,
 			workerId: "worker-a",
 		});
 	});
@@ -497,7 +497,7 @@ describe("StoreEventReplayWorker", () => {
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_1",
 			error: "provider unavailable",
-			nextAttemptAt: null,
+			retryDelayMs: null,
 			workerId: "worker-a",
 		});
 		expect(metrics.renderPrometheus()).toContain(
@@ -560,7 +560,7 @@ describe("StoreEventReplayWorker", () => {
 				method: "markStoreEventReplayJobFailed",
 				eventId: "event_failed",
 				error: "provider unavailable",
-				nextAttemptAt: "2026-05-31T00:01:00.000Z",
+				retryDelayMs: 60000,
 				workerId: "worker-a",
 			},
 			{

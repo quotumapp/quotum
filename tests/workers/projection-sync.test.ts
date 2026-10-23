@@ -128,21 +128,13 @@ describe("ProjectionSyncWorker", () => {
 			jitterMs: () => 0,
 		});
 		expect(await worker.runOnce()).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
-		expect(calls).toEqual([
-			[
-				job.project_id,
-				job.id,
-				"database unavailable",
-				new Date("2026-05-31T00:01:00.000Z"),
-				"worker-a",
-			],
-		]);
+		expect(calls).toEqual([[job.project_id, job.id, "database unavailable", 60_000, "worker-a"]]);
 	});
 
 	it("keeps failure recovery and job correlation while removing database values from logs", async () => {
 		const lines: string[] = [];
 		const error = databaseFailure();
-		const failures: Array<{ jobId: string; error: string; retry: Date | null }> = [];
+		const failures: Array<{ jobId: string; error: string; retry: number | null }> = [];
 		const worker = new ProjectionSyncWorker({
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-a",
@@ -158,8 +150,8 @@ describe("ProjectionSyncWorker", () => {
 				markProjectionSyncJobSucceeded: async () => {
 					throw new Error("must not succeed");
 				},
-				markProjectionSyncJobFailed: async (_projectId, jobId, lastError, nextAttemptAt) => {
-					failures.push({ jobId, error: lastError, retry: nextAttemptAt });
+				markProjectionSyncJobFailed: async (_projectId, jobId, lastError, retryDelayMs) => {
+					failures.push({ jobId, error: lastError, retry: retryDelayMs });
 				},
 			},
 			delivery: {
@@ -171,9 +163,7 @@ describe("ProjectionSyncWorker", () => {
 			jitterMs: () => 0,
 		});
 		expect(await worker.runOnce()).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
-		expect(failures).toEqual([
-			{ jobId: job.id, error: error.message, retry: new Date("2026-05-31T00:01:00.000Z") },
-		]);
+		expect(failures).toEqual([{ jobId: job.id, error: error.message, retry: 60000 }]);
 		const entry = lines.map((line) => JSON.parse(line)).find((event) => event.level === 50);
 		expect(entry).toMatchObject({
 			context: { jobId: job.id, workerId: "worker-a", result: "failed" },
@@ -524,12 +514,12 @@ describe("ProjectionSyncWorker", () => {
 				markProjectionSyncJobSucceeded: async () => {
 					throw new Error("should not succeed");
 				},
-				markProjectionSyncJobFailed: async (projectId, jobId, error, nextAttemptAt, workerId) => {
+				markProjectionSyncJobFailed: async (projectId, jobId, error, retryDelayMs, workerId) => {
 					calls.push({
 						projectId,
 						jobId,
 						error,
-						nextAttemptAt: nextAttemptAt?.toISOString(),
+						retryDelayMs: retryDelayMs,
 						workerId,
 					});
 				},
@@ -553,7 +543,7 @@ describe("ProjectionSyncWorker", () => {
 				projectId: "project_1",
 				jobId: "job_1",
 				error: "delivery failed",
-				nextAttemptAt: "2026-05-31T00:01:00.000Z",
+				retryDelayMs: 60000,
 				workerId: "worker-a",
 			},
 		]);

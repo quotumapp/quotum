@@ -14,7 +14,7 @@ import {
 } from "../observability/metrics";
 import type { ProjectionDelivery } from "../projections/delivery";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
-import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { calculateRetryDelayMs, normalizeWorkerError } from "./backoff";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface ProjectionSyncRepository {
@@ -34,7 +34,7 @@ export interface ProjectionSyncRepository {
 		projectId: string,
 		jobId: string,
 		lastError: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void>;
 }
@@ -69,7 +69,6 @@ export class ProjectionSyncWorker {
 	private readonly repository: ProjectionSyncRepository;
 	private readonly delivery: ProjectionDelivery;
 	private readonly projectContextResolver: ProjectInstanceContextResolver;
-	private readonly now: () => Date;
 	private readonly jitterMs: () => number;
 	private readonly logger: BillingLogger;
 	private readonly metrics: BillingMetrics;
@@ -82,7 +81,6 @@ export class ProjectionSyncWorker {
 		repository,
 		delivery,
 		projectContextResolver,
-		now = () => new Date(),
 		jitterMs = () => Math.floor(Math.random() * 1000),
 		logger = createNoopBillingLogger(),
 		metrics = createNoopBillingMetrics(),
@@ -94,7 +92,6 @@ export class ProjectionSyncWorker {
 		this.repository = repository;
 		this.delivery = delivery;
 		this.projectContextResolver = projectContextResolver;
-		this.now = now;
 		this.jitterMs = jitterMs;
 		this.logger = logger;
 		this.metrics = metrics;
@@ -260,10 +257,9 @@ export class ProjectionSyncWorker {
 	}
 
 	private async markFailed(job: ProjectionSyncJobRow, error: unknown): Promise<void> {
-		const nextAttemptAt = calculateNextAttemptAt({
+		const retryDelayMs = calculateRetryDelayMs({
 			attempts: job.attempts,
 			maxAttempts: this.maxAttempts,
-			now: this.now(),
 			jitterMs: this.jitterMs(),
 		});
 
@@ -271,7 +267,7 @@ export class ProjectionSyncWorker {
 			job.project_id,
 			job.id,
 			normalizeWorkerError(error),
-			nextAttemptAt,
+			retryDelayMs,
 			this.workerId,
 		);
 	}

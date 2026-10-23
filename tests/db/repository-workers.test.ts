@@ -192,13 +192,13 @@ describe("BillingRepository workers", () => {
 	it("marks projection failures with retry or terminal state", async () => {
 		const database = new FakeDatabase([[{ id: "job-id" }]]);
 		const repository = new BillingRepository(database as never);
-		const nextAttemptAt = "2026-01-01T00:05:00.000Z";
+		const retryDelayMs = 60_000;
 
 		await repository.markProjectionSyncJobFailed(
 			"project-id",
 			"job-id",
 			"projection failed",
-			new Date(nextAttemptAt),
+			60_000,
 			"worker-a",
 		);
 
@@ -212,7 +212,7 @@ describe("BillingRepository workers", () => {
 		expect(database.queries[0]).toContain("locked_by =");
 		expect(database.queries[0]).toContain("jobs.project_id =");
 		expect(database.queries[0]).toContain('"project-id"');
-		expect(database.params[0]).toContain(nextAttemptAt);
+		expect(database.params[0]).toContain(retryDelayMs);
 		expect(database.params[0].some((param) => param instanceof Date)).toBe(false);
 	});
 
@@ -246,26 +246,26 @@ describe("BillingRepository workers", () => {
 			"worker-a",
 		);
 
-		expect(database.params[0]).toContain(null);
+		expect(database.queries[0]).toContain("NULL::timestamptz");
 		expect(database.params[0].some((param) => param instanceof Date)).toBe(false);
 	});
 
 	it("binds store event replay retry timestamps as ISO strings", async () => {
 		const database = new FakeDatabase([[{ id: "event-id" }]]);
 		const repository = new BillingRepository(database as never);
-		const nextAttemptAt = "2026-01-01T00:05:00.000Z";
+		const retryDelayMs = 60_000;
 
 		await repository.markStoreEventReplayJobFailed(
 			"project-id",
 			"event-id",
 			"replay failed",
-			new Date(nextAttemptAt),
+			60_000,
 			"worker-a",
 		);
 
 		expect(database.queries[0]).toContain("processing_status = CASE");
 		expect(database.queries[0]).toContain("next_attempt_at = COALESCE");
-		expect(database.params[0]).toContain(nextAttemptAt);
+		expect(database.params[0]).toContain(retryDelayMs);
 		expect(database.params[0].some((param) => param instanceof Date)).toBe(false);
 	});
 
@@ -281,28 +281,28 @@ describe("BillingRepository workers", () => {
 			"worker-a",
 		);
 
-		expect(database.params[0]).toContain(null);
+		expect(database.queries[0]).toContain("NULL::timestamptz");
 		expect(database.params[0].some((param) => param instanceof Date)).toBe(false);
 	});
 
-	it("binds provider reconciliation retry timestamps as ISO strings", async () => {
+	it("stamps provider reconciliation retries using the database clock", async () => {
 		const database = new FakeDatabase([[{ id: "subscription-id" }]]);
 		const repository = new BillingRepository(database as never);
-		const nextAttemptAt = "2026-01-01T00:05:00.000Z";
+		const retryDelayMs = 60_000;
 
 		await repository.markProviderSubscriptionReconciliationFailed(
 			"project-id",
 			"subscription-id",
 			"reconciliation failed",
-			new Date(nextAttemptAt),
+			60_000,
 			"worker-a",
 		);
 
 		expect(database.queries[0]).toContain("provider_reconciliation_attempts");
 		expect(database.queries[0]).toMatch(
-			/provider_reconciliation_next_attempt_at = \$\d+::timestamptz/,
+			/provider_reconciliation_next_attempt_at = clock_timestamp\(\) \+/,
 		);
-		expect(database.params[0]).toContain(nextAttemptAt);
+		expect(database.params[0]).toContain(retryDelayMs);
 		expect(database.params[0].some((param) => param instanceof Date)).toBe(false);
 	});
 
@@ -314,7 +314,7 @@ describe("BillingRepository workers", () => {
 			"project-id",
 			"subscription-id",
 			"reconciliation failed",
-			new Date("2026-01-02T00:00:00.000Z"),
+			60_000,
 			"worker-a",
 		);
 
@@ -325,11 +325,7 @@ describe("BillingRepository workers", () => {
 		const database = new FakeDatabase([[]]);
 		const repository = new BillingRepository(database as never);
 
-		await repository.claimProviderSubscriptionReconciliations(
-			"worker-a",
-			10,
-			new Date("2026-01-01T00:00:00.000Z"),
-		);
+		await repository.claimProviderSubscriptionReconciliations("worker-a", 10, 300_000);
 
 		const query = database.queries[0] ?? "";
 		expect(query).toContain("s.provider_reconciliation_next_attempt_at <= now()");

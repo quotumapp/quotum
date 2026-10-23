@@ -274,7 +274,7 @@ interface StripeBillingRepositoryDependency
 		outcome:
 			| { kind: "ready"; externalId: string; providerActive: boolean }
 			| { kind: "retired"; externalId: string | null }
-			| { kind: "failed"; error: string; nextAttemptAt: Date | null },
+			| { kind: "failed"; error: string; retryDelayMs: number | null },
 	): Promise<void>;
 	recordStripeCheckoutPromotion?(input: {
 		billingAccountId: string;
@@ -759,7 +759,7 @@ export class StripeBillingService
 		await repository.markStripePromotionObjectOutcome(prepared.objectId, workerId, {
 			kind: "failed",
 			error: outcome.kind === "failed" ? outcome.error : "Stripe coupon was retired",
-			nextAttemptAt: outcome.kind === "failed" && outcome.terminal ? null : new Date(),
+			retryDelayMs: outcome.kind === "failed" && outcome.terminal ? null : 0,
 		});
 		throw promotionError("PROMOTION_PROVIDER_NOT_READY");
 	}

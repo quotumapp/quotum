@@ -289,10 +289,10 @@ describe("domain event delivery worker", () => {
 		await run(0, 503, "10");
 		await run(11, 500);
 
-		expect(failures.map((failure) => failure.nextAttemptAt?.toISOString() ?? null)).toEqual([
-			"2026-10-19T08:01:00.000Z",
-			"2026-10-19T08:10:00.000Z",
-			"2026-10-19T08:01:00.000Z",
+		expect(failures.map((failure) => failure.retryDelayMs ?? null)).toEqual([
+			60000,
+			600000,
+			60000,
 			null,
 		]);
 		expect(failures[0]).toMatchObject({ error: "Receiver answered 500", statusCode: 500 });

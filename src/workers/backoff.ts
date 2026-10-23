@@ -58,3 +58,20 @@ export function normalizeWorkerError(error: unknown): string {
 		return "Unknown worker error";
 	}
 }
+
+/** Backoff duration; persistence adds it to the database clock when recording failure. */
+export function calculateRetryDelayMs({
+	attempts,
+	maxAttempts,
+	jitterMs = Math.floor(Math.random() * 1000),
+}: Omit<CalculateNextAttemptInput, "now">): number | null {
+	if (attempts + 1 >= maxAttempts) return null;
+	return Math.min(MAX_DELAY_MS, ONE_MINUTE_MS * 2 ** attempts) + jitterMs;
+}
+
+export function calculateNextRetryDelayMs(input: Omit<CalculateNextAttemptInput, "now">): number {
+	return (
+		calculateRetryDelayMs(input) ??
+		MAX_DELAY_MS + (input.jitterMs ?? Math.floor(Math.random() * 1000))
+	);
+}

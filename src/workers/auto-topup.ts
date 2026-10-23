@@ -13,14 +13,18 @@ import {
 } from "../observability/metrics";
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderAdapter } from "../providers/contract";
-import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { calculateRetryDelayMs, normalizeWorkerError } from "./backoff";
 import { JobLeaseRenewalError, jobHeartbeatInterval, startJobLeases } from "./job-leases";
 import type { LeaseHeartbeatTimers } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface AutoTopupWorkerRepository {
 	renewAutoTopupJobLease(projectId: string, jobId: string, workerId: string): Promise<boolean>;
-	claimAutoTopupJobs(workerId: string, limit: number, staleBefore: Date): Promise<AutoTopupJob[]>;
+	claimAutoTopupJobs(
+		workerId: string,
+		limit: number,
+		staleAfterMs: number,
+	): Promise<AutoTopupJob[]>;
 	markAutoTopupSucceeded(
 		projectId: string,
 		jobId: string,
@@ -34,7 +38,7 @@ export interface AutoTopupWorkerRepository {
 		input: {
 			kind: "retryable" | "action_required" | "safety_limit_exceeded";
 			error: string;
-			nextAttemptAt: Date | null;
+			retryDelayMs: number | null;
 			externalInvoiceId?: string | null;
 			externalPaymentId?: string | null;
 		},
@@ -79,11 +83,11 @@ export class AutoTopupWorker {
 	}
 
 	async runOnce(): Promise<AutoTopupRunResult> {
-		const staleBefore = new Date(Date.now() - (this.dependencies.staleAfterMs ?? 5 * 60_000));
+		const staleAfterMs = this.dependencies.staleAfterMs ?? 5 * 60_000;
 		const jobs = await this.dependencies.repository.claimAutoTopupJobs(
 			this.dependencies.workerId,
 			this.dependencies.batchSize ?? 25,
-			staleBefore,
+			staleAfterMs,
 		);
 		const result: AutoTopupRunResult = {
 			claimed: jobs.length,
@@ -152,7 +156,7 @@ export class AutoTopupWorker {
 						{
 							kind: charge.status,
 							error: charge.reason,
-							nextAttemptAt: null,
+							retryDelayMs: null,
 							externalInvoiceId: charge.externalInvoiceId,
 							externalPaymentId: charge.externalPaymentId,
 						},
@@ -167,7 +171,7 @@ export class AutoTopupWorker {
 					}
 					if (!(await leases.owns(job).catch(() => false))) continue;
 					result.failed += 1;
-					const nextAttemptAt = calculateNextAttemptAt({
+					const retryDelayMs = calculateRetryDelayMs({
 						attempts: job.consecutiveFailures,
 						maxAttempts: job.maxConsecutiveFailures,
 					});
@@ -178,7 +182,7 @@ export class AutoTopupWorker {
 						{
 							kind: "retryable",
 							error: normalizeWorkerError(error).slice(0, 2_000),
-							nextAttemptAt,
+							retryDelayMs,
 						},
 					);
 					if (completion.retryScheduled) result.retryScheduled += 1;

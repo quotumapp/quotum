@@ -285,9 +285,7 @@ async function seed(kind: Kind, count = 2) {
 async function claim(kind: Kind, workerId: string): Promise<string[]> {
 	const repo = context.repository;
 	if (kind === "topup")
-		return (await repo.claimAutoTopupJobs(workerId, 25, new Date(Date.now() - 300_000))).map(
-			(job) => job.jobId,
-		);
+		return (await repo.claimAutoTopupJobs(workerId, 25, 300_000)).map((job) => job.jobId);
 	if (kind === "change")
 		return (await repo.claimSubscriptionChanges(workerId, 25)).map((job) => job.changeId);
 	return (await repo.materializeAndClaimUsageInvoicePeriods(workerId, 25)).jobs.map(
