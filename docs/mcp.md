@@ -48,7 +48,7 @@ The server uses authorization code with PKCE S256 and the `/mcp` resource indica
 organization selection regardless of refreshes. DPoP, client secrets, client credentials grants,
 and direct MCP execution of mutations are not supported.
 
-In **Organization → MCP connections**, view and revoke your connections for the selected
+In **Developer setup → MCP connections**, view and revoke your connections for the selected
 organization; each shows whether it is read-only or can propose changes. Revocation immediately invalidates access tokens, refresh tokens, and cached refresh
 responses for that immutable authorization; reconnecting never revives an older authorization.
 Authorization-code replay, including concurrent redemption, revokes the affected authorization.
