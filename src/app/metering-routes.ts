@@ -61,22 +61,6 @@ const usageEventParamsSchema = subjectParamsSchema.extend({
 	usageEventId: z.uuid(),
 });
 
-const filtersSchema = z.record(
-	z.string().trim().min(1).max(120),
-	z.union([z.string().max(256), z.number(), z.boolean()]),
-);
-
-export const usageBodySchema = z
-	.object({
-		featureKey: z.string().trim().min(1).max(120),
-		quantity: z.string().min(1).max(80).regex(/^\S+$/u),
-		entityId: z.string().trim().min(1).max(256).nullable().optional(),
-		filters: filtersSchema.optional(),
-		occurredAt: storableDateTimeSchema().nullable().optional(),
-		metadata: z.record(z.string(), z.unknown()).optional(),
-	})
-	.strict();
-
 export { confirmBodySchema, reserveBodySchema } from "./contracts/usage-api";
 
 /** Absent request bodies are allowed; `.optional()` keeps the rendered schema a plain object. */
@@ -375,17 +359,6 @@ function meteringOperation(path: string): string {
 	if (path.endsWith("/corrections")) return "correct";
 	if (path.endsWith("/reservations")) return "reserve";
 	return "unknown";
-}
-
-export function usageInput(body: z.infer<typeof usageBodySchema>) {
-	return {
-		featureKey: body.featureKey,
-		quantity: body.quantity,
-		entityId: body.entityId,
-		filters: body.filters,
-		occurredAt: body.occurredAt === undefined ? undefined : dateOrNull(body.occurredAt),
-		metadata: body.metadata,
-	};
 }
 
 function dateOrNull(value: string | null): Date | null {

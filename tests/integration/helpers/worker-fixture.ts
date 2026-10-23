@@ -10,10 +10,6 @@ import {
 	ProjectionSyncWorker,
 } from "../../../src/workers/projection-sync";
 import {
-	RecurringBillingWorker,
-	type RecurringBillingWorkerRepository,
-} from "../../../src/workers/recurring-billing";
-import {
 	type StoreEventReplayProviderSelector,
 	type StoreEventReplayProviders,
 	type StoreEventReplayRepository,
@@ -183,28 +179,6 @@ export async function runAutoTopupWorkerOnce({
 		workerId,
 		batchSize,
 		staleAfterMs,
-		repository,
-		projectContextResolver: integrationProjectContextResolver(),
-		adapterForJob: async () => wrapStripeService(provider),
-		logger: noopWorkerLogger,
-	});
-	return await worker.runOnce();
-}
-
-export async function runRecurringBillingWorkerOnce({
-	repository,
-	provider,
-	workerId = "integration-worker",
-	batchSize = 25,
-}: {
-	repository: RecurringBillingWorkerRepository;
-	provider: ProviderServiceSource<"stripe">;
-	workerId?: string;
-	batchSize?: number;
-}) {
-	const worker = new RecurringBillingWorker({
-		workerId,
-		batchSize,
 		repository,
 		projectContextResolver: integrationProjectContextResolver(),
 		adapterForJob: async () => wrapStripeService(provider),

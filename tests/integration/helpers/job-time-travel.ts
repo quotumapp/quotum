@@ -34,14 +34,6 @@ export async function setProjectionJobAttempts(
 	`;
 }
 
-export async function makeStoreEventDue(sql: SQL, eventId: string): Promise<void> {
-	await sql`
-		UPDATE store_events
-		SET next_attempt_at = now() - INTERVAL '1 second'
-		WHERE id = ${eventId}
-	`;
-}
-
 export async function expireStoreEventLock(sql: SQL, eventId: string): Promise<void> {
 	await sql`
 		UPDATE store_events
