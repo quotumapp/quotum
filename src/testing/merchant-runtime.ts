@@ -224,6 +224,12 @@ export async function createMerchantTestRuntime(
 									promotionRepository.promotionProviders.reconcilePromotionCoupons(limit),
 								ensureHostedPromotionCodeObjects: (limit) =>
 									promotionRepository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+								renewStripeObjectLease: (projectId, objectId, workerId) =>
+									promotionRepository.promotionProviders.renewStripeObjectLease(
+										projectId,
+										objectId,
+										workerId,
+									),
 								claimStripeObjects: (workerId, limit, staleBefore) =>
 									promotionRepository.promotionProviders.claimStripeObjects(
 										workerId,

@@ -832,6 +832,35 @@ localDescribe("promotion Stripe provisioning", () => {
 		await context.sql.close();
 	});
 
+	it("renews promotion leases on the DB clock and fences a previous owner", async () => {
+		await context.repository.promotions.createPromotion(project, discountPromotion());
+		const repo = context.repository.promotionProviders;
+		await repo.reconcilePromotionCoupons(25);
+		const [claimed] = await repo.claimStripeObjects(
+			"lease-owner",
+			25,
+			new Date(Date.now() - 300_000),
+		);
+		if (!claimed) throw new Error("No coupon claimed");
+		await context.sql`UPDATE promotion_provider_objects SET locked_at=now()-interval '6 minutes' WHERE id=${claimed.objectId}`;
+		expect(
+			await repo.renewStripeObjectLease(claimed.projectId, claimed.objectId, "lease-owner"),
+		).toBe(true);
+		expect(
+			await repo.claimStripeObjects("second-owner", 25, new Date(Date.now() - 300_000)),
+		).toEqual([]);
+		await context.sql`UPDATE promotion_provider_objects SET locked_at=now()-interval '6 minutes' WHERE id=${claimed.objectId}`;
+		expect(
+			await repo.claimStripeObjects("second-owner", 25, new Date(Date.now() - 300_000)),
+		).toHaveLength(1);
+		expect(
+			await repo.renewStripeObjectLease(claimed.projectId, claimed.objectId, "lease-owner"),
+		).toBe(false);
+		expect(
+			await repo.renewStripeObjectLease(claimed.projectId, claimed.objectId, "second-owner"),
+		).toBe(true);
+	});
+
 	it("provisions coupons and hosted codes, follows catalog product changes and deactivates codes", async () => {
 		const stripe = createFakeStripePromotions();
 		let failNext = false;
@@ -844,6 +873,12 @@ localDescribe("promotion Stripe provisioning", () => {
 					context.repository.promotionProviders.reconcilePromotionCoupons(limit),
 				ensureHostedPromotionCodeObjects: (limit) =>
 					context.repository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+				renewStripeObjectLease: (projectId, objectId, workerId) =>
+					context.repository.promotionProviders.renewStripeObjectLease(
+						projectId,
+						objectId,
+						workerId,
+					),
 				claimStripeObjects: (workerId, limit, staleBefore) =>
 					context.repository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
 				markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>
@@ -1721,6 +1756,12 @@ localDescribe("promotion Checkout", () => {
 					context.repository.promotionProviders.reconcilePromotionCoupons(limit),
 				ensureHostedPromotionCodeObjects: (limit) =>
 					context.repository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+				renewStripeObjectLease: (projectId, objectId, workerId) =>
+					context.repository.promotionProviders.renewStripeObjectLease(
+						projectId,
+						objectId,
+						workerId,
+					),
 				claimStripeObjects: (workerId, limit, staleBefore) =>
 					context.repository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
 				markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>
@@ -2573,6 +2614,8 @@ function promotionWorker(stripe: ReturnType<typeof createFakeStripePromotions>) 
 				context.repository.promotionProviders.reconcilePromotionCoupons(limit),
 			ensureHostedPromotionCodeObjects: (limit) =>
 				context.repository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+			renewStripeObjectLease: (projectId, objectId, workerId) =>
+				context.repository.promotionProviders.renewStripeObjectLease(projectId, objectId, workerId),
 			claimStripeObjects: (workerId, limit, staleBefore) =>
 				context.repository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
 			markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>

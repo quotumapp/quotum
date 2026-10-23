@@ -7,6 +7,7 @@ import {
 	type PromotionMaintenanceRepository,
 	PromotionMaintenanceWorker,
 } from "../../src/workers/promotion-maintenance";
+import { heartbeatTimers } from "../helpers/heartbeat-timers";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
 
 const job = (objectId: string, attempts = 1): PromotionStripeSyncJob => ({
@@ -36,6 +37,9 @@ function repository(jobs: PromotionStripeSyncJob[]) {
 	const outcomes: Array<{ objectId: string; outcome: Record<string, unknown> }> = [];
 	const calls: string[] = [];
 	const repo: PromotionMaintenanceRepository = {
+		async renewStripeObjectLease() {
+			return true;
+		},
 		async releaseExpiredPromotionReservations(limit) {
 			calls.push(`release:${limit}`);
 			return 2;
@@ -171,4 +175,70 @@ describe("PromotionMaintenanceWorker", () => {
 			},
 		]);
 	});
+});
+
+it.each(["before", "during", "unavailable"] as const)(
+	"keeps lease %s failures out of provider markers",
+	async (stage) => {
+		const clock = heartbeatTimers();
+		const f = repository([job("leased")]);
+		let owned = stage !== "before";
+		let calls = 0;
+		f.repo.renewStripeObjectLease = async () => {
+			if (stage === "unavailable") throw new Error("database unavailable");
+			return owned;
+		};
+		const worker = new PromotionMaintenanceWorker({
+			workerId: "worker-1",
+			repository: f.repo,
+			projectContextResolver: resolver,
+			leaseHeartbeatTimers: clock.timers,
+			adapterForJob: () => ({
+				promotions: {
+					async syncObject() {
+						calls++;
+						owned = false;
+						return { kind: "ready", externalId: "coupon", providerActive: true };
+					},
+				},
+			}),
+			logger: { error() {} },
+		});
+		await worker.runOnce();
+		expect(calls).toBe(stage === "during" ? 1 : 0);
+		expect(f.outcomes).toEqual([]);
+		expect(clock.active).toBe(0);
+	},
+);
+
+it("heartbeats waiting promotion jobs while the first provider call is active", async () => {
+	const clock = heartbeatTimers();
+	const f = repository([job("first"), job("waiting")]);
+	const renewed: string[] = [];
+	f.repo.renewStripeObjectLease = async (_p, id) => {
+		renewed.push(id);
+		return true;
+	};
+	const worker = new PromotionMaintenanceWorker({
+		workerId: "worker-1",
+		repository: f.repo,
+		projectContextResolver: resolver,
+		leaseHeartbeatTimers: clock.timers,
+		adapterForJob: () => ({
+			promotions: {
+				async syncObject(j) {
+					if (j.objectId === "first") {
+						clock.tick();
+						await Promise.resolve();
+						await Promise.resolve();
+						expect(renewed).toContain("waiting");
+					}
+					return { kind: "ready", externalId: j.objectId, providerActive: true };
+				},
+			},
+		}),
+		logger: { error() {} },
+	});
+	expect((await worker.runOnce()).ready).toBe(2);
+	expect(clock.active).toBe(0);
 });

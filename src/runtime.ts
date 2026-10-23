@@ -275,6 +275,8 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 				billingRepository.promotionProviders.reconcilePromotionCoupons(limit),
 			ensureHostedPromotionCodeObjects: (limit) =>
 				billingRepository.promotionProviders.ensureHostedPromotionCodeObjects(limit),
+			renewStripeObjectLease: (projectId, objectId, workerId) =>
+				billingRepository.promotionProviders.renewStripeObjectLease(projectId, objectId, workerId),
 			claimStripeObjects: (workerId, limit, staleBefore) =>
 				billingRepository.promotionProviders.claimStripeObjects(workerId, limit, staleBefore),
 			markStripeObjectOutcome: (projectId, objectId, workerId, outcome) =>

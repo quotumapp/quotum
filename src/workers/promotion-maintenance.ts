@@ -8,9 +8,12 @@ import {
 import type { ProjectInstanceContext, ProjectInstanceContextResolver } from "../projects/context";
 import type { ProviderAdapter } from "../providers/contract";
 import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { JobLeaseRenewalError, jobHeartbeatInterval, startJobLeases } from "./job-leases";
+import type { LeaseHeartbeatTimers } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface PromotionMaintenanceRepository {
+	renewStripeObjectLease(projectId: string, objectId: string, workerId: string): Promise<boolean>;
 	releaseExpiredPromotionReservations(limit: number): Promise<number>;
 	reconcilePromotionCoupons(limit: number): Promise<{ couponsCreated: number }>;
 	ensureHostedPromotionCodeObjects(limit: number): Promise<number>;
@@ -58,11 +61,14 @@ const NOT_CONFIGURED_RETRY_MS = 60 * 60_000;
  * released, coupons follow catalog changes, and Stripe objects are created and toggled.
  */
 export class PromotionMaintenanceWorker {
+	private readonly heartbeatIntervalMs: number;
 	constructor(
 		private readonly dependencies: {
 			workerId: string;
 			batchSize?: number;
 			staleAfterMs?: number;
+			leaseHeartbeatIntervalMs?: number;
+			leaseHeartbeatTimers?: LeaseHeartbeatTimers;
 			maxAttempts?: number;
 			repository: PromotionMaintenanceRepository;
 			projectContextResolver: ProjectInstanceContextResolver;
@@ -74,7 +80,12 @@ export class PromotionMaintenanceWorker {
 			logger: { error(message: string, error: unknown, context?: Record<string, unknown>): void };
 			metrics?: BillingMetrics;
 		},
-	) {}
+	) {
+		this.heartbeatIntervalMs = jobHeartbeatInterval(
+			dependencies.staleAfterMs ?? 5 * 60_000,
+			dependencies.leaseHeartbeatIntervalMs,
+		);
+	}
 
 	async runOnce(): Promise<PromotionMaintenanceRunResult> {
 		const batchSize = this.dependencies.batchSize ?? 25;
@@ -97,17 +108,49 @@ export class PromotionMaintenanceWorker {
 			staleBefore,
 		);
 		result.claimed = jobs.length;
-		for (const job of jobs) {
-			const outcome = await this.sync(job);
-			result[outcome] += 1;
-			this.record(job.objectKind, outcome);
+		const leases = startJobLeases({
+			jobs,
+			intervalMs: this.heartbeatIntervalMs,
+			timers: this.dependencies.leaseHeartbeatTimers,
+			renew: (job) =>
+				repository.renewStripeObjectLease(job.projectId, job.objectId, this.dependencies.workerId),
+			onLost: (job) =>
+				this.dependencies.logger.error(
+					"Promotion provider lease lost",
+					new Error("Lease no longer owned"),
+					{ objectId: job.objectId },
+				),
+			onError: (error, job) =>
+				this.dependencies.logger.error("Promotion lease renewal failed", error, {
+					objectId: job.objectId,
+				}),
+		});
+		try {
+			for (const job of jobs) {
+				try {
+					if (!(await leases.owns(job))) continue;
+					const outcome = await this.sync(job, () => leases.owns(job));
+					if (outcome !== null) {
+						result[outcome] += 1;
+						this.record(job.objectKind, outcome);
+					}
+				} catch (error) {
+					if (!(error instanceof JobLeaseRenewalError)) throw error;
+				} finally {
+					leases.release(job);
+				}
+			}
+		} finally {
+			await leases.stop();
 		}
+
 		return result;
 	}
 
 	private async sync(
 		job: PromotionStripeSyncJob,
-	): Promise<"ready" | "retired" | "retryScheduled" | "failed" | "deferred"> {
+		owns: () => Promise<boolean>,
+	): Promise<"ready" | "retired" | "retryScheduled" | "failed" | "deferred" | null> {
 		const { repository, workerId } = this.dependencies;
 		try {
 			const project = await resolveClaimedProjectInstance(
@@ -118,6 +161,7 @@ export class PromotionMaintenanceWorker {
 				},
 			);
 			const adapter = await this.dependencies.adapterForJob(project, job.provider);
+			if (!(await owns())) return null;
 			if (adapter === null) {
 				await repository.markStripeObjectOutcome(job.projectId, job.objectId, workerId, {
 					kind: "deferred",
@@ -130,12 +174,14 @@ export class PromotionMaintenanceWorker {
 				throw new Error(`${job.provider} provider does not serve promotion.hosted_code`);
 			}
 			const outcome = await adapter.promotions.syncObject(job);
+			if (!(await owns())) return null;
 			if (outcome.kind === "ready" || outcome.kind === "retired") {
 				await repository.markStripeObjectOutcome(job.projectId, job.objectId, workerId, outcome);
 				return outcome.kind;
 			}
 			return await this.fail(job, outcome.error, outcome.terminal);
 		} catch (error) {
+			if (error instanceof JobLeaseRenewalError || !(await owns())) return null;
 			this.dependencies.logger.error("Promotion provider sync failed", error, {
 				projectKey: job.projectKey,
 				objectId: job.objectId,

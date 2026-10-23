@@ -336,7 +336,7 @@ on the interval shown; unset per-worker overrides preserve the shared fallbacks 
 | [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | `BILLING_USAGE_PARTITION_UPKEEP_POLL_INTERVAL_MS` (900000) |
 | [Merchant platform retention](#merchant-platform-retention), only when `QUOTUM_CONSOLE_ENABLED=true` | `QUOTUM_PLATFORM_RETENTION_POLL_INTERVAL_MS` (900000) |
 
-Automatic top-up and recurring billing renew every outstanding claim in their current batch,
+Automatic top-up, recurring billing and promotion maintenance renew every outstanding claim in their current batch,
 including jobs waiting behind a provider call. The heartbeat runs every 60 seconds against the
 five-minute reclaim window. Each provider dispatch and completion also checks ownership; a lost
 lease skips that work, and a database error during the check leaves the claim for recovery. A

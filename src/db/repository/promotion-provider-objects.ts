@@ -197,6 +197,23 @@ export class PromotionProviderObjectRepository extends RepositoryModule {
 		return inserted.length;
 	}
 
+	async renewStripeObjectLease(
+		projectId: string,
+		objectId: string,
+		workerId: string,
+	): Promise<boolean> {
+		const row = await executeOne(
+			this.database,
+			drizzleSql`
+			UPDATE promotion_provider_objects SET locked_at = clock_timestamp(), updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${objectId} AND locked_by = ${workerId}
+				AND status IN ('pending', 'ready')
+			RETURNING id
+		`,
+		);
+		return row !== null;
+	}
+
 	async claimStripeObjects(
 		workerId: string,
 		limit: number,
