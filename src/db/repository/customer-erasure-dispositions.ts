@@ -400,8 +400,8 @@ export const unlinkedStoreEventBatch: CustomerErasureBatch = {
 };
 
 /**
- * Rows that still carry the original id after every step. A non-zero count fails the operation
- * rather than completing it, because completion drops the id the scrub needs to find them.
+ * Rows that still carry the original id, or projection jobs that should have been deleted,
+ * after every step. A non-zero count fails the operation rather than dropping its subject id.
  */
 export async function residualRows(
 	executor: QueryExecutor,
@@ -411,6 +411,8 @@ export async function residualRows(
 		SELECT table_name, count FROM (
 			SELECT 'customers' AS table_name, count(*) AS count FROM customers
 				WHERE project_id = ${context.projectId} AND billing_account_id = ${context.subjectId}
+			UNION ALL SELECT 'projection_sync_jobs', count(*) FROM projection_sync_jobs
+				WHERE project_id = ${context.projectId} AND customer_id = ${context.customerId}
 			UNION ALL SELECT 'provider_operations', count(*) FROM provider_operations
 				WHERE project_id = ${context.projectId} AND billing_account_id = ${context.subjectId}
 			UNION ALL SELECT 'paddle_checkout_reservations', count(*) FROM paddle_checkout_reservations

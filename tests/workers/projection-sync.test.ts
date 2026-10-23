@@ -60,6 +60,85 @@ function createRecordingLogger() {
 }
 
 describe("ProjectionSyncWorker", () => {
+	it.each([null, job.payload])(
+		"skips a claim before reading preferences, building or sending its payload: %j",
+		async (payload) => {
+			const calls: unknown[] = [];
+			const metrics = createInMemoryBillingMetrics();
+			const unexpected = async (): Promise<never> => {
+				throw new Error("skipped claim must not be touched");
+			};
+			const worker = new ProjectionSyncWorker({
+				projectContextResolver: workerProjectResolver,
+				workerId: "worker-a",
+				maxAttempts: 3,
+				batchSize: 1,
+				metrics,
+				repository: {
+					claimProjectionSyncJobs: async () => [{ ...job, payload }],
+					prepareProjectionSyncJobDelivery: async (...args) => {
+						calls.push(args);
+						return "skipped";
+					},
+					buildUsageProjection: unexpected,
+					markProjectionSyncJobSucceeded: unexpected,
+					markProjectionSyncJobFailed: unexpected,
+				},
+				delivery: { usageDeliveryMode: unexpected, deliver: unexpected },
+			});
+			expect(await worker.runOnce()).toEqual({ claimed: 1, succeeded: 0, failed: 0, skipped: 1 });
+			expect(calls).toEqual([[job.project_id, job.id, "worker-a"]]);
+			expect(metrics.renderPrometheus()).toContain(
+				'billing_projection_sync_jobs_total{result="skipped"} 1',
+			);
+			expect(metrics.renderPrometheus()).toContain(
+				'billing_worker_jobs_total{result="skipped",worker="projection_sync"} 1',
+			);
+		},
+	);
+
+	it("fails closed and schedules recovery when delivery admission cannot be checked", async () => {
+		const calls: unknown[] = [];
+		const worker = new ProjectionSyncWorker({
+			projectContextResolver: workerProjectResolver,
+			workerId: "worker-a",
+			maxAttempts: 3,
+			batchSize: 1,
+			repository: {
+				claimProjectionSyncJobs: async () => [job],
+				prepareProjectionSyncJobDelivery: async () => {
+					throw new Error("database unavailable");
+				},
+				buildUsageProjection: async () => {
+					throw new Error("must not build");
+				},
+				markProjectionSyncJobSucceeded: async () => {
+					throw new Error("must not succeed");
+				},
+				markProjectionSyncJobFailed: async (...args) => {
+					calls.push(args);
+				},
+			},
+			delivery: {
+				deliver: async () => {
+					throw new Error("must not deliver");
+				},
+			},
+			now: () => new Date("2026-05-31T00:00:00.000Z"),
+			jitterMs: () => 0,
+		});
+		expect(await worker.runOnce()).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
+		expect(calls).toEqual([
+			[
+				job.project_id,
+				job.id,
+				"database unavailable",
+				new Date("2026-05-31T00:01:00.000Z"),
+				"worker-a",
+			],
+		]);
+	});
+
 	it("keeps failure recovery and job correlation while removing database values from logs", async () => {
 		const lines: string[] = [];
 		const error = databaseFailure();
@@ -71,6 +150,7 @@ describe("ProjectionSyncWorker", () => {
 			batchSize: 5,
 			logger: createPinoBillingLogger({ destination: { write: (line) => lines.push(line) } }),
 			repository: {
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [{ ...job, reason: "usage_changed", payload: null }],
 				buildUsageProjection: async () => {
 					throw error;
@@ -90,7 +170,7 @@ describe("ProjectionSyncWorker", () => {
 			now: () => new Date("2026-05-31T00:00:00.000Z"),
 			jitterMs: () => 0,
 		});
-		expect(await worker.runOnce()).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		expect(await worker.runOnce()).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 		expect(failures).toEqual([
 			{ jobId: job.id, error: error.message, retry: new Date("2026-05-31T00:01:00.000Z") },
 		]);
@@ -116,6 +196,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [job],
 				markProjectionSyncJobSucceeded: async (projectId, jobId, workerId) => {
 					calls.push(`succeeded:${projectId}:${jobId}:${workerId}`);
@@ -136,7 +217,7 @@ describe("ProjectionSyncWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(calls).toEqual(["sync:user_1", "succeeded:project_1:job_1:worker-a"]);
 		expect(metrics.renderPrometheus()).toContain(
 			'billing_projection_sync_jobs_total{result="succeeded"} 1',
@@ -147,7 +228,7 @@ describe("ProjectionSyncWorker", () => {
 		expect(infos).toEqual([
 			{
 				message: "Projection sync run completed",
-				context: { claimed: 1, succeeded: 1, failed: 0, workerId: "worker-a" },
+				context: { claimed: 1, succeeded: 1, failed: 0, skipped: 0, workerId: "worker-a" },
 			},
 		]);
 	});
@@ -174,6 +255,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => jobs,
 				markProjectionSyncJobSucceeded: async (_projectId, jobId) => {
 					succeeded.push(jobId);
@@ -212,7 +294,7 @@ describe("ProjectionSyncWorker", () => {
 		if (assertionError !== undefined) {
 			throw assertionError;
 		}
-		expect(result).toEqual({ claimed: 3, succeeded: 3, failed: 0 });
+		expect(result).toEqual({ claimed: 3, succeeded: 3, failed: 0, skipped: 0 });
 		expect(succeeded.sort()).toEqual(["job_1", "job_2", "job_3"]);
 	});
 
@@ -228,6 +310,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [
 					{
 						...job,
@@ -299,6 +382,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [
 					{
 						...job,
@@ -383,6 +467,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [
 					{
 						...job,
@@ -434,6 +519,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [job],
 				markProjectionSyncJobSucceeded: async () => {
 					throw new Error("should not succeed");
@@ -461,7 +547,7 @@ describe("ProjectionSyncWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 		expect(calls).toEqual([
 			{
 				projectId: "project_1",
@@ -512,6 +598,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [failedJob, laterJob],
 				markProjectionSyncJobSucceeded: async (projectId, jobId) => {
 					calls.push(`succeeded:${projectId}:${jobId}`);
@@ -537,7 +624,7 @@ describe("ProjectionSyncWorker", () => {
 
 		const result = await worker.runOnce();
 
-		expect(result).toEqual({ claimed: 2, succeeded: 1, failed: 1 });
+		expect(result).toEqual({ claimed: 2, succeeded: 1, failed: 1, skipped: 0 });
 		expect(calls).toEqual([
 			"sync:job_failed",
 			"failed:project_1:job_failed",
@@ -565,6 +652,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("usage projections are not expected here");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => {
 					throw new Error("database unavailable");
 				},
@@ -627,6 +715,7 @@ describe("ProjectionSyncWorker", () => {
 						sequence: 7,
 					};
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [usageJob],
 				markProjectionSyncJobSucceeded: async () => {},
 				markProjectionSyncJobFailed: async () => {
@@ -641,7 +730,12 @@ describe("ProjectionSyncWorker", () => {
 			},
 		});
 
-		await expect(worker.runOnce()).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		await expect(worker.runOnce()).resolves.toEqual({
+			claimed: 1,
+			succeeded: 1,
+			failed: 0,
+			skipped: 0,
+		});
 		expect(built).toEqual(["project_1:customer_1"]);
 		expect(delivered[0]?.idempotencyKey).toBe("usage:customer_1:7");
 		expect(delivered).toHaveLength(1);
@@ -682,6 +776,7 @@ describe("ProjectionSyncWorker", () => {
 					},
 					balances: [],
 				}),
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [usageJob],
 				markProjectionSyncJobSucceeded: async () => {
 					throw new Error("unexpected success");
@@ -698,7 +793,12 @@ describe("ProjectionSyncWorker", () => {
 			},
 		});
 
-		await expect(worker.runOnce()).resolves.toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		await expect(worker.runOnce()).resolves.toEqual({
+			claimed: 1,
+			succeeded: 0,
+			failed: 1,
+			skipped: 0,
+		});
 		expect(delivered).toEqual([]);
 		expect(failures).toEqual(["A usage projection payload has no sequence"]);
 	});
@@ -722,6 +822,7 @@ describe("ProjectionSyncWorker", () => {
 				buildUsageProjection: async (): Promise<never> => {
 					throw new Error("must not build a payload when delivery is off");
 				},
+				prepareProjectionSyncJobDelivery: async () => "ready",
 				claimProjectionSyncJobs: async () => [usageJob],
 				markProjectionSyncJobSucceeded: async (_projectId, jobId) => {
 					calls.push(`succeeded:${jobId}`);
@@ -738,7 +839,12 @@ describe("ProjectionSyncWorker", () => {
 			},
 		});
 
-		await expect(worker.runOnce()).resolves.toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		await expect(worker.runOnce()).resolves.toEqual({
+			claimed: 1,
+			succeeded: 1,
+			failed: 0,
+			skipped: 0,
+		});
 		expect(calls).toEqual(["succeeded:job_usage"]);
 	});
 });

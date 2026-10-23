@@ -398,8 +398,14 @@ export class CustomerErasureRepository
 		workerId: string,
 		counts: Record<string, number>,
 	): Promise<"completed" | "failed"> {
-		const residual = await residualRows(this.database, claimed.context);
 		const outcome = await this.transaction(async (tx) => {
+			// Keep the final scan and completion under the same lock the enqueue helpers take.
+			await tx.execute(drizzleSql`
+				SELECT id FROM customers
+				WHERE project_id = ${claimed.context.projectId} AND id = ${claimed.context.customerId}
+				FOR NO KEY UPDATE
+			`);
+			const residual = await residualRows(tx, claimed.context);
 			if (Object.keys(residual).length > 0) {
 				const withResidual = {
 					...counts,

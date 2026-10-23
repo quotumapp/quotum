@@ -73,7 +73,7 @@ localDescribe("Cross-provider journeys integration", () => {
 			const result = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(2, 1000);
 
-			expect(result).toEqual({ claimed: 2, succeeded: 2, failed: 0 });
+			expect(result).toEqual({ claimed: 2, succeeded: 2, failed: 0, skipped: 0 });
 			expect(receiver.requests.map((request) => request.body.idempotencyKey).sort()).toEqual([
 				"apple:200000000000001:purchase_verified",
 				"stripe:payment:pi_integration:projection",

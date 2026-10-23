@@ -32,6 +32,9 @@ describe("worker fixture helpers", () => {
 					async buildUsageProjection(): Promise<never> {
 						throw new Error("usage projections are not expected here");
 					},
+					async prepareProjectionSyncJobDelivery() {
+						return "ready";
+					},
 					async claimProjectionSyncJobs(workerId, limit) {
 						calls.push(`claim:${workerId}:${limit}`);
 						return [projectionJob()];
@@ -47,7 +50,7 @@ describe("worker fixture helpers", () => {
 				batchSize: 7,
 			});
 
-			expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+			expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 			expect(calls).toEqual(["claim:worker-a:7", "fetch", "succeed:worker-a"]);
 		} finally {
 			globalThis.fetch = previousFetch;

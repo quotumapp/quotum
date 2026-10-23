@@ -84,7 +84,7 @@ localDescribe("Worker concurrency integration", () => {
 			workerId: "worker-b",
 		});
 
-		expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+		expect(result).toEqual({ claimed: 0, succeeded: 0, failed: 0, skipped: 0 });
 		expect(projection.requests).toHaveLength(0);
 		await expectProjectionJobLock(context.sql, jobs[0].id, {
 			status: "processing",
@@ -105,7 +105,7 @@ localDescribe("Worker concurrency integration", () => {
 			workerId: "worker-b",
 		});
 
-		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(projection.requests[0].body.jobId).toBe(jobs[0].id);
 		await expectProjectionJobLock(context.sql, jobs[0].id, {
 			status: "succeeded",
@@ -126,7 +126,7 @@ localDescribe("Worker concurrency integration", () => {
 			workerId: "worker-a",
 		});
 
-		expect(failed).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		expect(failed).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 		await expectProjectionNextAttemptNearOneMinute(context.sql, jobs[0].id);
 		const immediate = await runProjectionWorkerOnce({
 			env: context.env,
@@ -134,7 +134,7 @@ localDescribe("Worker concurrency integration", () => {
 			fetch: createRecordingProjectionFetch().fetch,
 			workerId: "worker-b",
 		});
-		expect(immediate).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+		expect(immediate).toEqual({ claimed: 0, succeeded: 0, failed: 0, skipped: 0 });
 
 		await makeProjectionJobDue(context.sql, jobs[0].id);
 		const projection = createRecordingProjectionFetch();
@@ -145,7 +145,7 @@ localDescribe("Worker concurrency integration", () => {
 			workerId: "worker-b",
 		});
 
-		expect(retried).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(retried).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(projection.requests[0].body.jobId).toBe(jobs[0].id);
 	});
 
@@ -164,7 +164,7 @@ localDescribe("Worker concurrency integration", () => {
 			maxAttempts,
 		});
 
-		expect(failed).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		expect(failed).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 		await expectProjectionJobLock(context.sql, jobs[0].id, {
 			status: "failed",
 			lockedBy: null,
@@ -179,7 +179,7 @@ localDescribe("Worker concurrency integration", () => {
 			maxAttempts,
 		});
 
-		expect(retried).toEqual({ claimed: 0, succeeded: 0, failed: 0 });
+		expect(retried).toEqual({ claimed: 0, succeeded: 0, failed: 0, skipped: 0 });
 		expect(projection.requests).toHaveLength(0);
 
 		await expect(
@@ -194,7 +194,7 @@ localDescribe("Worker concurrency integration", () => {
 			maxAttempts,
 		});
 
-		expect(recovered).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(recovered).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(recoveredProjection.requests[0].body.jobId).toBe(jobs[0].id);
 	});
 

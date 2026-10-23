@@ -50,7 +50,7 @@ localDescribe("Failure modes integration", () => {
 
 			const first = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(1, 1000);
-			expect(first).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+			expect(first).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 			await expectProjectionAttempt(context.sql, pendingJob.id, {
 				status: "pending",
 				attempts: 1,
@@ -60,7 +60,7 @@ localDescribe("Failure modes integration", () => {
 			await makeProjectionJobDue(context.sql, pendingJob.id);
 			const second = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(2, 1000);
-			expect(second).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+			expect(second).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 			await expectProjectionAttempt(context.sql, pendingJob.id, {
 				status: "pending",
 				attempts: 2,
@@ -70,7 +70,7 @@ localDescribe("Failure modes integration", () => {
 			await makeProjectionJobDue(context.sql, pendingJob.id);
 			const third = await runProjectionWorkerOnce({ env, repository: context.repository });
 			await receiver.waitForRequests(3, 1000);
-			expect(third).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+			expect(third).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 			await expectProjectionAttempt(context.sql, pendingJob.id, {
 				status: "succeeded",
 				attempts: 2,
@@ -151,7 +151,7 @@ localDescribe("Failure modes integration", () => {
 			fetch,
 		});
 
-		expect(result).toEqual({ claimed: 3, succeeded: 2, failed: 1 });
+		expect(result).toEqual({ claimed: 3, succeeded: 2, failed: 1, skipped: 0 });
 		await expectProjectionJobStatus(context.sql, jobs[0].id, "succeeded");
 		await expectProjectionJobStatus(context.sql, jobs[1].id, "pending");
 		await expectProjectionJobStatus(context.sql, jobs[2].id, "succeeded");
@@ -186,7 +186,7 @@ localDescribe("Failure modes integration", () => {
 				new Response(JSON.stringify({ success: false }), { status: 503 }),
 			).fetch,
 		});
-		expect(first).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		expect(first).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 		await makeProjectionJobDue(context.sql, job.id);
 		const second = await runProjectionWorkerOnce({
 			env,
@@ -194,7 +194,7 @@ localDescribe("Failure modes integration", () => {
 			fetch: createRecordingProjectionFetch(new Error("receiver unavailable")).fetch,
 		});
 
-		expect(second).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+		expect(second).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 		await expectProjectionAttempt(context.sql, job.id, {
 			status: "pending",
 			attempts: 2,

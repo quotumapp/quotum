@@ -198,6 +198,12 @@ idempotency rows, step-up grants and terminal MCP rows in bounded batches.
 Usage projection jobs retain an immutable payload through retries; their internal coalescing key
 is `usage:<customerId>` and their delivery key includes `:<sequence>`. Drain old workers before
 upgrading this delivery behavior.
+Projection enqueues lock and check the customer for erasure in their transaction. Claims exclude
+erased customers, and delivery admission checks the account under a shared lock and rechecks the
+job's ownership before materialization or HTTP. An admitted processing job blocks erasure; an
+erased, removed or lost claim is skipped without result markers. Erasure verification counts all
+remaining projection jobs and holds the customer lock through completion. Follow the historical
+projection cleanup in `docs/operations.md` when replacing processes without these guards.
 Workers lease job rows by `worker_id` (`locked_by` columns, refreshed by
 `src/workers/lease-heartbeat.ts`) and retry with `src/workers/backoff.ts`, so a worker must only
 touch rows it holds. Auto-topup and recurring billing use `src/workers/job-leases.ts` to renew

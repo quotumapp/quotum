@@ -12,6 +12,11 @@ import type {
 
 export interface ProjectionSyncJobRepositorySource {
 	claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]>;
+	prepareProjectionSyncJobDelivery(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+	): Promise<"ready" | "skipped">;
 	buildUsageProjection(
 		projectId: string,
 		customerId: string,
@@ -32,6 +37,14 @@ export class ProjectionSyncJobRepository implements ProjectionSyncJobRepositoryS
 
 	async claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]> {
 		return await this.source.claimProjectionSyncJobs(workerId, limit);
+	}
+
+	async prepareProjectionSyncJobDelivery(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+	): Promise<"ready" | "skipped"> {
+		return await this.source.prepareProjectionSyncJobDelivery(projectId, jobId, workerId);
 	}
 
 	async buildUsageProjection(

@@ -25,7 +25,7 @@ describe("projection sync runtime", () => {
 			worker: {
 				async runOnce() {
 					calls.push("runOnce");
-					return { claimed: 0, succeeded: 0, failed: 0 };
+					return { claimed: 0, succeeded: 0, failed: 0, skipped: 0 };
 				},
 			},
 			pollIntervalMs: 2500,
@@ -143,7 +143,7 @@ describe("projection sync runtime", () => {
 				async runOnce() {
 					calls += 1;
 					await running.promise;
-					return { claimed: 0, succeeded: 0, failed: 0 };
+					return { claimed: 0, succeeded: 0, failed: 0, skipped: 0 };
 				},
 			},
 			pollIntervalMs: 1000,
@@ -182,7 +182,7 @@ describe("projection sync runtime", () => {
 			worker: {
 				async runOnce() {
 					await running.promise;
-					return { claimed: 0, succeeded: 0, failed: 0 };
+					return { claimed: 0, succeeded: 0, failed: 0, skipped: 0 };
 				},
 			},
 			pollIntervalMs: 1000,

@@ -19,6 +19,11 @@ import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface ProjectionSyncRepository {
 	claimProjectionSyncJobs(workerId: string, limit: number): Promise<ProjectionSyncJobRow[]>;
+	prepareProjectionSyncJobDelivery(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+	): Promise<"ready" | "skipped">;
 	buildUsageProjection(
 		projectId: string,
 		customerId: string,
@@ -52,6 +57,8 @@ export interface ProjectionSyncRunResult {
 	claimed: number;
 	succeeded: number;
 	failed: number;
+	/** Erased, removed or no longer owned claims, left without delivery or a result marker. */
+	skipped: number;
 }
 
 export class ProjectionSyncWorker {
@@ -171,10 +178,11 @@ export class ProjectionSyncWorker {
 
 	private async syncClaimedJobs(
 		jobs: ProjectionSyncJobRow[],
-	): Promise<{ succeeded: number; failed: number }> {
+	): Promise<{ succeeded: number; failed: number; skipped: number }> {
 		let nextIndex = 0;
 		let succeeded = 0;
 		let failed = 0;
+		let skipped = 0;
 		const workerCount = Math.min(this.concurrency, jobs.length);
 
 		await Promise.all(
@@ -189,6 +197,8 @@ export class ProjectionSyncWorker {
 					const status = await this.syncClaimedJob(job);
 					if (status === "succeeded") {
 						succeeded += 1;
+					} else if (status === "skipped") {
+						skipped += 1;
 					} else {
 						failed += 1;
 					}
@@ -196,11 +206,25 @@ export class ProjectionSyncWorker {
 			}),
 		);
 
-		return { succeeded, failed };
+		return { succeeded, failed, skipped };
 	}
 
-	private async syncClaimedJob(job: ProjectionSyncJobRow): Promise<"succeeded" | "failed"> {
+	private async syncClaimedJob(
+		job: ProjectionSyncJobRow,
+	): Promise<"succeeded" | "failed" | "skipped"> {
 		try {
+			const admission = await this.repository.prepareProjectionSyncJobDelivery(
+				job.project_id,
+				job.id,
+				this.workerId,
+			);
+			if (admission === "skipped") {
+				safelyIncrementBillingMetric(this.metrics, "billing_projection_sync_jobs_total", {
+					result: "skipped",
+				});
+				this.recordWorkerJobMetric("skipped");
+				return "skipped";
+			}
 			const project = await resolveClaimedProjectInstance(this.projectContextResolver, {
 				projectInstanceId: job.project_id,
 				projectInstanceKey: job.project_key,
@@ -228,7 +252,7 @@ export class ProjectionSyncWorker {
 		return "succeeded";
 	}
 
-	private recordWorkerJobMetric(result: "succeeded" | "failed"): void {
+	private recordWorkerJobMetric(result: "succeeded" | "failed" | "skipped"): void {
 		safelyIncrementBillingMetric(this.metrics, "billing_worker_jobs_total", {
 			worker: "projection_sync",
 			result,

@@ -885,6 +885,13 @@ current. Set
 `usageDelivery` to `off` on the projection connection when your backend takes balances from the
 consume response and only needs purchase and provider events.
 
+An account frozen for [customer erasure](operations.md#customer-erasure) cannot enqueue or send
+projections. Delivery admission is checked even for retries with stored payloads and jobs already
+held by a worker. A delivery admitted before the freeze blocks the erasure request until it
+finishes; jobs for an account whose freeze committed first are skipped and deleted by erasure.
+See the [historical cleanup](operations.md#historical-projection-cleanup) when upgrading processes
+that could leave projection jobs behind after erasure.
+
 ### Private receivers (headless only)
 
 Receivers must be public HTTPS by default. Quotum resolves the receiver's hostname, refuses the

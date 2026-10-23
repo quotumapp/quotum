@@ -66,7 +66,7 @@ localDescribe("Worker flows integration", () => {
 			fetch: projection.fetch,
 		});
 
-		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(projection.requests).toHaveLength(1);
 		expect(projection.requests[0].url).toBe(
 			"https://acme.projection.integration.test/internal/billing/projections",
@@ -141,7 +141,7 @@ localDescribe("Worker flows integration", () => {
 				fetch: globalThis.fetch,
 				timeoutMs: 200,
 			});
-			expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+			expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 			const failedJob = await expectProjectionJob(context.sql, {
 				billingAccountId: "integration_user",
 				reason: "purchase_verified",
@@ -207,7 +207,7 @@ localDescribe("Worker flows integration", () => {
 				fetch: projection.fetch,
 			});
 
-			expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1 });
+			expect(result).toEqual({ claimed: 1, succeeded: 0, failed: 1, skipped: 0 });
 			expect(projection.requests).toHaveLength(1);
 			const retriedJob = await expectProjectionJob(context.sql, {
 				billingAccountId: "integration_user",
@@ -250,7 +250,7 @@ localDescribe("Worker flows integration", () => {
 			fetch: projection.fetch,
 		});
 
-		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(projection.requests).toHaveLength(1);
 		expect(projection.requests[0].body).toMatchObject({
 			jobId: pendingJob.id,
@@ -315,7 +315,7 @@ localDescribe("Worker flows integration", () => {
 			fetch: projection.fetch,
 		});
 
-		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0 });
+		expect(result).toEqual({ claimed: 1, succeeded: 1, failed: 0, skipped: 0 });
 		expect(projection.requests).toHaveLength(1);
 		expect(projection.requests[0].body).toMatchObject({
 			jobId: processingJob.id,

@@ -348,7 +348,10 @@ defaults to claiming up to 25 jobs per poll from a candidate set bounded by the 
 delivering five concurrently with bounded HTTP timeouts. Batches, existing delivery concurrency,
 scan sizes and per-run budgets have optional overrides in [worker tuning](deployment.md#worker-tuning).
 The existing repository caps are enforced at startup. Lease, heartbeat, retry and retention policies
-keep their current behavior.
+keep their current behavior. Erased accounts are excluded before bounding candidates.
+Each claimed job checks its current ownership and the account's erasure state before materializing
+or sending a payload. Removed, erased or no longer owned claims increment `skipped` in the run log
+and `result="skipped"` on the projection and worker job counters, without a delivery result marker.
 Usage-driven projections are one job per billing account whose payload is built when it is first
 delivered and kept for retries, so the backlog is bounded by active accounts. Tune intervals and attempt limits with the `BILLING_*` variables listed
 in [deployment.md](deployment.md#optional-variables).
@@ -784,6 +787,15 @@ batches under a lease and resumes after a stop:
 - verifies that nothing still carries the original id, then completes and drops the id from the
   operation row, the only place it lived until then.
 
+Projection enqueues lock the account and check `erased_at` in the same transaction as the enqueue,
+so an in-flight operation holding an internal customer id cannot add a job after the freeze.
+Delivery admission shares the account lock with the erasure request: a delivery admitted first
+blocks erasure as in flight, and a freeze admitted first suppresses delivery, including a stored
+payload already held in worker memory. No transaction stays open during the HTTP request. Erased
+claims are parked until the erasure deletes them; claims whose rows were already deleted are
+skipped. Verification counts every remaining projection job, including null payloads and all
+terminal statuses, and holds the account lock through the completion commit.
+
 Quantities, ledger entries, usage windows and the purchase, subscription and invoice rows stay,
 because the ledger must keep its integrity; only what names the person goes.
 
@@ -804,3 +816,50 @@ What an erasure does not do:
   again after a restore.
 - It keeps caller-supplied dimension values on usage rows (`filters`, rate inputs). They must not
   carry personal data.
+
+#### Historical projection cleanup
+
+Older processes could enqueue or send a projection after the account was frozen, and complete an
+erasure while projection rows or stored payloads remained. Drain and replace every old API and
+worker process before resuming erasures or running this cleanup: a payload in an old worker's
+memory can still be sent even after its row is deleted. This fix needs no schema migration or
+environment changes. The cleanup removes only projection jobs belonging to an erased customer;
+completed erasure receipts, active customers and accounting rows stay in place.
+
+Using an operator database connection, preview the number of remaining jobs without selecting
+their payloads or account identifiers:
+
+```sql
+SELECT count(*) AS remaining
+FROM projection_sync_jobs jobs
+JOIN customers customer
+  ON customer.project_id = jobs.project_id AND customer.id = jobs.customer_id
+WHERE customer.erased_at IS NOT NULL;
+```
+
+Run the following statement repeatedly. Each statement commits a batch of at most 500 jobs,
+including stored payloads and every job status. It skips rows locked by another transaction.
+
+```sql
+-- Erased projection cleanup batch
+WITH batch AS (
+  SELECT jobs.project_id, jobs.id
+  FROM projection_sync_jobs jobs
+  JOIN customers customer
+    ON customer.project_id = jobs.project_id AND customer.id = jobs.customer_id
+  WHERE customer.erased_at IS NOT NULL
+  ORDER BY jobs.created_at, jobs.id
+  LIMIT 500
+  FOR UPDATE OF jobs SKIP LOCKED
+), deleted AS (
+  DELETE FROM projection_sync_jobs jobs USING batch
+  WHERE jobs.project_id = batch.project_id AND jobs.id = batch.id
+  RETURNING jobs.id
+)
+SELECT count(*) AS deleted FROM deleted;
+```
+
+Re-run the preview after each batch. Finish only when `remaining` is zero: `deleted = 0` can mean
+that another transaction still locks the remaining rows. Repeating the cleanup is safe. A running
+erasure that fails with `RESIDUAL_ROWS` retains its subject id and can be queued again using its
+original request and idempotency key.

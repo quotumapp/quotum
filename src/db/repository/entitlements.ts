@@ -255,7 +255,7 @@ export async function nextProjectionSequence(
 		drizzleSql`
 		UPDATE customers
 		SET projection_sequence = projection_sequence + 1, updated_at = now()
-		WHERE project_id = ${projectId} AND id = ${customerId}
+		WHERE project_id = ${projectId} AND id = ${customerId} AND erased_at IS NULL
 		RETURNING projection_sequence, billing_account_id
 	`,
 	);
@@ -274,13 +274,21 @@ export async function enqueueUsageProjection(
 	executor: QueryExecutor,
 	input: { projectId: string; customerId: string },
 ): Promise<void> {
+	// The caller's transaction keeps the customer lock through the insert. An erasure either
+	// waits for the enqueue to commit, or freezes first and is observed even with a remembered id.
 	await executeOne(
 		executor,
 		drizzleSql`
+		WITH active_customer AS MATERIALIZED (
+			SELECT c.id FROM customers c
+			WHERE c.project_id = ${input.projectId} AND c.id = ${input.customerId}
+				AND c.erased_at IS NULL
+			FOR NO KEY UPDATE
+		)
 		INSERT INTO projection_sync_jobs (
 			project_id, customer_id, idempotency_key, reason, payload, status, next_attempt_at
 		)
-		VALUES (
+		SELECT
 			${input.projectId},
 			${input.customerId},
 			${usageProjectionKey(input.customerId)},
@@ -291,7 +299,8 @@ export async function enqueueUsageProjection(
 				(SELECT projection_usage_debounce_ms FROM metering_settings WHERE project_id = ${input.projectId}),
 				1000
 			) / 1000.0)
-		)
+		FROM active_customer
+		WHERE true
 		ON CONFLICT (project_id, idempotency_key) DO UPDATE SET
 			status = CASE
 				WHEN projection_sync_jobs.status = 'processing' THEN 'processing'
@@ -594,6 +603,7 @@ export async function enqueueProjectionSyncJob(
 		SELECT c.project_id, c.erased_at
 		FROM customers c
 		WHERE c.id = ${input.customerId}
+		FOR NO KEY UPDATE
 	`,
 	);
 	if (customer === null) {
@@ -634,7 +644,7 @@ export async function enqueueProjectionSyncJob(
 }
 
 /** Inserts or refreshes the per-key projection job for a payload the caller already built. */
-export async function insertProjectionSyncJob(
+async function insertProjectionSyncJob(
 	executor: QueryExecutor,
 	input: {
 		projectId: string;
