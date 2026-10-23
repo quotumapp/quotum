@@ -12,7 +12,6 @@ import {
 
 const repositoryRoot = resolve(import.meta.dir, "../../..");
 const temporaryDirectories: string[] = [];
-
 afterEach(async () => {
 	for (const directory of temporaryDirectories.splice(0)) {
 		await rm(directory, { recursive: true, force: true });
@@ -40,9 +39,8 @@ async function scratch(): Promise<string> {
 }
 
 const stripeBinding = (productKey: string) => ({ productKey, provider: "stripe", channel: "web" });
-
-/** A catalog in the legacy spelling, with one item of each kind the canonical spelling renames. */
-const legacyCatalog = {
+/** A canonical catalog with optional defaults. */
+const authoredCatalog = {
 	features: [
 		{
 			key: "ai_credits",
@@ -69,11 +67,6 @@ const legacyCatalog = {
 			name: "Pro",
 			version: 1,
 			trialDays: null,
-			currency: "USD",
-			baseAmountMinor: 2000,
-			billingInterval: "month",
-			// The legacy fields and the base price agree, and the plan-level binding is the base
-			// price's, as legacy catalogs spelled a Stripe-priced plan.
 			basePrice: {
 				key: "pro_monthly",
 				currency: "USD",
@@ -85,23 +78,28 @@ const legacyCatalog = {
 				taxBehavior: "exclusive",
 				providerBindings: [stripeBinding("pro_monthly")],
 			},
-			providerBindings: [stripeBinding("pro_monthly")],
 			items: [
 				{
 					featureKey: "ai_credits",
 					itemKind: "allocation",
 					quantity: "1000",
-					resetInterval: "month",
-					expiresAfterSeconds: 86400,
-					overagePolicy: "blocked",
+					reset: {
+						interval: "month",
+						intervalCount: 1,
+					},
+					expiry: {
+						mode: "after_seconds",
+						seconds: 86400,
+					},
 				},
 				{
 					featureKey: "exports",
 					itemKind: "meter_limit",
 					quantity: "100",
-					resetInterval: "day",
-					expiresAfterSeconds: null,
-					overagePolicy: "blocked",
+					reset: {
+						interval: "day",
+						intervalCount: 1,
+					},
 				},
 			],
 		},
@@ -130,8 +128,10 @@ const legacyCatalog = {
 			key: "credits_10",
 			featureKey: "ai_credits",
 			quantity: "10",
-			expiresAfterSeconds: null,
 			providerBindings: [stripeBinding("credits_10")],
+			expiry: {
+				mode: "forever",
+			},
 		},
 		{
 			key: "credits_1000",
@@ -143,14 +143,13 @@ const legacyCatalog = {
 	],
 	rateCards: [],
 };
-
 describe("quotum catalog format", () => {
-	it("prints a legacy TypeScript catalog in the canonical spelling and keeps an explicit null revision", async () => {
+	it("normalizes a canonical TypeScript catalog and keeps an explicit null revision", async () => {
 		const directory = await scratch();
 		const file = join(directory, "billing.catalog.ts");
 		await writeFile(
 			file,
-			`export const expectedRevision = null;\nexport const catalog = ${JSON.stringify(legacyCatalog)};\n`,
+			`export const expectedRevision = null;\nexport const catalog = ${JSON.stringify(authoredCatalog)};\n`,
 			"utf8",
 		);
 		const first = captured();
@@ -210,11 +209,10 @@ describe("quotum catalog format", () => {
 		expect(againCode).toBe(0);
 		expect(again.out.join("\n")).toBe(text);
 	});
-
 	it("rewrites the file with --write and leaves a revision the file never declared undeclared", async () => {
 		const directory = await scratch();
 		const file = join(directory, "catalog.mjs");
-		await writeFile(file, `export default ${JSON.stringify(legacyCatalog)};\n`, "utf8");
+		await writeFile(file, `export default ${JSON.stringify(authoredCatalog)};\n`, "utf8");
 		const write = captured();
 		expect(await runCatalogFormat([file, "--write"], write.output)).toBe(0);
 		expect(write.out).toEqual([`Wrote ${file} in the canonical spelling.`]);
@@ -235,15 +233,14 @@ describe("quotum catalog format", () => {
 		const example = JSON.parse(await readFile(file, "utf8"));
 		expect(JSON.parse(result.out.join("\n"))).toEqual(checkNewCatalogIntent(example).canonical);
 	});
-
 	it("prints Stripe prices left to Stripe as advice, not as an error", () => {
 		const advised = formatCatalogSource(
 			{
 				catalog: {
-					...legacyCatalog,
+					...authoredCatalog,
 					plans: [
 						{
-							...legacyCatalog.plans[1],
+							...authoredCatalog.plans[1],
 							kind: "base",
 							basePrice: null,
 							providerPriced: {
@@ -264,11 +261,23 @@ describe("quotum catalog format", () => {
 			},
 		]);
 	});
+	it("rejects removed authoring fields instead of converting them", () => {
+		const plan = authoredCatalog.plans[0];
+		if (plan === undefined) throw new Error("Missing plan fixture");
+		for (const legacyFields of [{ providerBindings: [] }, { billingInterval: null }]) {
+			expect(() =>
+				formatCatalogSource(
+					{ catalog: { ...authoredCatalog, plans: [{ ...plan, ...legacyFields }] } },
+					"json",
+				),
+			).toThrow("Unrecognized key");
+		}
+	});
 
 	it("refuses wrong arguments with 64 and an invalid catalog with 1, on one line", async () => {
 		const directory = await scratch();
 		const valid = join(directory, "catalog.json");
-		await writeFile(valid, JSON.stringify(legacyCatalog), "utf8");
+		await writeFile(valid, JSON.stringify(authoredCatalog), "utf8");
 		const cases: Array<[string[], number, string]> = [
 			[[], 64, "format requires one catalog file. Run `quotum catalog --help` for usage."],
 			[
@@ -294,8 +303,8 @@ describe("quotum catalog format", () => {
 		await writeFile(
 			unknownField,
 			JSON.stringify({
-				...legacyCatalog,
-				plans: [{ ...legacyCatalog.plans[0], items: [{ itemKind: "allocation" }] }],
+				...authoredCatalog,
+				plans: [{ ...authoredCatalog.plans[0], items: [{ itemKind: "allocation" }] }],
 			}),
 			"utf8",
 		);
@@ -308,10 +317,10 @@ describe("quotum catalog format", () => {
 		await writeFile(
 			conflicting,
 			JSON.stringify({
-				...legacyCatalog,
+				...authoredCatalog,
 				plans: [
 					{
-						...legacyCatalog.plans[1],
+						...authoredCatalog.plans[1],
 						providerPriced: {
 							billingInterval: "year",
 							providerBindings: [stripeBinding("yearly")],

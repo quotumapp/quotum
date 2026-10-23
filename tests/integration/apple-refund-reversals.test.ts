@@ -292,7 +292,15 @@ localDescribe("Apple refund reversal accounting", () => {
 			const catalog = structuredClone(aiCreditsCatalog);
 			catalog.plans = catalog.plans.map((plan) => ({
 				...plan,
-				items: plan.items.map((item) => ({ ...item, resetInterval })),
+				items: plan.items.map((item) =>
+					item.itemKind === "allocation"
+						? {
+								...item,
+								reset:
+									resetInterval === null ? null : { interval: resetInterval, intervalCount: 1 },
+							}
+						: item,
+				),
 			}));
 			const preview = await context.repository.previewCatalog(project(), {
 				expectedRevision: null,

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent, AuthoredPlanIntent } from "../../src/catalog/types";
 import { runUsageScopesCommand } from "../../src/composition/cli/usage-scopes";
 import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
 import type { UsageScopesVerification } from "../../src/db/repository/usage-scopes-transition";
@@ -18,20 +18,17 @@ const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
 let directory: string;
 let consumed: { usageEventId: string | null };
-
 /** `quotum usage scopes snapshot` before `quotum migrate`, then `verify` after it (PC-04). */
 localDescribe("declared meter-limit scope transition", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		directory = await mkdtemp(join(tmpdir(), "quotum-scopes-transition-"));
 		await seedTransitionState();
 		expect(await run(["snapshot", "--out", baseline()])).toMatchObject({ code: 0 });
 	});
-
 	afterAll(async () => {
 		await rm(directory, { recursive: true, force: true });
 		await context.sql.close();
@@ -273,20 +270,16 @@ async function seedTransitionState(): Promise<void> {
 		FROM closed, component
 	`;
 }
-
 function plan(
 	key: string,
 	kind: "base" | "addon",
 	quantity: string,
 	allocationScope: "account" | "entity",
-): CatalogPlanIntent {
+): AuthoredPlanIntent {
 	return {
 		key,
 		name: key,
 		version: 1,
-		currency: "USD",
-		baseAmountMinor: kind === "base" ? 1000 : 300,
-		billingInterval: "month",
 		trialDays: null,
 		kind,
 		items: [
@@ -294,17 +287,16 @@ function plan(
 				featureKey: "api_requests",
 				itemKind: "meter_limit",
 				quantity,
-				resetInterval: "day",
-				expiresAfterSeconds: null,
-				overagePolicy: "blocked",
 				allocationScope,
+				reset: {
+					interval: "day",
+					intervalCount: 1,
+				},
 			},
 		],
-		providerBindings: [],
 	};
 }
-
-function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
+function catalog(plans: AuthoredPlanIntent[]): AuthoredCatalogIntent {
 	return {
 		features: [
 			{
@@ -322,8 +314,7 @@ function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
 		rateCards: [],
 	};
 }
-
-async function publish(intent: CatalogIntent): Promise<void> {
+async function publish(intent: AuthoredCatalogIntent): Promise<void> {
 	const project = integrationProjectContext();
 	const actor = "integration-scopes-transition";
 	const preview = await context.repository.previewCatalog(project, {

@@ -1,9 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import type {
-	AuthoredCatalogIntent,
-	CatalogIntent,
-	CatalogPlanIntent,
-} from "../../src/catalog/types";
+import type { AuthoredCatalogIntent, AuthoredPlanIntent } from "../../src/catalog/types";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -19,34 +15,29 @@ const localDescribe = describeLocalPostgres(describe, describe.skip);
 const project = integrationProjectContext();
 let context: LocalPostgresContext;
 let revision: number | null;
-
-function freePlan(version: number, quantity: string): CatalogPlanIntent {
+function freePlan(version: number, quantity: string): AuthoredPlanIntent {
 	return {
 		key: "free",
 		name: "Free",
 		version,
-		currency: null,
-		baseAmountMinor: null,
-		billingInterval: null,
 		trialDays: null,
 		items: [
 			{
 				featureKey: "ai_credits",
 				itemKind: "allocation",
 				quantity,
-				resetInterval: "month",
-				expiresAfterSeconds: null,
-				overagePolicy: "blocked",
+				reset: {
+					interval: "month",
+					intervalCount: 1,
+				},
 			},
 		],
-		providerBindings: [],
 	};
 }
-
 function catalog(
-	plan: CatalogPlanIntent | null,
+	plan: AuthoredPlanIntent | null,
 	entitlementKeys: string[] = ["free_tier"],
-): CatalogIntent {
+): AuthoredCatalogIntent {
 	return {
 		...aiCreditsCatalog,
 		plans: [...aiCreditsCatalog.plans, ...(plan === null ? [] : [plan])],
@@ -211,17 +202,14 @@ const idle = {
 	defaultPlanSkipped: 0,
 	defaultPlanFailedSlices: 0,
 };
-
 localDescribe("default plan", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		revision = null;
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});
@@ -801,16 +789,17 @@ localDescribe("default plan", () => {
 		expect(jobs.map((job) => job.idempotency_key)).toContain(`plan_grant:${grant?.id}:started`);
 		expect(await runWorker(25)).toEqual(idle);
 	});
-
 	it("reads a republished reset as the account's next write applies it, before the pass", async () => {
 		await publish(catalog(freePlan(1, "100")));
 		await consume("reset_user", 30, "spend-1");
 		// Version 2 resets weekly. The account's next write keeps the monthly allowance for the rest of
 		// its window and starts the weekly reset where it ends, so a read answers with it already.
 		const weekly = freePlan(2, "100");
-		weekly.items = weekly.items.map((item) => ({ ...item, resetInterval: "week" as const }));
+		weekly.items = weekly.items.map((item) => ({
+			...item,
+			reset: { interval: "week", intervalCount: 1 } as const,
+		}));
 		await publish(catalog(weekly));
-
 		const kept = { granted: "100", consumed: "30", available: "70" };
 		expect(await balance("reset_user")).toMatchObject(kept);
 		expect(
@@ -827,7 +816,6 @@ localDescribe("default plan", () => {
 			),
 		).toMatchObject([{ featureKey: "ai_credits", available: "70" }]);
 		expect(await grants("reset_user")).toMatchObject([{ status: "active", plan_version: 1 }]);
-
 		expect(await consume("reset_user", 10, "spend-2")).toMatchObject({
 			allowed: true,
 			balance: { granted: "100", available: "60" },
@@ -835,14 +823,15 @@ localDescribe("default plan", () => {
 		expect(await grants("reset_user")).toMatchObject([{ status: "active", plan_version: 2 }]);
 		expect((await allowanceRows("reset_user")).map((row) => row.live)).toEqual([true]);
 	});
-
 	it("keeps a window's allowance through a reset change and starts the new reset at its end", async () => {
 		const weekly = freePlan(1, "200");
-		weekly.items = weekly.items.map((item) => ({ ...item, resetInterval: "week" as const }));
+		weekly.items = weekly.items.map((item) => ({
+			...item,
+			reset: { interval: "week", intervalCount: 1 } as const,
+		}));
 		await publish(catalog(weekly));
 		await consume("reset_change", 169, "spend-1");
 		expect(await balance("reset_change")).toMatchObject({ available: "31" });
-
 		// Version 2 resets monthly. Changing the reset never refills the window: the weekly allowance
 		// runs to its end, before and after the pass reaches the account.
 		await publish(catalog(freePlan(2, "200")));
@@ -857,7 +846,6 @@ localDescribe("default plan", () => {
 		});
 		expect(await consume("reset_change", 31, "spend-3")).toMatchObject({ allowed: false });
 		expect((await allowanceRows("reset_change")).map((row) => row.live)).toEqual([true]);
-
 		// A week later the weekly allowance has ended, and the monthly quantity starts where it ended.
 		await context.sql`
 			UPDATE plan_grants SET starts_at = starts_at - interval '7 days 1 minute'
@@ -991,7 +979,6 @@ localDescribe("default plan", () => {
 			{ key: "starter", status: "inactive" },
 		]);
 	});
-
 	it("checks a republished meter limit and usage limit before the pass reaches the account", async () => {
 		const limited = (version: number, meterLimit: string, usageLimit: string) => {
 			const plan = freePlan(version, "100");
@@ -999,9 +986,10 @@ localDescribe("default plan", () => {
 				featureKey: "model_tokens",
 				itemKind: "meter_limit",
 				quantity: meterLimit,
-				resetInterval: "day",
-				expiresAfterSeconds: null,
-				overagePolicy: "blocked",
+				reset: {
+					interval: "day",
+					intervalCount: 1,
+				},
 			});
 			return {
 				...plan,
@@ -1031,14 +1019,12 @@ localDescribe("default plan", () => {
 				idempotencyKey: "spend-1",
 			}),
 		).toMatchObject({ allowed: true });
-
 		// Version 2 lowers the meter limit below what the window used.
 		await publish({ ...catalog(limited(2, "300", "900")), rateCards: [] });
 		expect(await tokens("100")).toMatchObject({ allowed: false, reason: "insufficient_balance" });
 		expect(
 			await context.repository.getMeteringBalance(project, "tightened", "model_tokens"),
 		).toMatchObject({ granted: "300", available: "0" });
-
 		// Version 3 lowers the usage limit instead.
 		await publish({ ...catalog(limited(3, "1000", "450")), rateCards: [] });
 		expect(await tokens("100")).toMatchObject({ allowed: false, reason: "control_limit_exceeded" });
@@ -1046,7 +1032,6 @@ localDescribe("default plan", () => {
 			await context.repository.controlsEnterprise.listEffectiveControls(project, "tightened"),
 		).toMatchObject([{ featureKey: "model_tokens", limitValue: "450", consumedValue: "400" }]);
 		expect(await grants("tightened")).toMatchObject([{ plan_version: 1 }]);
-
 		expect(
 			await consumeForAccount({
 				billingAccountId: "tightened",
@@ -1087,16 +1072,16 @@ localDescribe("default plan", () => {
 		expect(await balance("lapsed_user")).toMatchObject({ granted: "100", available: "98" });
 		expect(await runWorker(25)).toEqual(idle);
 	});
-
 	it("keeps counting the meter-limit window when the account falls back to it", async () => {
 		const limited = freePlan(1, "100");
 		limited.items.push({
 			featureKey: "model_tokens",
 			itemKind: "meter_limit",
 			quantity: "1000",
-			resetInterval: "day",
-			expiresAfterSeconds: null,
-			overagePolicy: "blocked",
+			reset: {
+				interval: "day",
+				intervalCount: 1,
+			},
 		});
 		await publish({ ...catalog(limited), rateCards: [] });
 		const tokens = (quantity: string) =>
@@ -1128,7 +1113,6 @@ localDescribe("default plan", () => {
 			idempotencyKey: "end-1",
 			actor: null,
 		});
-
 		expect(await tokens("600")).toMatchObject({ allowed: false, reason: "insufficient_balance" });
 		expect(await tokens("400")).toMatchObject({ allowed: true });
 	});
@@ -1288,16 +1272,16 @@ localDescribe("default plan", () => {
 			await context.sql`SELECT id FROM customers WHERE billing_account_id = 'stranger'`,
 		).toHaveLength(0);
 	});
-
 	it("reads the default plan's meter limit for an unknown account and applies it once created", async () => {
 		const limited = freePlan(1, "100");
 		limited.items.push({
 			featureKey: "model_tokens",
 			itemKind: "meter_limit",
 			quantity: "1000",
-			resetInterval: "day",
-			expiresAfterSeconds: null,
-			overagePolicy: "blocked",
+			reset: {
+				interval: "day",
+				intervalCount: 1,
+			},
 		});
 		await publish({ ...catalog(limited), rateCards: [] });
 
@@ -1320,7 +1304,6 @@ localDescribe("default plan", () => {
 		expect(
 			await context.sql`SELECT id FROM customers WHERE billing_account_id = 'stranger'`,
 		).toHaveLength(0);
-
 		await context.repository.usageApi.createAccount(project, "stranger");
 		const within = await context.repository.checkUsage(project, {
 			billingAccountId: "stranger",
@@ -1332,7 +1315,6 @@ localDescribe("default plan", () => {
 			featureKey: "model_tokens",
 			quantity: "1200",
 		});
-
 		expect(within).toMatchObject({
 			allowed: true,
 			balance: { granted: "1000", available: "1000" },
@@ -1587,9 +1569,8 @@ localDescribe("default plan", () => {
 		expect(await grants("catcher")).toMatchObject([{ status: "active", plan_version: 2 }]);
 		expect(await balance("catcher")).toMatchObject({ consumed: "9", available: "91" });
 	});
-
 	it("keeps a non-consumable level when the default plan moves to a new version", async () => {
-		const withProjects = (version: number, projects: string): CatalogIntent => {
+		const withProjects = (version: number, projects: string): AuthoredCatalogIntent => {
 			const base = catalog({
 				...freePlan(version, "100"),
 				items: [
@@ -1598,9 +1579,10 @@ localDescribe("default plan", () => {
 						featureKey: "projects",
 						itemKind: "allocation",
 						quantity: projects,
-						resetInterval: "month",
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
+						reset: {
+							interval: "month",
+							intervalCount: 1,
+						},
 					},
 				],
 			});
@@ -1629,10 +1611,8 @@ localDescribe("default plan", () => {
 			});
 		const projects = async () =>
 			await context.repository.getMeteringBalance(project, "builder", "projects");
-
 		await publish(withProjects(1, "5"));
 		for (const n of [1, 2, 3, 4]) expect((await addProject(`project-${n}`)).allowed).toBe(true);
-
 		// Version 2 allows three projects: the four in use stay, before and after the pass.
 		await publish(withProjects(2, "3"));
 		expect(await projects()).toMatchObject({ consumed: "4" });

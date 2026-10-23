@@ -50,9 +50,7 @@ answer `409 CATALOG_REVISION_CONFLICT` naming the revision that now exists.
 returns the [canonical intent](#canonical-intent), with every default spelled out and `tiers: []`
 on a flat price or rate card, and the hash of that canonical intent. Preview accepts that output
 unchanged, and previewing it reports the same `intentHash` with no features, plans or versions
-created. A revision keeps the hash recorded when it was published; the read-back hash is
-recomputed from the stored intent, so it can differ from the recorded one for a catalog published
-before the canonical intent. See [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json)
+created. Revisions store the normalized canonical intent and its hash. See [`examples/quickstart/catalog.json`](../examples/quickstart/catalog.json)
 for a minimal intent, and
 [`examples/quickstart/catalog-plans.json`](../examples/quickstart/catalog-plans.json) for one plan of
 each kind in the canonical spelling: an unpriced default plan, a base plan with a `basePrice`, a plan
@@ -114,23 +112,14 @@ allocation, `expiry`, `allocationScope`, `rollover` and `overage` may be left ou
 null, `forever`, `account`, null and `blocked`; plan defaults such as `kind`, `visibility` and
 `controls` are optional too.
 
-Until the 1.0 release candidate preview and publish also accept the legacy spelling: the
-plan-level `currency`, `baseAmountMinor`, `billingInterval`, `billingIntervalCount` and
-`providerBindings`; item `resetInterval`, `resetIntervalCount`, `expiresAfterSeconds` and
-`overagePolicy`; and a top-up's `expiresAfterSeconds`. A legacy plan with a `basePrice` keeps it
-as its `basePrice`, and its plan-level bindings that `basePrice` does not hold become its
-`providerPriced` products, on the plan's cadence. A legacy plan without a `basePrice` whose
-plan-level bindings name products is provider-priced, and must then have a `billingInterval`; its
-`baseAmountMinor` and `currency` are dropped, because the provider owns that price. On a plan with
-neither a price nor a binding, `baseAmountMinor`, `currency` and `billingInterval` charge nothing
-and are dropped too. A legacy access item must have a null quantity, reset and expiry and a blocked
-overage. Spelling a catalog either way yields the same canonical intent and hash.
+Canonical syntax is required for requests, catalog files and stored revisions. Unknown fields
+are rejected with `400 INVALID_REQUEST`, even when their value is null or an empty array. Prices
+belong in `basePrice`, `providerPriced`, licensed item `price`, or allowed `overage.price`; resets
+use `reset`, and expiries use `expiry`. An access item carries only its kind and feature key.
 
-A preview reports what it accepted in the legacy spelling in `deprecations`, one entry per plan,
-item or top-up: its `path`, the `legacy` fields it used, the `canonical` fields that replace them
-and a `message`. It reports `advisories` separately: valid shapes worth reconsidering, which never
-imply removal. The one advisory is a Stripe binding in `providerPriced`: "Use `basePrice` when
-Quotum should model the price." Provider-owned Stripe pricing has no retirement plan.
+A preview reports `advisories` for valid choices worth reconsidering. The advisory for a Stripe
+binding in `providerPriced` is "Use `basePrice` when Quotum should model the price."
+Provider-owned Stripe pricing remains supported.
 
 Preview and publish report an `impact`. Its counts describe what the revision changes, not what
 it contains: `planVersionsCreated` the plans that get a new version, `topupOptionsCreated` the
@@ -147,23 +136,22 @@ intent or on a pinned version, and an entity-scoped limit that allows postpaid o
 [declared meter-limit scope](metering.md#meter-limits).
 
 The SDK's `defineCatalog`, the CLI's catalog files and `client.catalog.preview` and `publish` take
-either spelling; `client.catalog.status` and the MCP `get_catalog` tool return the canonical intent.
+canonical authoring with optional defaults; `client.catalog.status` and the MCP `get_catalog` tool return the canonical intent.
 
 ## Validation
 
 Preview and publish validate the intent's structure first and reject the first structural problem,
 including a binding on the wrong channel, with `400 INVALID_REQUEST`. That includes a meter limit or
-allocation whose reset window cannot fit every billing period, such as `resetInterval: "year"` on a
-`billingInterval: "month"` plan or 29 days on a monthly plan (February is 28): windows and grants
+allocation whose reset window cannot fit every billing period, such as a yearly `reset` on a
+monthly priced plan or 29 days on a monthly plan (February is 28): windows and grants
 reset with every provider period, so the yearly quantity would silently become a monthly one. It
 also includes a plan item quantity or rollover `maxQuantity` with more decimal places than its
 feature's `creditScale`, which a top-up's quantity may not have either. A reset spans at most three
-years, `resetIntervalCount` is a whole number from 1 to 1,000 and needs a
-`resetInterval`, and `overagePolicy: "allowed"` needs a reset of a month or longer, because postpaid
+years; `reset.intervalCount` is a whole number from 1 to 1,000. An allowed `overage` needs a reset of a month or longer, because postpaid
 overage is invoiced once per closed window; a daily or weekly meter limit is a hard cap. A rollover
 expiry is `{ "mode": "after", "interval": "week", "intervalCount": 2 }` or `{ "mode": "forever" }`
-and spans at most ten years; the earlier `{ "mode": "months", "months": 3 }` is still accepted and
-is returned as `after` with a month interval. An allocation's or top-up's calendar `expiry` takes a
+and spans at most ten years. A three-month rollover expiry is
+`{ "mode": "after", "interval": "month", "intervalCount": 3 }`. An allocation's or top-up's calendar `expiry` takes a
 count from 1 to 1,000 of any cadence unit, `hour` included, and spans at most ten years too. An
 exact duration (`after_seconds`) is a whole number of seconds from 1 to 315,619,200, the 3,653 days
 of the longest ten calendar years; a catalog published before that bound with a longer duration
@@ -179,12 +167,11 @@ billing interval also needs its provider to sell that interval (the billing inte
 four months, so a verdict on `catalog.product.subscription` blocked at the `provider` layer with
 reason `BILLING_INTERVAL` names the interval. All incompatible bindings are reported together as one
 `400 PROVIDER_CAPABILITY_UNSUPPORTED` whose `details.providerCompatibility` lists them in catalog
-order; see [Provider capability errors](provider-capabilities.md#provider-capability-errors). The whole submitted intent is
-checked, including the plans it keeps unchanged. The published catalog is never re-validated
-against the declarations, the reset-interval rule or the price rules below: it stays readable, and
-preview still compares a new intent against it. Publish checks reset intervals, prices and
-capabilities after it finds the preview token, so retrying a publish that already succeeded returns
-its stored result with `duplicate: true`. A successful preview also reports `providerCompatibility`;
+order; see [Provider capability errors](provider-capabilities.md#provider-capability-errors).
+The whole submitted intent is checked, including unchanged plans. Stored revisions must use
+canonical syntax and consistent price cadences. Reading a published catalog does not reapply
+current provider capabilities or reset-fit rules. A successful publish retry returns its stored
+result with `duplicate: true`, even if provider declarations have since narrowed. A successful preview also reports `providerCompatibility`;
 see [Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
 
 A preview lasts 30 minutes. Metering maintenance marks it expired after that and deletes it a week
@@ -201,33 +188,21 @@ neither is answered with the earlier publish. Contract and catalog-migration pub
 same way, and another intent under a published token answers `409 CONTRACT_PREVIEW_MISMATCH` or
 `409 MIGRATION_PREVIEW_MISMATCH`.
 
-A legacy plan can spell its price twice: the plan-level `currency`, `baseAmountMinor`,
-`billingInterval`, `billingIntervalCount` and `providerBindings`, and the `basePrice` object. When
-a plan has a `basePrice`, every plan-level value it also sends must agree with it, or preview and
-publish answer `400 INVALID_REQUEST` naming both values, such as `Plan pro baseAmountMinor 1000
-conflicts with basePrice unitAmountMinor 2000`. A plan-level binding conflicts when it binds a
-provider channel that `basePrice` also binds to a different product; App Store and Google Play
-products whose price the store owns, on channels the `basePrice` does not bind, are its
-`providerPriced` products. A plan sending `providerPriced` cannot also send the plan-level fields.
-A price on an `allocation`, or on a `meter_limit` whose overage is blocked, is refused too:
-Checkout leaves metered prices out, and usage invoicing and metering read an overage price only for
-an `allowed` limit, so such a price would show in the plan's pricing and never be billed. A plan
-may have no items. A catalog published before these rules keeps working as it was published, and
-reads back in the canonical spelling, which has no place for a price that never charges; previewing
-the stored legacy intent unchanged is refused until the conflicting value or the unbilled price is
-removed.
+Every priced plan has one billing cadence, including plans priced only by seats or postpaid
+overage. All base, provider-owned and item prices must agree, including interval counts;
+`quarter` and `month` × 3 agree. A conflict answers `400 INVALID_REQUEST` with
+`Plan <key> price intervals must match`. Only an unpriced plan has no billing cadence. Reset
+validation and publication use that same derived cadence, so a monthly seat price cannot fund a
+yearly allocation. A plan may have no items.
 
-A plan's base price is its amount and currency together: a plan version records a currency only
-with a `baseAmountMinor` or a `basePrice`. A plan priced only by its items, such as a seat-only plan
-or a meter limit with postpaid overage, may still name `currency` for its item prices, which must
-use it, but publishes no base price; each item price keeps its own currency on its price component,
-which is what Checkout and invoicing charge. A `baseAmountMinor` without a `currency` is refused
-with `400 INVALID_REQUEST` (`Plan team baseAmountMinor requires a currency`).
+A plan records an amount and currency only for its `basePrice`. Each item price keeps its own
+currency on its price component, which is what Checkout and invoicing charge. A plan priced only
+by items records neither a base amount nor a plan currency.
 
 ## Allowance windows
 
-An allocation that resets more often than its plan bills, such as `resetInterval: "month"` on an
-annual plan or `"week"` on a monthly one, grants its quantity once per reset window, anchored at the
+An allocation that resets more often than its plan bills, such as a monthly `reset` on an
+annual plan or a weekly `reset` on a monthly one, grants its quantity once per reset window, anchored at the
 provider period start in UTC. A plan version with no billing cadence, such as an unpriced plan,
 bills by the period the subscription recorded: a reset shorter than that period splits it the same
 way, for allowances and meter limits alike. Month-end anchors clamp to the shorter month and recover their
@@ -325,8 +300,8 @@ the container to diff or push it. `status` needs only the base URL and a project
 `push` also need the operator key. The file exports its intent as `catalog` (or the default export)
 and may export `expectedRevision`: a revision number to publish only over that revision, or `null`
 to publish only while no catalog is published. Without the export, `diff` and `push` expect the
-current revision. `diff` compares canonical intents, so a file that spells the published catalog the
-legacy way still reports `changed: false`. `push` publishes nothing for such a file: it prints
+current revision. `diff` compares normalized canonical intents, so optional defaults do not make
+an unchanged file a new revision. `push` publishes nothing for an unchanged file: it prints
 `{ "changed": false, "published": false }` with the current revision and exits 0, so a deploy that
 pushes on every run adds a revision only when the catalog changed. `push --force` publishes it
 anyway, as a new revision that writes every top-up option again.
@@ -340,7 +315,7 @@ store product. Keys are written in a fixed order, so formatting a formatted file
 TypeScript or JavaScript file is written as a module that exports `catalog` and keeps the file's
 `expectedRevision`, `null` included; comments and code in the original module are not kept. A JSON
 file stays the bare intent. Advice, such as a Stripe price left to Stripe in `providerPriced`, is
-printed on stderr; legacy spellings are simply rewritten.
+printed on stderr. Files must already use canonical syntax; the formatter rejects older spellings.
 
 ### Without a project key: `--instance`
 

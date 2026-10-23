@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { sql as drizzleSql } from "drizzle-orm";
-import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent, AuthoredPlanIntent } from "../../src/catalog/types";
 import { runUsageScopesCommand } from "../../src/composition/cli/usage-scopes";
 import { executeRows } from "../../src/db/repository/query";
 import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
@@ -18,17 +18,14 @@ import {
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
-
 /** `quotum usage scopes report` against real windows, holds and pinned subscriptions. */
 localDescribe("declared meter-limit scope report", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});
@@ -296,21 +293,17 @@ async function legacyWindow(input: {
 		WHERE customer.billing_account_id = ${input.billingAccountId}
 	`;
 }
-
 function plan(
 	key: string,
 	kind: "base" | "addon",
 	featureKey: string,
 	quantity: string,
 	allocationScope: "account" | "entity",
-): CatalogPlanIntent {
+): AuthoredPlanIntent {
 	return {
 		key,
 		name: key,
 		version: 1,
-		currency: "USD",
-		baseAmountMinor: kind === "base" ? 1000 : 300,
-		billingInterval: "month",
 		trialDays: null,
 		kind,
 		items: [
@@ -318,17 +311,16 @@ function plan(
 				featureKey,
 				itemKind: "meter_limit",
 				quantity,
-				resetInterval: "day",
-				expiresAfterSeconds: null,
-				overagePolicy: "blocked",
 				allocationScope,
+				reset: {
+					interval: "day",
+					intervalCount: 1,
+				},
 			},
 		],
-		providerBindings: [],
 	};
 }
-
-function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
+function catalog(plans: AuthoredPlanIntent[]): AuthoredCatalogIntent {
 	const feature = (key: string) => ({
 		key,
 		name: key,
@@ -345,8 +337,7 @@ function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
 		rateCards: [],
 	};
 }
-
-async function publish(intent: CatalogIntent): Promise<void> {
+async function publish(intent: AuthoredCatalogIntent): Promise<void> {
 	const project = integrationProjectContext();
 	const actor = "integration-scopes-report";
 	const preview = await context.repository.previewCatalog(project, {

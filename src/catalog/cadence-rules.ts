@@ -93,18 +93,7 @@ export function priceBillingCadence(
 /** The cadence after which rolled-over quantity expires, or null when it never does. */
 export function rolloverExpiryCadence(expiry: CatalogRolloverExpiryIntent): Cadence | null {
 	if (expiry.mode === "forever") return null;
-	if (expiry.mode === "months") return { unit: "month", count: expiry.months };
 	return { unit: expiry.interval, count: expiry.intervalCount };
-}
-
-/** The canonical spelling of a rollover expiry: `months` becomes `after` with a month interval. */
-export function normalizeRolloverExpiry(
-	expiry: CatalogRolloverExpiryIntent,
-): CatalogRolloverExpiryIntent {
-	if (expiry.mode === "forever") return { mode: "forever" };
-	const cadence = rolloverExpiryCadence(expiry);
-	if (cadence === null) return { mode: "forever" };
-	return { mode: "after", interval: cadence.unit, intervalCount: cadence.count };
 }
 
 /**

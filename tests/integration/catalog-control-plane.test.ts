@@ -10,7 +10,6 @@ import {
 } from "./helpers/local-postgres";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
-
 /** A plan item's or top-up option's stored expiry columns. */
 type ExpiryColumns = {
 	expires_after_seconds: string | null;
@@ -18,18 +17,128 @@ type ExpiryColumns = {
 	expiry_interval_count: number;
 };
 let context: LocalPostgresContext;
-
 localDescribe("catalog control plane", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
+	});
+
+	it("rejects cadence bypasses before publication and persists an item-only cadence", async () => {
+		await seedPhaseTwoStripePrices();
+		const { app, authHeaders } = createIntegrationApp({
+			env: context.env,
+			repository: context.repository,
+		});
+		const headers = operatorHeaders(authHeaders());
+		const source = phaseTwoCatalogIntent();
+		const seat = source.plans[0]?.items[0];
+		if (seat?.itemKind !== "licensed_quantity" || !("price" in seat) || seat.price === undefined) {
+			throw new Error("Expected the licensed seat fixture");
+		}
+		const allocation = {
+			itemKind: "allocation",
+			featureKey: "credits",
+			quantity: "1200",
+			reset: { interval: "month", intervalCount: 1 },
+		};
+		const plan = { key: "team", name: "Team", version: 1, items: [seat, allocation] };
+		const catalog = {
+			features: [
+				...source.features,
+				{
+					key: "credits",
+					name: "Credits",
+					kind: "metered",
+					meterKind: "consumable",
+					unit: "credit",
+					creditScale: 0,
+					filterDimensions: [],
+				},
+				{
+					key: "reviewers",
+					name: "Reviewers",
+					kind: "metered",
+					meterKind: "non_consumable",
+					unit: "reviewer",
+					creditScale: 0,
+					filterDimensions: [],
+				},
+			],
+			plans: [plan],
+			topups: [],
+			rateCards: [],
+		};
+		const yearlyReset = {
+			...plan,
+			items: [seat, { ...allocation, reset: { interval: "year", intervalCount: 1 } }],
+		};
+		const mixedPrices = {
+			...plan,
+			items: [
+				seat,
+				{
+					...seat,
+					featureKey: "reviewers",
+					price: { ...seat.price, key: "reviewer", billingInterval: "year" },
+				},
+			],
+		};
+		for (const candidate of [
+			yearlyReset,
+			mixedPrices,
+			{ ...plan, providerBindings: [] },
+			{ ...plan, billingInterval: null },
+		]) {
+			const response = await testRequest(app, "/v1/admin/catalog/preview", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					expectedRevision: null,
+					catalog: { ...catalog, plans: [candidate] },
+				}),
+			});
+			expect(response.status).toBe(400);
+			expect((await response.json()).error.code).toBe("INVALID_REQUEST");
+		}
+		expect(await context.sql`SELECT id FROM catalog_drafts`).toHaveLength(0);
+		expect(await context.sql`SELECT id FROM catalog_revisions`).toHaveLength(0);
+
+		const preview = await previewCatalog(app, headers, null, catalog as never);
+		const invalidPublish = await testRequest(app, "/v1/admin/catalog/publish", {
+			method: "POST",
+			headers,
+			body: JSON.stringify({
+				expectedRevision: null,
+				previewToken: preview.previewToken,
+				catalog: { ...catalog, plans: [yearlyReset] },
+			}),
+		});
+		expect(invalidPublish.status).toBe(400);
+		expect((await invalidPublish.json()).error).toMatchObject({
+			code: "INVALID_REQUEST",
+			message: expect.stringContaining("cannot reset every year"),
+		});
+		expect(await context.sql`SELECT id FROM catalog_revisions`).toHaveLength(0);
+		expect((await context.sql`SELECT status FROM catalog_drafts`)[0]?.status).toBe("previewed");
+
+		await publishCatalog(app, headers, null, preview.previewToken, catalog as never);
+		const [stored] = await context.sql`
+			SELECT pv.billing_interval, pv.billing_interval_count, pi.reset_interval
+			FROM plan_versions pv JOIN plan_items pi
+				ON pi.project_id = pv.project_id AND pi.plan_version_id = pv.id
+			WHERE pv.project_id = ${integrationProjectContext().projectInstanceId}
+				AND pi.item_kind = 'allocation'
+		`;
+		expect(stored).toEqual({
+			billing_interval: "month",
+			billing_interval_count: 1,
+			reset_interval: "month",
+		});
 	});
 
 	it("previews and atomically publishes the exact versioned catalog intent", async () => {
@@ -150,7 +259,6 @@ localDescribe("catalog control plane", () => {
 			audits: 1,
 		});
 	});
-
 	it("publishes an unpriced default plan and counts the accounts without a base plan", async () => {
 		const errors: unknown[] = [];
 		const { app, authHeaders } = createIntegrationApp({
@@ -163,21 +271,18 @@ localDescribe("catalog control plane", () => {
 			key: "free",
 			name: "Free",
 			version: 1,
-			currency: null,
-			baseAmountMinor: null,
-			billingInterval: null,
 			trialDays: null,
 			items: [
 				{
 					featureKey: "ai_credits",
 					itemKind: "allocation",
 					quantity: "50",
-					resetInterval: "month",
-					expiresAfterSeconds: null,
-					overagePolicy: "blocked",
+					reset: {
+						interval: "month",
+						intervalCount: 1,
+					},
 				},
 			],
-			providerBindings: [],
 		};
 		const base = catalogIntent(1, "0.005");
 		const marked = {
@@ -220,13 +325,16 @@ localDescribe("catalog control plane", () => {
 		await seedCustomer("free_user");
 		await seedSubscription("lapsed_user", "expired", null);
 		await seedSubscription("legacy_user", "active", null);
-
 		const first = await publish(marked, null);
-
 		expect(first.preview.impact.defaultPlanAccounts).toBe(2);
 		expect(first.published.impact.defaultPlanAccounts).toBe(2);
 		expect((await first.replay()).impact.defaultPlanAccounts).toBe(2);
-		const [row] = await context.sql<Array<{ plan_key: string; entitlement_keys: string[] }>>`
+		const [row] = await context.sql<
+			Array<{
+				plan_key: string;
+				entitlement_keys: string[];
+			}>
+		>`
 			SELECT plan.key AS plan_key, marker.entitlement_keys
 			FROM catalog_default_plans marker
 			JOIN plans plan ON plan.project_id = marker.project_id AND plan.id = marker.plan_id
@@ -234,7 +342,10 @@ localDescribe("catalog control plane", () => {
 		`;
 		expect(row).toEqual({ plan_key: "free", entitlement_keys: ["free_tier"] });
 		const [version] = await context.sql<
-			Array<{ currency: string | null; base_amount_minor: string | null }>
+			Array<{
+				currency: string | null;
+				base_amount_minor: string | null;
+			}>
 		>`
 			SELECT version.currency, version.base_amount_minor::text
 			FROM plan_versions version JOIN plans plan ON plan.active_version_id = version.id
@@ -246,7 +357,6 @@ localDescribe("catalog control plane", () => {
 			planKey: "free",
 			entitlementKeys: ["free_tier"],
 		});
-
 		await seedSubscription("paid_user", "active", "premium");
 		await context.repository.planGrants.startTrial(integrationProjectContext(), {
 			billingAccountId: "trial_user",
@@ -578,7 +688,6 @@ localDescribe("catalog control plane", () => {
 			existingSubscriptionsGrandfathered: 0,
 		});
 	});
-
 	it("keeps grandfathered subscriptions pinned through ordinary provider syncs", async () => {
 		const errors: unknown[] = [];
 		const { app, authHeaders } = createIntegrationApp({
@@ -592,6 +701,7 @@ localDescribe("catalog control plane", () => {
 		await publishCatalog(app, headers, null, firstPreview.previewToken, firstIntent, errors);
 
 		const project = integrationProjectContext();
+
 		const periodStart = new Date();
 		const periodEnd = new Date(periodStart.getTime() + 30 * 86_400_000);
 		const sync = async (
@@ -646,7 +756,6 @@ localDescribe("catalog control plane", () => {
 			).breakdown
 				.map((allocation) => allocation.quantity)
 				.sort();
-
 		await sync("evt_pinned_purchase", 1);
 		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 1, revision: 1 });
 		expect(await allocations()).toEqual(["1000"]);
@@ -664,7 +773,6 @@ localDescribe("catalog control plane", () => {
 		await sync("evt_pinned_renewal", 2);
 		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 1, revision: 1 });
 		expect(await allocations()).toEqual(["1000"]);
-
 		// An applied subscription change staged from the pinned version carries its target.
 		await context.sql`
 			INSERT INTO subscription_changes (
@@ -689,7 +797,6 @@ localDescribe("catalog control plane", () => {
 		// The change was staged from version 1, so it cannot move the subscription again.
 		await sync("evt_pinned_after_migration", 4);
 		expect(await pinnedVersion()).toEqual({ plan_key: "premium", version: 2, revision: 2 });
-
 		// A product of another plan is a provider-side switch and adopts that plan's bound version.
 		await context.sql`
 			INSERT INTO products (project_id, key, entitlement_key, credit_amount, name, type, active)
@@ -716,9 +823,11 @@ localDescribe("catalog control plane", () => {
 					key: "pro",
 					name: "Pro",
 					version: 1,
-					baseAmountMinor: 1999,
 					items: [{ ...secondIntent.plans[0].items[0], quantity: "5000" }],
-					providerBindings: [{ productKey: "pro_monthly", provider: "stripe", channel: "web" }],
+					providerPriced: {
+						billingInterval: "month",
+						providerBindings: [{ productKey: "pro_monthly", provider: "stripe", channel: "web" }],
+					},
 				},
 			],
 		};
@@ -1263,29 +1372,22 @@ localDescribe("catalog control plane", () => {
 			topupsRetired: 0,
 		});
 	});
-
-	it("reads the catalog back canonically and republishes a respelling without a new version", async () => {
+	it("reads the canonical catalog back and republishes without a new version", async () => {
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
 		});
 		const headers = operatorHeaders(authHeaders());
-		const legacy = catalogIntent(1, "0.005");
-		const first = await previewCatalog(app, headers, null, legacy);
+		const authored = catalogIntent(1, "0.005");
+		const first = await previewCatalog(app, headers, null, authored);
 		// Legacy syntax is reported, and a Stripe product the plan leaves to Stripe to price is advice.
-		expect(first.deprecations.map(({ path }: { path: string }) => path)).toEqual([
-			"plans[0].items[0]",
-			"plans[0]",
-			"topups[0]",
-		]);
 		expect(first.advisories).toEqual([
 			{
 				path: "plans[0].providerPriced.providerBindings[2]",
 				message: "Use `basePrice` when Quotum should model the price.",
 			},
 		]);
-		const published = await publishCatalog(app, headers, null, first.previewToken, legacy);
-
+		const published = await publishCatalog(app, headers, null, first.previewToken, authored);
 		const read = (
 			await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()
 		).data;
@@ -1314,7 +1416,7 @@ localDescribe("catalog control plane", () => {
 			],
 		});
 		expect(read.catalog.plans[0]).not.toHaveProperty("baseAmountMinor");
-		expect(read.catalog.topups[0].expiry).toEqual({ mode: "after_seconds", seconds: 315_360_000 });
+		expect(read.catalog.topups[0].expiry).toEqual({ mode: "after_seconds", seconds: 315360000 });
 
 		const versions = async () =>
 			(
@@ -1327,25 +1429,24 @@ localDescribe("catalog control plane", () => {
 		const again = await previewCatalog(app, headers, 1, read.catalog);
 		expect(again).toMatchObject({
 			intentHash: read.intentHash,
-			deprecations: [],
+
 			impact: { planVersionsCreated: 0, plansCreated: 0 },
 		});
 		const republished = await publishCatalog(app, headers, 1, again.previewToken, read.catalog);
 		expect(republished.impact.planVersionsCreated).toBe(0);
 		expect(await versions()).toBe(versionsBefore);
-		// The legacy file still diffs as unchanged: it canonicalizes to the same intent.
-		expect((await previewCatalog(app, headers, 2, legacy)).intentHash).toBe(read.intentHash);
+		// Optional defaults and normalized output have the same canonical hash.
+		expect((await previewCatalog(app, headers, 2, authored)).intentHash).toBe(read.intentHash);
 	});
-
 	it("publishes calendar expiries, reads them back unchanged and bounds them at ten years", async () => {
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
 		});
 		const headers = operatorHeaders(authHeaders());
-		const legacy = catalogIntent(1, "0.005");
-		const first = await previewCatalog(app, headers, null, legacy);
-		await publishCatalog(app, headers, null, first.previewToken, legacy);
+		const authored = catalogIntent(1, "0.005");
+		const first = await previewCatalog(app, headers, null, authored);
+		await publishCatalog(app, headers, null, first.previewToken, authored);
 		const readCatalog = async () =>
 			(await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()).data;
 		const published = await readCatalog();
@@ -1380,7 +1481,6 @@ localDescribe("catalog control plane", () => {
 			code: "INVALID_REQUEST",
 			message: "Top-up ai_credits_10 expiry cannot span more than 10 × year",
 		});
-
 		const preview = await previewCatalog(app, headers, 1, next);
 		await publishCatalog(app, headers, 1, preview.previewToken, next);
 		expect(
@@ -1415,65 +1515,6 @@ localDescribe("catalog control plane", () => {
 			impact: { planVersionsCreated: 0, plansCreated: 0 },
 		});
 	});
-
-	it("decodes a catalog stored in the legacy spelling and refuses a preview issued before", async () => {
-		const errors: unknown[] = [];
-		const { app, authHeaders } = createIntegrationApp({
-			env: context.env,
-			repository: context.repository,
-			logger: recordingErrorLogger(errors),
-		});
-		const headers = operatorHeaders(authHeaders());
-		const legacy = catalogIntent(1, "0.005");
-		const first = await previewCatalog(app, headers, null, legacy);
-		await publishCatalog(app, headers, null, first.previewToken, legacy, errors);
-		const canonical = (
-			await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()
-		).data;
-
-		// What the control plane stored before the canonical intent: the legacy spelling, and the
-		// hash recorded for it at publish, which stays as history.
-		const legacyHash = "0".repeat(64);
-		await context.sql`
-			UPDATE catalog_drafts SET intent = ${JSON.stringify(legacy)}::text::jsonb
-			WHERE status = 'published'
-		`;
-		await context.sql`UPDATE catalog_revisions SET intent_hash = ${legacyHash}`;
-		const decoded = (
-			await (await testRequest(app, "/v1/admin/catalog", { headers: authHeaders() })).json()
-		).data;
-		expect(decoded.catalog).toEqual(canonical.catalog);
-		expect(decoded.intentHash).toBe(canonical.intentHash);
-		expect(
-			(
-				await context.sql<Array<{ intent_hash: string }>>`SELECT intent_hash FROM catalog_revisions`
-			)[0]?.intent_hash,
-		).toBe(legacyHash);
-		const diff = await previewCatalog(app, headers, 1, legacy);
-		expect(diff).toMatchObject({
-			intentHash: canonical.intentHash,
-			impact: { planVersionsCreated: 0 },
-		});
-
-		// A preview stored in the legacy spelling no longer matches what its intent canonicalizes to.
-		await context.sql`
-			UPDATE catalog_drafts
-			SET intent = ${JSON.stringify(legacy)}::text::jsonb, intent_hash = ${legacyHash}
-			WHERE preview_token = ${diff.previewToken}
-		`;
-		const stale = await testRequest(app, "/v1/admin/catalog/publish", {
-			method: "POST",
-			headers,
-			body: JSON.stringify({
-				expectedRevision: 1,
-				previewToken: diff.previewToken,
-				catalog: legacy,
-			}),
-		});
-		expect(stale.status).toBe(409);
-		expect((await stale.json()).error.code).toBe("CATALOG_PREVIEW_MISMATCH");
-	});
-
 	it("binds a plan to its base price's product and its store products alike", async () => {
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
@@ -1500,12 +1541,13 @@ localDescribe("catalog control plane", () => {
 							{ productKey: "premium_monthly", provider: "stripe", channel: "web" },
 						],
 					},
-					// The legacy list names only the store products. Before the canonical intent it replaced
-					// the base price's product as the plan's binding, so a Stripe subscription found no plan.
-					providerBindings: [
-						{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
-						{ productKey: "premium_monthly", provider: "google", channel: "android" },
-					],
+					providerPriced: {
+						billingInterval: "month",
+						providerBindings: [
+							{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
+							{ productKey: "premium_monthly", provider: "google", channel: "android" },
+						],
+					},
 				},
 			],
 		};
@@ -1513,7 +1555,12 @@ localDescribe("catalog control plane", () => {
 		expect(preview.advisories).toEqual([]);
 		await publishCatalog(app, headers, null, preview.previewToken, intent as never);
 		expect(
-			await context.sql<Array<{ provider: string; version: number }>>`
+			await context.sql<
+				Array<{
+					provider: string;
+					version: number;
+				}>
+			>`
 				SELECT store.provider, version.version
 				FROM provider_plan_bindings binding
 				JOIN store_products store ON store.id = binding.store_product_id
@@ -1555,7 +1602,12 @@ localDescribe("catalog control plane", () => {
 		);
 		expect(synced.processingStatus).toBe("processed");
 		expect(
-			await context.sql<Array<{ plan_key: string; version: number }>>`
+			await context.sql<
+				Array<{
+					plan_key: string;
+					version: number;
+				}>
+			>`
 				SELECT plan.key AS plan_key, version.version
 				FROM subscriptions subscription
 				JOIN plan_versions version ON version.id = subscription.plan_version_id
@@ -1564,8 +1616,7 @@ localDescribe("catalog control plane", () => {
 			`,
 		).toEqual([{ plan_key: "premium", version: 1 }]);
 	});
-
-	it("refuses two spellings of one plan price and accepts a priced plan with no items", async () => {
+	it("rejects removed plan fields and accepts a priced plan with no items", async () => {
 		const { app, authHeaders } = createIntegrationApp({
 			env: context.env,
 			repository: context.repository,
@@ -1574,6 +1625,7 @@ localDescribe("catalog control plane", () => {
 		const base = catalogIntent(1, "0.005");
 		const premium = {
 			...base.plans[0],
+			providerPriced: null,
 			basePrice: {
 				key: "premium-base",
 				currency: "USD",
@@ -1598,7 +1650,7 @@ localDescribe("catalog control plane", () => {
 		expect(conflicting.status).toBe(400);
 		expect((await conflicting.json()).error).toMatchObject({
 			code: "INVALID_REQUEST",
-			message: "Plan premium baseAmountMinor 1000 conflicts with basePrice unitAmountMinor 999",
+			message: expect.stringContaining("baseAmountMinor"),
 		});
 		expect(await context.sql`SELECT id FROM catalog_drafts`).toHaveLength(0);
 
@@ -1606,7 +1658,6 @@ localDescribe("catalog control plane", () => {
 		expect(empty.status).toBe(200);
 		expect(await context.sql`SELECT id FROM catalog_drafts`).toHaveLength(1);
 	});
-
 	it("publishes plans priced only by their items without a plan currency", async () => {
 		await seedPhaseTwoStripePrices();
 		const { app, authHeaders } = createIntegrationApp({
@@ -1623,7 +1674,6 @@ localDescribe("catalog control plane", () => {
 				...plan,
 				key,
 				name: key,
-				baseAmountMinor: null,
 				trialDays: null,
 				items,
 			};
@@ -1650,10 +1700,13 @@ localDescribe("catalog control plane", () => {
 			}),
 		});
 		expect(publish.status).toBe(200);
-
 		expect(
 			await context.sql<
-				Array<{ key: string; currency: string | null; base_amount_minor: number | null }>
+				Array<{
+					key: string;
+					currency: string | null;
+					base_amount_minor: number | null;
+				}>
 			>`
 				SELECT plan.key, version.currency, version.base_amount_minor::integer AS base_amount_minor
 				FROM plan_versions version
@@ -1666,7 +1719,12 @@ localDescribe("catalog control plane", () => {
 		]);
 		expect(
 			await context.sql<
-				Array<{ key: string; component_kind: string; currency: string; unit_amount_minor: number }>
+				Array<{
+					key: string;
+					component_kind: string;
+					currency: string;
+					unit_amount_minor: number;
+				}>
 			>`
 				SELECT key, component_kind, currency, unit_amount_minor::integer AS unit_amount_minor
 				FROM price_components
@@ -1694,7 +1752,7 @@ localDescribe("catalog control plane", () => {
 		expect(mismatched.status).toBe(400);
 		expect((await mismatched.json()).error).toMatchObject({
 			code: "INVALID_REQUEST",
-			message: "Plan team price currencies must match",
+			message: expect.stringContaining("currency"),
 		});
 
 		// A base amount without a currency is not a price.
@@ -1712,10 +1770,9 @@ localDescribe("catalog control plane", () => {
 		expect(amountOnly.status).toBe(400);
 		expect((await amountOnly.json()).error).toMatchObject({
 			code: "INVALID_REQUEST",
-			message: "Plan team baseAmountMinor requires a currency",
+			message: expect.stringContaining("currency"),
 		});
 	});
-
 	it("publishes a plan priced only by its items without a plan currency", async () => {
 		await seedPhaseTwoStripePrices();
 		const { app, authHeaders } = createIntegrationApp({
@@ -1726,14 +1783,7 @@ localDescribe("catalog control plane", () => {
 		const catalog = phaseTwoCatalogIntent();
 		const [pro, ...rest] = catalog.plans;
 		if (pro === undefined) throw new Error("phase-two catalog has no pro plan");
-		const {
-			currency: _currency,
-			baseAmountMinor: _baseAmountMinor,
-			billingInterval: _billingInterval,
-			basePrice: _basePrice,
-			providerBindings: _providerBindings,
-			...seatOnly
-		} = pro;
+		const { basePrice: _basePrice, ...seatOnly } = pro;
 		const intent = {
 			...catalog,
 			plans: [{ ...seatOnly, basePrice: null, providerPriced: null }, ...rest],
@@ -1814,7 +1864,6 @@ async function seedPhaseTwoStripePrices(period = { unit: "month", count: 1 }) {
 		`;
 	}
 }
-
 function phaseTwoCatalogIntent(billingInterval = "month") {
 	const stripePrice = (
 		key: string,
@@ -1867,9 +1916,6 @@ function phaseTwoCatalogIntent(billingInterval = "month") {
 				key: "pro",
 				name: "Pro",
 				version: 1,
-				currency: "USD",
-				baseAmountMinor: 999,
-				billingInterval,
 				trialDays: 14,
 				kind: "base",
 				tierRank: 20,
@@ -1883,30 +1929,27 @@ function phaseTwoCatalogIntent(billingInterval = "month") {
 						featureKey: "seats",
 						itemKind: "licensed_quantity",
 						quantity: "1",
-						resetInterval: null,
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
 						price: stripePrice("seat", "pro_seat", 200, "1"),
 					},
 					{
 						featureKey: "api_calls",
 						itemKind: "meter_limit",
 						quantity: "10000",
-						resetInterval: "month",
-						expiresAfterSeconds: null,
-						overagePolicy: "allowed",
-						price: stripePrice("api-overage", "api_overage", 50, "1000"),
+						reset: {
+							interval: "month",
+							intervalCount: 1,
+						},
+						overage: {
+							policy: "allowed",
+							price: stripePrice("api-overage", "api_overage", 50, "1000"),
+						},
 					},
 				],
-				providerBindings: [],
 			},
 			{
 				key: "priority-support",
 				name: "Priority support",
 				version: 1,
-				currency: "USD",
-				baseAmountMinor: 300,
-				billingInterval,
 				trialDays: null,
 				kind: "addon",
 				tierRank: 0,
@@ -1915,20 +1958,14 @@ function phaseTwoCatalogIntent(billingInterval = "month") {
 					{
 						featureKey: "priority_support_access",
 						itemKind: "access",
-						quantity: null,
-						resetInterval: null,
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
 					},
 				],
-				providerBindings: [],
 			},
 		],
 		topups: [],
 		rateCards: [],
 	};
 }
-
 function catalogIntent(version: number, ratePerUnit: string) {
 	return {
 		features: [
@@ -1956,25 +1993,26 @@ function catalogIntent(version: number, ratePerUnit: string) {
 				key: "premium",
 				name: "Premium",
 				version,
-				currency: "USD",
-				baseAmountMinor: 999,
-				billingInterval: "month",
 				trialDays: null,
 				items: [
 					{
 						featureKey: "ai_credits",
 						itemKind: "allocation",
 						quantity: "1000",
-						resetInterval: "month",
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
+						reset: {
+							interval: "month",
+							intervalCount: 1,
+						},
 					},
 				],
-				providerBindings: [
-					{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
-					{ productKey: "premium_monthly", provider: "google", channel: "android" },
-					{ productKey: "premium_monthly", provider: "stripe", channel: "web" },
-				],
+				providerPriced: {
+					billingInterval: "month",
+					providerBindings: [
+						{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
+						{ productKey: "premium_monthly", provider: "google", channel: "android" },
+						{ productKey: "premium_monthly", provider: "stripe", channel: "web" },
+					],
+				},
 			},
 		],
 		topups: [
@@ -1982,12 +2020,15 @@ function catalogIntent(version: number, ratePerUnit: string) {
 				key: "ai_credits_10",
 				featureKey: "ai_credits",
 				quantity: "10",
-				expiresAfterSeconds: 315_360_000,
 				providerBindings: [
 					{ productKey: "echo_credits_10", provider: "apple", channel: "ios" },
 					{ productKey: "echo_credits_10", provider: "google", channel: "android" },
 					{ productKey: "echo_credits_10", provider: "stripe", channel: "web" },
 				],
+				expiry: {
+					mode: "after_seconds",
+					seconds: 315360000,
+				},
 			},
 		],
 		rateCards: [
@@ -1999,7 +2040,6 @@ function catalogIntent(version: number, ratePerUnit: string) {
 		],
 	};
 }
-
 /**
  * A catalog that uses every intent section the read returns: priced, licensed and metered plan
  * items, an add-on, allocation rollover, controls, a trial, graduated rate-card tiers, a top-up and
@@ -2041,12 +2081,13 @@ function richCatalogIntent() {
 						featureKey: "ai_credits",
 						itemKind: "allocation",
 						quantity: "1000",
-						resetInterval: "month",
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
 						rollover: {
 							maxQuantity: "500",
 							expiry: { mode: "after", interval: "month", intervalCount: 3 },
+						},
+						reset: {
+							interval: "month",
+							intervalCount: 1,
 						},
 					},
 				],
@@ -2072,38 +2113,31 @@ function richCatalogIntent() {
 				key: "free",
 				name: "Free",
 				version: 1,
-				currency: null,
-				baseAmountMinor: null,
-				billingInterval: null,
 				trialDays: null,
 				items: [
 					{
 						featureKey: "free_tier",
 						itemKind: "access",
-						quantity: null,
-						resetInterval: null,
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
 					},
 					{
 						featureKey: "ai_credits",
 						itemKind: "allocation",
 						quantity: "50",
-						resetInterval: "month",
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
+						reset: {
+							interval: "month",
+							intervalCount: 1,
+						},
 					},
 					{
 						featureKey: "api_calls",
 						itemKind: "meter_limit",
 						quantity: "100",
-						resetInterval: "day",
-						resetIntervalCount: 1,
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
+						reset: {
+							interval: "day",
+							intervalCount: 1,
+						},
 					},
 				],
-				providerBindings: [],
 			},
 		],
 		topups: base.topups,

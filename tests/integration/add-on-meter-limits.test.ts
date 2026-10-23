@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent, AuthoredPlanIntent } from "../../src/catalog/types";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import type { CadenceUnit } from "../../src/shared/cadence";
@@ -13,17 +13,14 @@ import {
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
-
 /** A base plan and an add-on that both cap one feature, as an add-on that raises a quota does. */
 localDescribe("meter limits from a base plan and its add-ons", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});
@@ -108,20 +105,19 @@ localDescribe("meter limits from a base plan and its add-ons", () => {
 function limit(quantity: string, resetInterval: CadenceUnit) {
 	return { quantity, resetInterval };
 }
-
 function plan(
 	key: string,
 	kind: "base" | "addon",
 	version: number,
-	cap: { quantity: string; resetInterval: CadenceUnit } | null,
-): CatalogPlanIntent {
+	cap: {
+		quantity: string;
+		resetInterval: CadenceUnit;
+	} | null,
+): AuthoredPlanIntent {
 	return {
 		key,
 		name: key,
 		version,
-		currency: "USD",
-		baseAmountMinor: (kind === "base" ? 1000 : 300) * version,
-		billingInterval: "month",
 		trialDays: null,
 		kind,
 		items:
@@ -132,16 +128,15 @@ function plan(
 							featureKey: "api_requests",
 							itemKind: "meter_limit",
 							quantity: cap.quantity,
-							resetInterval: cap.resetInterval,
-							expiresAfterSeconds: null,
-							overagePolicy: "blocked",
+							reset: {
+								interval: cap.resetInterval,
+								intervalCount: 1,
+							},
 						},
 					],
-		providerBindings: [],
 	};
 }
-
-function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
+function catalog(plans: AuthoredPlanIntent[]): AuthoredCatalogIntent {
 	return {
 		features: [
 			{
@@ -159,8 +154,10 @@ function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
 		rateCards: [],
 	};
 }
-
-async function publish(intent: CatalogIntent, expectedRevision: number | null): Promise<void> {
+async function publish(
+	intent: AuthoredCatalogIntent,
+	expectedRevision: number | null,
+): Promise<void> {
 	const project = integrationProjectContext();
 	const actor = "integration-meter-limits";
 	const preview = await context.repository.previewCatalog(project, {

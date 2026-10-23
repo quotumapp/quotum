@@ -25,7 +25,7 @@
 			"key": "credits_10",
 			"featureKey": "ai_credits",
 			"quantity": "10",
-			"expiresAfterSeconds": null,
+			"expiry": { "mode": "forever" },
 			"providerBindings": [{ "productKey": "credits_10", "provider": "stripe", "channel": "web" }]
 		}
 	],
