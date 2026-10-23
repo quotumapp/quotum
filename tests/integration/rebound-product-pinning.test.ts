@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import type { CatalogIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent } from "../../src/catalog/types";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -12,7 +12,6 @@ import { aiCreditsCatalog } from "./helpers/metering-catalog";
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 const project = integrationProjectContext();
 let context: LocalPostgresContext;
-
 /** One plan sold through the seeded `premium_monthly` product on Stripe and the App Store. */
 function catalogWith(planKey: string, quantity: string, retiredPlanKeys: string[] = []) {
 	const [template] = aiCreditsCatalog.plans;
@@ -24,9 +23,8 @@ function catalogWith(planKey: string, quantity: string, retiredPlanKeys: string[
 		plans: [{ ...template, key: planKey, name: planKey, items: [{ ...allowance, quantity }] }],
 		topups: [],
 		retiredPlanKeys,
-	} as CatalogIntent;
+	} as AuthoredCatalogIntent;
 }
-
 localDescribe("a store product re-bound to another plan", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
@@ -37,8 +35,7 @@ localDescribe("a store product re-bound to another plan", () => {
 	afterAll(async () => {
 		await context.sql.close();
 	});
-
-	async function publish(catalog: CatalogIntent, expectedRevision: number | null) {
+	async function publish(catalog: AuthoredCatalogIntent, expectedRevision: number | null) {
 		const preview = await context.repository.previewCatalog(project, {
 			expectedRevision,
 			actor: "integration-test",

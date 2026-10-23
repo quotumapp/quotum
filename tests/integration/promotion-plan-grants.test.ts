@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
 import type { CreatePromotionInput } from "../../src/billing/promotions";
-import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent, AuthoredPlanIntent } from "../../src/catalog/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -19,59 +19,48 @@ const project = integrationProjectContext();
 const actor = "operator@example.com";
 const day = 86_400_000;
 let context: LocalPostgresContext;
-
 const allowance = (quantity: string) => ({
 	featureKey: "ai_credits",
 	itemKind: "allocation" as const,
 	quantity,
-	resetInterval: "month" as const,
-	expiresAfterSeconds: null,
-	overagePolicy: "blocked" as const,
+	reset: {
+		interval: "month" as const,
+		intervalCount: 1,
+	},
 });
-
-const plan = (key: string, extra: Partial<CatalogPlanIntent> = {}): CatalogPlanIntent => ({
+const plan = (key: string, extra: Partial<AuthoredPlanIntent> = {}): AuthoredPlanIntent => ({
 	key,
 	name: key,
 	version: 1,
-	currency: "USD",
-	baseAmountMinor: 0,
-	billingInterval: "month",
 	trialDays: null,
 	items: [allowance("50")],
-	providerBindings: [],
 	...extra,
 });
-
 /**
  * `premium` is bound to every store and allows 1000 credits a month; `starter` has no binding and
  * a seven-day trial; `boost` is an add-on; `free`, when marked, is the default plan.
  */
-function catalog(options: { defaultPlan: boolean }): CatalogIntent {
+function catalog(options: { defaultPlan: boolean }): AuthoredCatalogIntent {
 	return {
 		...aiCreditsCatalog,
 		plans: [
 			...aiCreditsCatalog.plans,
 			plan("starter", { trialDays: 7 }),
 			plan("boost", { kind: "addon", items: [allowance("10")] }),
-			...(options.defaultPlan
-				? [plan("free", { currency: null, baseAmountMinor: null, billingInterval: null })]
-				: []),
+			...(options.defaultPlan ? [plan("free")] : []),
 		],
 		...(options.defaultPlan
 			? { defaultPlan: { planKey: "free", entitlementKeys: ["free_tier"] } }
 			: {}),
 	};
 }
-
 localDescribe("Promotion plan grants integration", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});

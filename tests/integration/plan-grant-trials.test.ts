@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
-import type { CatalogIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent } from "../../src/catalog/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -16,21 +16,20 @@ import { integrationProjectReadOnlyCredential } from "./helpers/platform-fixture
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
-
 const allowanceItem = (quantity: string) => ({
 	featureKey: "ai_credits",
 	itemKind: "allocation" as const,
 	quantity,
-	resetInterval: "month" as const,
-	expiresAfterSeconds: null,
-	overagePolicy: "blocked" as const,
+	reset: {
+		interval: "month" as const,
+		intervalCount: 1,
+	},
 });
-
 /**
  * `premium` is bound to every store and declares no trial length; `starter` has no binding and a
  * seven-day trial; `boost` is an add-on.
  */
-const trialCatalog: CatalogIntent = {
+const trialCatalog: AuthoredCatalogIntent = {
 	...aiCreditsCatalog,
 	plans: [
 		...aiCreditsCatalog.plans,
@@ -38,35 +37,24 @@ const trialCatalog: CatalogIntent = {
 			key: "starter",
 			name: "Starter",
 			version: 1,
-			currency: "USD",
-			baseAmountMinor: 0,
-			billingInterval: "month",
 			trialDays: 7,
 			items: [allowanceItem("50")],
-			providerBindings: [],
 		},
 		{
 			key: "boost",
 			name: "Boost",
 			version: 1,
-			currency: "USD",
-			baseAmountMinor: 0,
-			billingInterval: "month",
 			trialDays: null,
 			kind: "addon",
 			items: [allowanceItem("10")],
-			providerBindings: [],
 		},
 	],
 };
-
 localDescribe("Plan grant trials integration", () => {
 	const project = integrationProjectContext();
-
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		const preview = await context.repository.previewCatalog(project, {
@@ -81,7 +69,6 @@ localDescribe("Plan grant trials integration", () => {
 			catalog: trialCatalog,
 		});
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});

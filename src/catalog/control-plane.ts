@@ -29,7 +29,6 @@ import { maxInt4, minInt4 } from "../shared/input-bounds";
 import {
 	assertPlanCadences,
 	assertTopupCadences,
-	normalizeRolloverExpiry,
 	planBillingCadence,
 	priceBillingCadence,
 	rolloverExpiryCadence,
@@ -38,20 +37,13 @@ import {
 	assertAuthoredShape,
 	canonicalFromWorking,
 	catalogAdvisories,
-	legacyPriceView,
-	type SpellingFindings,
 	toWorkingShape,
 	unionBindings,
-	workingFromCanonical,
 } from "./canonical-intent";
 import { assertDefaultPlan } from "./default-plan-rules";
 import { assertRetiringFeaturesAreNotHeld } from "./feature-retirement";
-import {
-	assertBaseAmountHasCurrency,
-	assertItemPricesCharge,
-	assertPriceSpellingsAgree,
-	planVersionCurrency,
-} from "./price-rules";
+import { catalogIntentSchema } from "./intent-schema";
+import { planVersionCurrency } from "./price-rules";
 import {
 	assertCatalogProviderCompatibility,
 	catalogProviderCompatibility,
@@ -63,7 +55,6 @@ import type {
 	CatalogControlIntent,
 	CatalogControlPlaneLike,
 	CatalogDefaultPlanIntent,
-	CatalogDeprecation,
 	CatalogFeatureIntent,
 	CatalogGiftIntent,
 	CatalogImpact,
@@ -86,69 +77,48 @@ const MAX_GIFT_VALID_DAYS = 730;
 
 /**
  * An authored intent read every way the control plane needs it. Preview stores and hashes
- * `canonical`; validation and publishing read `working`, rebuilt from `canonical`, so what is
- * stored is what is published.
+ * `canonical`; validation and publishing read the same normalized `working` representation.
  */
 export interface ParsedCatalogIntent {
-	/** The authored intent spelled the legacy way, before normalization. */
-	submitted: CatalogIntent;
-	/** `submitted`, normalized: it still holds what canonicalization drops. */
-	normalized: CatalogIntent;
 	canonical: CanonicalCatalog;
-	/** The normalized working intent rebuilt from `canonical`. */
 	working: CatalogIntent;
-	deprecations: CatalogDeprecation[];
 	advisories: CatalogAdvisory[];
 }
 
-/**
- * Reads a new intent in either spelling. Structural only, like normalization: the rules of a new
- * intent are asserted by {@link assertNewCatalogIntent}.
- */
+/** Parses canonical authoring once, deriving the catalog validation and publication both use. */
 export function parseAuthoredIntent(
 	authored: AuthoredCatalogIntent,
 	capabilities: ProviderCapabilityLookup = providerCapabilityCatalog,
 ): ParsedCatalogIntent {
-	const findings: SpellingFindings = { deprecations: [] };
-	const submitted = toWorkingShape(authored, findings);
-	const normalized = normalizeCatalog(submitted, capabilities);
-	const canonical = canonicalFromWorking(normalized);
-	return {
-		submitted,
-		normalized,
-		canonical,
-		working: normalizeCatalog(workingFromCanonical(canonical), capabilities),
-		deprecations: findings.deprecations,
-		advisories: catalogAdvisories(canonical),
-	};
+	const parsed = catalogIntentSchema.safeParse(authored);
+	if (!parsed.success) {
+		const issue = parsed.error.issues[0];
+		throw new InvalidRequestError(
+			`Catalog is invalid at ${issue?.path.join(".") ?? "catalog"}: ${issue?.message ?? "invalid canonical intent"}`,
+		);
+	}
+	assertAuthoredShape(parsed.data);
+	const working = normalizeCatalog(toWorkingShape(parsed.data), capabilities);
+	const canonical = canonicalFromWorking(working);
+	return { canonical, working, advisories: catalogAdvisories(canonical) };
 }
 
-/**
- * A new intent read and checked the way preview checks it before reading the database: its
- * structure, the authoring rules and provider compatibility, but not the lifecycle rules that
- * compare it with what is published. `quotum catalog format` prints its canonical intent.
- */
+/** Checks a new canonical intent before consulting the database. */
 export function checkNewCatalogIntent(
 	authored: AuthoredCatalogIntent,
 	capabilities: ProviderCapabilityLookup = providerCapabilityCatalog,
 ): ParsedCatalogIntent {
 	const parsed = parseAuthoredIntent(authored, capabilities);
-	assertNewCatalogIntent(authored, parsed, capabilities);
+	assertNewCatalogIntent(parsed, capabilities);
 	return parsed;
 }
 
-/**
- * Reads a stored intent, in whichever spelling it was stored, as its canonical intent. Stored data
- * only (published revisions, drafts, read-back and diff): it never applies the rules of a new intent,
- * so a catalog published before a rule existed stays readable.
- */
+/** Reads canonical stored data without applying current provider capability or lifecycle rules. */
 export function decodeStoredIntent(
 	stored: unknown,
 	capabilities: ProviderCapabilityLookup = providerCapabilityCatalog,
 ): CanonicalCatalog {
-	return canonicalFromWorking(
-		normalizeCatalog(toWorkingShape(stored as AuthoredCatalogIntent), capabilities),
-	);
+	return parseAuthoredIntent(stored as AuthoredCatalogIntent, capabilities).canonical;
 }
 
 interface ProjectCatalogRow {
@@ -159,7 +129,7 @@ interface ProjectCatalogRow {
 
 interface DraftRow {
 	intent_hash: string;
-	intent: CatalogIntent;
+	intent: CanonicalCatalog;
 	base_revision: number | null;
 	next_revision: number;
 	status: "previewed" | "published" | "expired";
@@ -285,7 +255,6 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 				expiresAt: expiresAt.toISOString(),
 				impact,
 				providerCompatibility,
-				deprecations: parsed.deprecations,
 				advisories: parsed.advisories,
 				scopeImpact,
 			};
@@ -352,7 +321,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 			}
 			// After the retry branch: a published draft replays its result even if a declaration or
 			// rule narrowed since, while every new publish is still checked before any write.
-			assertNewCatalogIntent(input.catalog, parsed, this.capabilities);
+			assertNewCatalogIntent(parsed, this.capabilities);
 			if (draft.status !== "previewed" || new Date(draft.expires_at).getTime() <= Date.now()) {
 				throw new PersistenceConflictError(
 					"Catalog preview has expired",
@@ -366,8 +335,6 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 					"CATALOG_PREVIEW_STALE",
 				);
 			}
-			// A preview issued before the canonical intent stored the legacy spelling, so it no longer
-			// matches and must be repeated.
 			const intentHash = sha256Hex(stableJson(parsed.canonical));
 			if (
 				draft.intent_hash !== intentHash ||
@@ -592,29 +559,14 @@ function assertExpectedRevision(expected: number | null, actual: number | null):
 	}
 }
 
-/**
- * Checks a new intent in preview and publish, never a stored catalog: a published intent that
- * predates a rule stays readable, and preview still compares its replacement against it. A rule
- * that normalization or canonicalization would erase, such as two spellings of one price or a price
- * that never charges, reads the intent as submitted; the rest read the working intent rebuilt from
- * the canonical one.
- */
+/** Domain rules for a new canonical catalog, applied to the representation publication writes. */
 function assertNewCatalogIntent(
-	authored: AuthoredCatalogIntent,
 	parsed: ParsedCatalogIntent,
 	capabilities: ProviderCapabilityLookup,
 ): void {
-	assertAuthoredShape(authored);
-	assertPriceSpellingsAgree(legacyPriceView(authored, parsed.submitted), parsed.normalized);
-	assertBaseAmountHasCurrency(parsed.normalized);
-	assertItemPricesCharge(parsed.normalized);
-	assertFeatureKinds(parsed.normalized);
-	// Usage windows and plan allocations reset within the provider period, so an item that resets
-	// less often than its plan bills would silently reset every period: a yearly limit on a monthly
-	// plan would become a monthly one.
-	for (const plan of parsed.normalized.plans) assertPlanCadences(plan);
-	for (const topup of parsed.normalized.topups) assertTopupCadences(topup);
-	// One definition of "unpriced": no base price, no provider-priced products, no item price.
+	assertFeatureKinds(parsed.working);
+	for (const plan of parsed.working.plans) assertPlanCadences(plan);
+	for (const topup of parsed.working.topups) assertTopupCadences(topup);
 	assertDefaultPlan(parsed.working);
 	assertCatalogProviderCompatibility(parsed.working, capabilities);
 }
@@ -705,7 +657,7 @@ function normalizeCatalog(
 	for (const feature of features) validateFeature(feature);
 
 	const plans = catalog.plans.map((plan) => {
-		const legacyBindings = plan.providerBindings
+		const planBindings = plan.providerBindings
 			.map((binding) => normalizeProviderBinding(binding, capabilities))
 			.sort((left, right) =>
 				providerBindingIdentity(left).localeCompare(providerBindingIdentity(right)),
@@ -762,13 +714,13 @@ function normalizeCatalog(
 									item.rollover.maxQuantity === null
 										? null
 										: positiveDecimal(item.rollover.maxQuantity, "rollover maxQuantity"),
-								expiry: normalizeRolloverExpiry(item.rollover.expiry),
+								expiry: item.rollover.expiry,
 							},
 			})),
 			controls: (plan.controls ?? []).map((control) => normalizeControl(control, featureByKey)),
-			// The plan's products span both price spellings: a Stripe base price and the store
+			// The plan's products span both price blocks: a Stripe base price and the store
 			// products whose price the provider owns both identify this plan.
-			providerBindings: unionBindings(legacyBindings, basePrice?.providerBindings ?? []),
+			providerBindings: unionBindings(planBindings, basePrice?.providerBindings ?? []),
 		};
 	});
 	assertUnique(
@@ -876,8 +828,7 @@ function normalizeCatalog(
 			const planCadence = planBillingCadence(plan);
 			if (
 				item.price !== null &&
-				planCadence !== null &&
-				!sameCadence(priceBillingCadence(item.price), planCadence)
+				(planCadence === null || !sameCadence(priceBillingCadence(item.price), planCadence))
 			) {
 				throw new InvalidRequestError(`Plan ${plan.key} price intervals must match`);
 			}
@@ -1449,7 +1400,7 @@ async function calculateImpact(
 
 /**
  * The keys of the plans a publish gives a new version: those whose canonical form differs from the
- * published one. Comparing canonical forms means a respelling alone (legacy to canonical) creates
+ * published one. Comparing normalized canonical forms means optional defaults create
  * no version.
  */
 function changedPlanKeys(

@@ -157,8 +157,8 @@ AI credits; a meter limit on it would stop calls drawing on the wallet. Publish 
 CATALOG="$(cat examples/quickstart/catalog-plans.json)"
 PREVIEW="$(curl -s -X POST localhost:3000/v1/admin/catalog/preview "${AUTH[@]}" "${OPS[@]}" \
   -d "{\"expectedRevision\":1,\"catalog\":$CATALOG}")"
-echo "$PREVIEW" | jq '.data | {deprecations, advisories, plansCreated: .impact.plansCreated}'
-# {"deprecations":[],"advisories":[],"plansCreated":4}
+echo "$PREVIEW" | jq '.data | {advisories, plansCreated: .impact.plansCreated}'
+# {"advisories":[],"plansCreated":4}
 
 curl -s -X POST localhost:3000/v1/admin/catalog/publish "${AUTH[@]}" "${OPS[@]}" \
   -d "{\"expectedRevision\":1,\"previewToken\":$(echo "$PREVIEW" | jq .data.previewToken),\"catalog\":$CATALOG}" | jq .data.revision
@@ -184,8 +184,7 @@ curl -s -X POST localhost:3000/v1/billing-accounts/user_2/usage/check "${AUTH[@]
 
 `GET /v1/admin/catalog` returns the published catalog with every default spelled out; previewing that
 output unchanged creates nothing. `bun run catalog format examples/quickstart/catalog.json` prints the
-starter catalog the same way, rewriting its legacy `expiresAfterSeconds: null` as
-`expiry: { "mode": "forever" }`.
+starter catalog with its optional defaults filled in. Catalog files must use canonical syntax.
 
 ## 9. Continue with the JavaScript SDK (optional)
 

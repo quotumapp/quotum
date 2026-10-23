@@ -1074,13 +1074,6 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
-                          "baseAmountMinor": {
-                            "minimum": 0,
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
                           "basePrice": {
                             "additionalProperties": false,
                             "properties": {
@@ -1233,29 +1226,6 @@
                               "null"
                             ]
                           },
-                          "billingInterval": {
-                            "enum": [
-                              "day",
-                              "week",
-                              "month",
-                              "quarter",
-                              "semi_annual",
-                              "year",
-                              null
-                            ],
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "billingIntervalCount": {
-                            "maximum": 1000,
-                            "minimum": 1,
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
                           "controls": {
                             "items": {
                               "additionalProperties": false,
@@ -1322,14 +1292,6 @@
                             "maxItems": 50,
                             "type": "array"
                           },
-                          "currency": {
-                            "maxLength": 3,
-                            "minLength": 3,
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
                           "customerBillingAccountId": {
                             "maxLength": 200,
                             "minLength": 1,
@@ -1348,40 +1310,161 @@
                           },
                           "items": {
                             "items": {
-                              "anyOf": [
+                              "oneOf": [
                                 {
-                                  "oneOf": [
-                                    {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "access"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "allocationScope": {
+                                      "enum": [
+                                        "account",
+                                        "entity"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "expiry": {
+                                      "oneOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "mode": {
+                                              "enum": [
+                                                "forever"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "mode"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "interval": {
+                                              "enum": [
+                                                "hour",
+                                                "day",
+                                                "week",
+                                                "month",
+                                                "quarter",
+                                                "semi_annual",
+                                                "year"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "intervalCount": {
+                                              "maximum": 1000,
+                                              "minimum": 1,
+                                              "type": "integer"
+                                            },
+                                            "mode": {
+                                              "enum": [
+                                                "after"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "mode",
+                                            "interval",
+                                            "intervalCount"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "mode": {
+                                              "enum": [
+                                                "after_seconds"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "seconds": {
+                                              "maximum": 315619200,
+                                              "minimum": 1,
+                                              "type": "integer"
+                                            }
+                                          },
+                                          "required": [
+                                            "mode",
+                                            "seconds"
+                                          ],
+                                          "type": "object"
+                                        }
+                                      ]
+                                    },
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "allocation"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "quantity": {
+                                      "maxLength": 80,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "reset": {
                                       "additionalProperties": false,
                                       "properties": {
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
+                                        "interval": {
                                           "enum": [
-                                            "access"
+                                            "hour",
+                                            "day",
+                                            "week",
+                                            "month",
+                                            "quarter",
+                                            "semi_annual",
+                                            "year"
                                           ],
                                           "type": "string"
+                                        },
+                                        "intervalCount": {
+                                          "maximum": 1000,
+                                          "minimum": 1,
+                                          "type": "integer"
                                         }
                                       },
                                       "required": [
-                                        "itemKind",
-                                        "featureKey"
+                                        "interval",
+                                        "intervalCount"
                                       ],
-                                      "type": "object"
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ]
                                     },
-                                    {
+                                    "rollover": {
                                       "additionalProperties": false,
                                       "properties": {
-                                        "allocationScope": {
-                                          "enum": [
-                                            "account",
-                                            "entity"
-                                          ],
-                                          "type": "string"
-                                        },
                                         "expiry": {
                                           "oneOf": [
                                             {
@@ -1432,610 +1515,34 @@
                                                 "intervalCount"
                                               ],
                                               "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "mode": {
-                                                  "enum": [
-                                                    "after_seconds"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "seconds": {
-                                                  "maximum": 315619200,
-                                                  "minimum": 1,
-                                                  "type": "integer"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode",
-                                                "seconds"
-                                              ],
-                                              "type": "object"
                                             }
                                           ]
                                         },
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "allocation"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "quantity": {
+                                        "maxQuantity": {
                                           "maxLength": 80,
                                           "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "reset": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "interval": {
-                                              "enum": [
-                                                "hour",
-                                                "day",
-                                                "week",
-                                                "month",
-                                                "quarter",
-                                                "semi_annual",
-                                                "year"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "intervalCount": {
-                                              "maximum": 1000,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            }
-                                          },
-                                          "required": [
-                                            "interval",
-                                            "intervalCount"
-                                          ],
                                           "type": [
-                                            "object",
-                                            "null"
-                                          ]
-                                        },
-                                        "rollover": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "expiry": {
-                                              "oneOf": [
-                                                {
-                                                  "additionalProperties": false,
-                                                  "properties": {
-                                                    "mode": {
-                                                      "enum": [
-                                                        "forever"
-                                                      ],
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "mode"
-                                                  ],
-                                                  "type": "object"
-                                                },
-                                                {
-                                                  "additionalProperties": false,
-                                                  "properties": {
-                                                    "interval": {
-                                                      "enum": [
-                                                        "hour",
-                                                        "day",
-                                                        "week",
-                                                        "month",
-                                                        "quarter",
-                                                        "semi_annual",
-                                                        "year"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "intervalCount": {
-                                                      "maximum": 1000,
-                                                      "minimum": 1,
-                                                      "type": "integer"
-                                                    },
-                                                    "mode": {
-                                                      "enum": [
-                                                        "after"
-                                                      ],
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "mode",
-                                                    "interval",
-                                                    "intervalCount"
-                                                  ],
-                                                  "type": "object"
-                                                }
-                                              ]
-                                            },
-                                            "maxQuantity": {
-                                              "maxLength": 80,
-                                              "minLength": 1,
-                                              "type": [
-                                                "string",
-                                                "null"
-                                              ]
-                                            }
-                                          },
-                                          "required": [
-                                            "maxQuantity",
-                                            "expiry"
-                                          ],
-                                          "type": [
-                                            "object",
+                                            "string",
                                             "null"
                                           ]
                                         }
                                       },
                                       "required": [
-                                        "itemKind",
-                                        "featureKey",
-                                        "quantity"
+                                        "maxQuantity",
+                                        "expiry"
                                       ],
-                                      "type": "object"
-                                    },
-                                    {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "allocationScope": {
-                                          "enum": [
-                                            "account",
-                                            "entity"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "meter_limit"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "overage": {
-                                          "oneOf": [
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "policy": {
-                                                  "enum": [
-                                                    "blocked"
-                                                  ],
-                                                  "type": "string"
-                                                }
-                                              },
-                                              "required": [
-                                                "policy"
-                                              ],
-                                              "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "policy": {
-                                                  "enum": [
-                                                    "allowed"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "price": {
-                                                  "additionalProperties": false,
-                                                  "properties": {
-                                                    "billingInterval": {
-                                                      "enum": [
-                                                        "day",
-                                                        "week",
-                                                        "month",
-                                                        "quarter",
-                                                        "semi_annual",
-                                                        "year"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "billingIntervalCount": {
-                                                      "maximum": 1000,
-                                                      "minimum": 1,
-                                                      "type": "integer"
-                                                    },
-                                                    "billingUnits": {
-                                                      "maxLength": 80,
-                                                      "minLength": 1,
-                                                      "type": "string"
-                                                    },
-                                                    "currency": {
-                                                      "maxLength": 3,
-                                                      "minLength": 3,
-                                                      "type": "string"
-                                                    },
-                                                    "key": {
-                                                      "maxLength": 120,
-                                                      "minLength": 1,
-                                                      "type": "string"
-                                                    },
-                                                    "maximumQuantity": {
-                                                      "maximum": 2147483647,
-                                                      "minimum": 1,
-                                                      "type": [
-                                                        "integer",
-                                                        "null"
-                                                      ]
-                                                    },
-                                                    "minimumQuantity": {
-                                                      "maximum": 2147483647,
-                                                      "minimum": 1,
-                                                      "type": "integer"
-                                                    },
-                                                    "pricingModel": {
-                                                      "enum": [
-                                                        "flat",
-                                                        "graduated",
-                                                        "volume"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "providerBindings": {
-                                                      "items": {
-                                                        "additionalProperties": false,
-                                                        "properties": {
-                                                          "channel": {
-                                                            "enum": [
-                                                              "ios",
-                                                              "android",
-                                                              "web"
-                                                            ],
-                                                            "type": "string"
-                                                          },
-                                                          "productKey": {
-                                                            "maxLength": 120,
-                                                            "minLength": 1,
-                                                            "type": "string"
-                                                          },
-                                                          "provider": {
-                                                            "enum": [
-                                                              "apple",
-                                                              "google",
-                                                              "stripe",
-                                                              "paddle"
-                                                            ],
-                                                            "type": "string"
-                                                          }
-                                                        },
-                                                        "required": [
-                                                          "productKey",
-                                                          "provider",
-                                                          "channel"
-                                                        ],
-                                                        "type": "object"
-                                                      },
-                                                      "maxItems": 20,
-                                                      "minItems": 1,
-                                                      "type": "array"
-                                                    },
-                                                    "taxBehavior": {
-                                                      "enum": [
-                                                        "inclusive",
-                                                        "exclusive",
-                                                        "unspecified"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "tiers": {
-                                                      "items": {
-                                                        "additionalProperties": false,
-                                                        "properties": {
-                                                          "flatAmountMinor": {
-                                                            "minimum": 0,
-                                                            "type": "integer"
-                                                          },
-                                                          "unitAmountMinor": {
-                                                            "minimum": 0,
-                                                            "type": "integer"
-                                                          },
-                                                          "upToQuantity": {
-                                                            "maxLength": 80,
-                                                            "minLength": 1,
-                                                            "type": [
-                                                              "string",
-                                                              "null"
-                                                            ]
-                                                          }
-                                                        },
-                                                        "required": [
-                                                          "upToQuantity",
-                                                          "unitAmountMinor"
-                                                        ],
-                                                        "type": "object"
-                                                      },
-                                                      "maxItems": 100,
-                                                      "type": "array"
-                                                    },
-                                                    "unitAmountMinor": {
-                                                      "minimum": 0,
-                                                      "type": "integer"
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "key",
-                                                    "currency",
-                                                    "unitAmountMinor",
-                                                    "billingUnits",
-                                                    "billingInterval",
-                                                    "minimumQuantity",
-                                                    "maximumQuantity",
-                                                    "taxBehavior",
-                                                    "providerBindings"
-                                                  ],
-                                                  "type": "object"
-                                                }
-                                              },
-                                              "required": [
-                                                "policy",
-                                                "price"
-                                              ],
-                                              "type": "object"
-                                            }
-                                          ]
-                                        },
-                                        "quantity": {
-                                          "maxLength": 80,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "reset": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "interval": {
-                                              "enum": [
-                                                "hour",
-                                                "day",
-                                                "week",
-                                                "month",
-                                                "quarter",
-                                                "semi_annual",
-                                                "year"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "intervalCount": {
-                                              "maximum": 1000,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            }
-                                          },
-                                          "required": [
-                                            "interval",
-                                            "intervalCount"
-                                          ],
-                                          "type": "object"
-                                        }
-                                      },
-                                      "required": [
-                                        "itemKind",
-                                        "featureKey",
-                                        "quantity",
-                                        "reset"
-                                      ],
-                                      "type": "object"
-                                    },
-                                    {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "allocationScope": {
-                                          "enum": [
-                                            "account",
-                                            "license_pool"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "licensed_quantity"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "price": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "billingInterval": {
-                                              "enum": [
-                                                "day",
-                                                "week",
-                                                "month",
-                                                "quarter",
-                                                "semi_annual",
-                                                "year"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "billingIntervalCount": {
-                                              "maximum": 1000,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            },
-                                            "billingUnits": {
-                                              "maxLength": 80,
-                                              "minLength": 1,
-                                              "type": "string"
-                                            },
-                                            "currency": {
-                                              "maxLength": 3,
-                                              "minLength": 3,
-                                              "type": "string"
-                                            },
-                                            "key": {
-                                              "maxLength": 120,
-                                              "minLength": 1,
-                                              "type": "string"
-                                            },
-                                            "maximumQuantity": {
-                                              "maximum": 2147483647,
-                                              "minimum": 1,
-                                              "type": [
-                                                "integer",
-                                                "null"
-                                              ]
-                                            },
-                                            "minimumQuantity": {
-                                              "maximum": 2147483647,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            },
-                                            "pricingModel": {
-                                              "enum": [
-                                                "flat",
-                                                "graduated",
-                                                "volume"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "providerBindings": {
-                                              "items": {
-                                                "additionalProperties": false,
-                                                "properties": {
-                                                  "channel": {
-                                                    "enum": [
-                                                      "ios",
-                                                      "android",
-                                                      "web"
-                                                    ],
-                                                    "type": "string"
-                                                  },
-                                                  "productKey": {
-                                                    "maxLength": 120,
-                                                    "minLength": 1,
-                                                    "type": "string"
-                                                  },
-                                                  "provider": {
-                                                    "enum": [
-                                                      "apple",
-                                                      "google",
-                                                      "stripe",
-                                                      "paddle"
-                                                    ],
-                                                    "type": "string"
-                                                  }
-                                                },
-                                                "required": [
-                                                  "productKey",
-                                                  "provider",
-                                                  "channel"
-                                                ],
-                                                "type": "object"
-                                              },
-                                              "maxItems": 20,
-                                              "minItems": 1,
-                                              "type": "array"
-                                            },
-                                            "taxBehavior": {
-                                              "enum": [
-                                                "inclusive",
-                                                "exclusive",
-                                                "unspecified"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "tiers": {
-                                              "items": {
-                                                "additionalProperties": false,
-                                                "properties": {
-                                                  "flatAmountMinor": {
-                                                    "minimum": 0,
-                                                    "type": "integer"
-                                                  },
-                                                  "unitAmountMinor": {
-                                                    "minimum": 0,
-                                                    "type": "integer"
-                                                  },
-                                                  "upToQuantity": {
-                                                    "maxLength": 80,
-                                                    "minLength": 1,
-                                                    "type": [
-                                                      "string",
-                                                      "null"
-                                                    ]
-                                                  }
-                                                },
-                                                "required": [
-                                                  "upToQuantity",
-                                                  "unitAmountMinor"
-                                                ],
-                                                "type": "object"
-                                              },
-                                              "maxItems": 100,
-                                              "type": "array"
-                                            },
-                                            "unitAmountMinor": {
-                                              "minimum": 0,
-                                              "type": "integer"
-                                            }
-                                          },
-                                          "required": [
-                                            "key",
-                                            "currency",
-                                            "unitAmountMinor",
-                                            "billingUnits",
-                                            "billingInterval",
-                                            "minimumQuantity",
-                                            "maximumQuantity",
-                                            "taxBehavior",
-                                            "providerBindings"
-                                          ],
-                                          "type": "object"
-                                        },
-                                        "quantity": {
-                                          "maxLength": 80,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": [
-                                        "itemKind",
-                                        "featureKey",
-                                        "quantity",
-                                        "price"
-                                      ],
-                                      "type": "object"
-                                    },
-                                    {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "unlimited_usage"
-                                          ],
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": [
-                                        "itemKind",
-                                        "featureKey"
-                                      ],
-                                      "type": "object"
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ]
                                     }
-                                  ]
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey",
+                                    "quantity"
+                                  ],
+                                  "type": "object"
                                 },
                                 {
                                   "additionalProperties": false,
@@ -2043,18 +1550,9 @@
                                     "allocationScope": {
                                       "enum": [
                                         "account",
-                                        "entity",
-                                        "license_pool"
+                                        "entity"
                                       ],
                                       "type": "string"
-                                    },
-                                    "expiresAfterSeconds": {
-                                      "maximum": 315619200,
-                                      "minimum": 1,
-                                      "type": [
-                                        "integer",
-                                        "null"
-                                      ]
                                     },
                                     "featureKey": {
                                       "maxLength": 120,
@@ -2063,17 +1561,253 @@
                                     },
                                     "itemKind": {
                                       "enum": [
-                                        "access",
-                                        "allocation",
-                                        "meter_limit",
-                                        "licensed_quantity"
+                                        "meter_limit"
                                       ],
                                       "type": "string"
                                     },
-                                    "overagePolicy": {
+                                    "overage": {
+                                      "oneOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "policy": {
+                                              "enum": [
+                                                "blocked"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "policy"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "policy": {
+                                              "enum": [
+                                                "allowed"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "additionalProperties": false,
+                                              "properties": {
+                                                "billingInterval": {
+                                                  "enum": [
+                                                    "day",
+                                                    "week",
+                                                    "month",
+                                                    "quarter",
+                                                    "semi_annual",
+                                                    "year"
+                                                  ],
+                                                  "type": "string"
+                                                },
+                                                "billingIntervalCount": {
+                                                  "maximum": 1000,
+                                                  "minimum": 1,
+                                                  "type": "integer"
+                                                },
+                                                "billingUnits": {
+                                                  "maxLength": 80,
+                                                  "minLength": 1,
+                                                  "type": "string"
+                                                },
+                                                "currency": {
+                                                  "maxLength": 3,
+                                                  "minLength": 3,
+                                                  "type": "string"
+                                                },
+                                                "key": {
+                                                  "maxLength": 120,
+                                                  "minLength": 1,
+                                                  "type": "string"
+                                                },
+                                                "maximumQuantity": {
+                                                  "maximum": 2147483647,
+                                                  "minimum": 1,
+                                                  "type": [
+                                                    "integer",
+                                                    "null"
+                                                  ]
+                                                },
+                                                "minimumQuantity": {
+                                                  "maximum": 2147483647,
+                                                  "minimum": 1,
+                                                  "type": "integer"
+                                                },
+                                                "pricingModel": {
+                                                  "enum": [
+                                                    "flat",
+                                                    "graduated",
+                                                    "volume"
+                                                  ],
+                                                  "type": "string"
+                                                },
+                                                "providerBindings": {
+                                                  "items": {
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                      "channel": {
+                                                        "enum": [
+                                                          "ios",
+                                                          "android",
+                                                          "web"
+                                                        ],
+                                                        "type": "string"
+                                                      },
+                                                      "productKey": {
+                                                        "maxLength": 120,
+                                                        "minLength": 1,
+                                                        "type": "string"
+                                                      },
+                                                      "provider": {
+                                                        "enum": [
+                                                          "apple",
+                                                          "google",
+                                                          "stripe",
+                                                          "paddle"
+                                                        ],
+                                                        "type": "string"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "productKey",
+                                                      "provider",
+                                                      "channel"
+                                                    ],
+                                                    "type": "object"
+                                                  },
+                                                  "maxItems": 20,
+                                                  "minItems": 1,
+                                                  "type": "array"
+                                                },
+                                                "taxBehavior": {
+                                                  "enum": [
+                                                    "inclusive",
+                                                    "exclusive",
+                                                    "unspecified"
+                                                  ],
+                                                  "type": "string"
+                                                },
+                                                "tiers": {
+                                                  "items": {
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                      "flatAmountMinor": {
+                                                        "minimum": 0,
+                                                        "type": "integer"
+                                                      },
+                                                      "unitAmountMinor": {
+                                                        "minimum": 0,
+                                                        "type": "integer"
+                                                      },
+                                                      "upToQuantity": {
+                                                        "maxLength": 80,
+                                                        "minLength": 1,
+                                                        "type": [
+                                                          "string",
+                                                          "null"
+                                                        ]
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "upToQuantity",
+                                                      "unitAmountMinor"
+                                                    ],
+                                                    "type": "object"
+                                                  },
+                                                  "maxItems": 100,
+                                                  "type": "array"
+                                                },
+                                                "unitAmountMinor": {
+                                                  "minimum": 0,
+                                                  "type": "integer"
+                                                }
+                                              },
+                                              "required": [
+                                                "key",
+                                                "currency",
+                                                "unitAmountMinor",
+                                                "billingUnits",
+                                                "billingInterval",
+                                                "minimumQuantity",
+                                                "maximumQuantity",
+                                                "taxBehavior",
+                                                "providerBindings"
+                                              ],
+                                              "type": "object"
+                                            }
+                                          },
+                                          "required": [
+                                            "policy",
+                                            "price"
+                                          ],
+                                          "type": "object"
+                                        }
+                                      ]
+                                    },
+                                    "quantity": {
+                                      "maxLength": 80,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "reset": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "interval": {
+                                          "enum": [
+                                            "hour",
+                                            "day",
+                                            "week",
+                                            "month",
+                                            "quarter",
+                                            "semi_annual",
+                                            "year"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "intervalCount": {
+                                          "maximum": 1000,
+                                          "minimum": 1,
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": [
+                                        "interval",
+                                        "intervalCount"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey",
+                                    "quantity",
+                                    "reset"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "allocationScope": {
                                       "enum": [
-                                        "blocked",
-                                        "allowed"
+                                        "account",
+                                        "license_pool"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "licensed_quantity"
                                       ],
                                       "type": "string"
                                     },
@@ -2224,146 +1958,40 @@
                                         "taxBehavior",
                                         "providerBindings"
                                       ],
-                                      "type": [
-                                        "object",
-                                        "null"
-                                      ]
+                                      "type": "object"
                                     },
                                     "quantity": {
                                       "maxLength": 80,
                                       "minLength": 1,
-                                      "type": [
-                                        "string",
-                                        "null"
-                                      ]
-                                    },
-                                    "resetInterval": {
-                                      "enum": [
-                                        "hour",
-                                        "day",
-                                        "week",
-                                        "month",
-                                        "quarter",
-                                        "semi_annual",
-                                        "year",
-                                        null
-                                      ],
-                                      "type": [
-                                        "string",
-                                        "null"
-                                      ]
-                                    },
-                                    "resetIntervalCount": {
-                                      "maximum": 1000,
-                                      "minimum": 1,
-                                      "type": [
-                                        "integer",
-                                        "null"
-                                      ]
-                                    },
-                                    "rollover": {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "expiry": {
-                                          "oneOf": [
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "mode": {
-                                                  "enum": [
-                                                    "forever"
-                                                  ],
-                                                  "type": "string"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode"
-                                              ],
-                                              "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "interval": {
-                                                  "enum": [
-                                                    "hour",
-                                                    "day",
-                                                    "week",
-                                                    "month",
-                                                    "quarter",
-                                                    "semi_annual",
-                                                    "year"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "intervalCount": {
-                                                  "maximum": 1000,
-                                                  "minimum": 1,
-                                                  "type": "integer"
-                                                },
-                                                "mode": {
-                                                  "enum": [
-                                                    "after"
-                                                  ],
-                                                  "type": "string"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode",
-                                                "interval",
-                                                "intervalCount"
-                                              ],
-                                              "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "mode": {
-                                                  "enum": [
-                                                    "months"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "months": {
-                                                  "maximum": 120,
-                                                  "minimum": 1,
-                                                  "type": "integer"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode",
-                                                "months"
-                                              ],
-                                              "type": "object"
-                                            }
-                                          ]
-                                        },
-                                        "maxQuantity": {
-                                          "maxLength": 80,
-                                          "minLength": 1,
-                                          "type": [
-                                            "string",
-                                            "null"
-                                          ]
-                                        }
-                                      },
-                                      "required": [
-                                        "maxQuantity",
-                                        "expiry"
-                                      ],
-                                      "type": [
-                                        "object",
-                                        "null"
-                                      ]
+                                      "type": "string"
                                     }
                                   },
                                   "required": [
-                                    "featureKey",
                                     "itemKind",
+                                    "featureKey",
                                     "quantity",
-                                    "resetInterval",
-                                    "expiresAfterSeconds",
-                                    "overagePolicy"
+                                    "price"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "unlimited_usage"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey"
                                   ],
                                   "type": "object"
                                 }
@@ -2388,43 +2016,6 @@
                             "maxLength": 200,
                             "minLength": 1,
                             "type": "string"
-                          },
-                          "providerBindings": {
-                            "items": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "channel": {
-                                  "enum": [
-                                    "ios",
-                                    "android",
-                                    "web"
-                                  ],
-                                  "type": "string"
-                                },
-                                "productKey": {
-                                  "maxLength": 120,
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "provider": {
-                                  "enum": [
-                                    "apple",
-                                    "google",
-                                    "stripe",
-                                    "paddle"
-                                  ],
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "productKey",
-                                "provider",
-                                "channel"
-                              ],
-                              "type": "object"
-                            },
-                            "maxItems": 20,
-                            "type": "array"
                           },
                           "providerPriced": {
                             "additionalProperties": false,
@@ -2652,14 +2243,6 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
-                          "expiresAfterSeconds": {
-                            "maximum": 315619200,
-                            "minimum": 1,
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
                           "expiry": {
                             "oneOf": [
                               {
@@ -3012,13 +2595,6 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
-                          "baseAmountMinor": {
-                            "minimum": 0,
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
                           "basePrice": {
                             "additionalProperties": false,
                             "properties": {
@@ -3171,29 +2747,6 @@
                               "null"
                             ]
                           },
-                          "billingInterval": {
-                            "enum": [
-                              "day",
-                              "week",
-                              "month",
-                              "quarter",
-                              "semi_annual",
-                              "year",
-                              null
-                            ],
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
-                          "billingIntervalCount": {
-                            "maximum": 1000,
-                            "minimum": 1,
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
                           "controls": {
                             "items": {
                               "additionalProperties": false,
@@ -3260,14 +2813,6 @@
                             "maxItems": 50,
                             "type": "array"
                           },
-                          "currency": {
-                            "maxLength": 3,
-                            "minLength": 3,
-                            "type": [
-                              "string",
-                              "null"
-                            ]
-                          },
                           "customerBillingAccountId": {
                             "maxLength": 200,
                             "minLength": 1,
@@ -3286,40 +2831,161 @@
                           },
                           "items": {
                             "items": {
-                              "anyOf": [
+                              "oneOf": [
                                 {
-                                  "oneOf": [
-                                    {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "access"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "allocationScope": {
+                                      "enum": [
+                                        "account",
+                                        "entity"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "expiry": {
+                                      "oneOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "mode": {
+                                              "enum": [
+                                                "forever"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "mode"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "interval": {
+                                              "enum": [
+                                                "hour",
+                                                "day",
+                                                "week",
+                                                "month",
+                                                "quarter",
+                                                "semi_annual",
+                                                "year"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "intervalCount": {
+                                              "maximum": 1000,
+                                              "minimum": 1,
+                                              "type": "integer"
+                                            },
+                                            "mode": {
+                                              "enum": [
+                                                "after"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "mode",
+                                            "interval",
+                                            "intervalCount"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "mode": {
+                                              "enum": [
+                                                "after_seconds"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "seconds": {
+                                              "maximum": 315619200,
+                                              "minimum": 1,
+                                              "type": "integer"
+                                            }
+                                          },
+                                          "required": [
+                                            "mode",
+                                            "seconds"
+                                          ],
+                                          "type": "object"
+                                        }
+                                      ]
+                                    },
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "allocation"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "quantity": {
+                                      "maxLength": 80,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "reset": {
                                       "additionalProperties": false,
                                       "properties": {
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
+                                        "interval": {
                                           "enum": [
-                                            "access"
+                                            "hour",
+                                            "day",
+                                            "week",
+                                            "month",
+                                            "quarter",
+                                            "semi_annual",
+                                            "year"
                                           ],
                                           "type": "string"
+                                        },
+                                        "intervalCount": {
+                                          "maximum": 1000,
+                                          "minimum": 1,
+                                          "type": "integer"
                                         }
                                       },
                                       "required": [
-                                        "itemKind",
-                                        "featureKey"
+                                        "interval",
+                                        "intervalCount"
                                       ],
-                                      "type": "object"
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ]
                                     },
-                                    {
+                                    "rollover": {
                                       "additionalProperties": false,
                                       "properties": {
-                                        "allocationScope": {
-                                          "enum": [
-                                            "account",
-                                            "entity"
-                                          ],
-                                          "type": "string"
-                                        },
                                         "expiry": {
                                           "oneOf": [
                                             {
@@ -3370,610 +3036,34 @@
                                                 "intervalCount"
                                               ],
                                               "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "mode": {
-                                                  "enum": [
-                                                    "after_seconds"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "seconds": {
-                                                  "maximum": 315619200,
-                                                  "minimum": 1,
-                                                  "type": "integer"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode",
-                                                "seconds"
-                                              ],
-                                              "type": "object"
                                             }
                                           ]
                                         },
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "allocation"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "quantity": {
+                                        "maxQuantity": {
                                           "maxLength": 80,
                                           "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "reset": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "interval": {
-                                              "enum": [
-                                                "hour",
-                                                "day",
-                                                "week",
-                                                "month",
-                                                "quarter",
-                                                "semi_annual",
-                                                "year"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "intervalCount": {
-                                              "maximum": 1000,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            }
-                                          },
-                                          "required": [
-                                            "interval",
-                                            "intervalCount"
-                                          ],
                                           "type": [
-                                            "object",
-                                            "null"
-                                          ]
-                                        },
-                                        "rollover": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "expiry": {
-                                              "oneOf": [
-                                                {
-                                                  "additionalProperties": false,
-                                                  "properties": {
-                                                    "mode": {
-                                                      "enum": [
-                                                        "forever"
-                                                      ],
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "mode"
-                                                  ],
-                                                  "type": "object"
-                                                },
-                                                {
-                                                  "additionalProperties": false,
-                                                  "properties": {
-                                                    "interval": {
-                                                      "enum": [
-                                                        "hour",
-                                                        "day",
-                                                        "week",
-                                                        "month",
-                                                        "quarter",
-                                                        "semi_annual",
-                                                        "year"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "intervalCount": {
-                                                      "maximum": 1000,
-                                                      "minimum": 1,
-                                                      "type": "integer"
-                                                    },
-                                                    "mode": {
-                                                      "enum": [
-                                                        "after"
-                                                      ],
-                                                      "type": "string"
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "mode",
-                                                    "interval",
-                                                    "intervalCount"
-                                                  ],
-                                                  "type": "object"
-                                                }
-                                              ]
-                                            },
-                                            "maxQuantity": {
-                                              "maxLength": 80,
-                                              "minLength": 1,
-                                              "type": [
-                                                "string",
-                                                "null"
-                                              ]
-                                            }
-                                          },
-                                          "required": [
-                                            "maxQuantity",
-                                            "expiry"
-                                          ],
-                                          "type": [
-                                            "object",
+                                            "string",
                                             "null"
                                           ]
                                         }
                                       },
                                       "required": [
-                                        "itemKind",
-                                        "featureKey",
-                                        "quantity"
+                                        "maxQuantity",
+                                        "expiry"
                                       ],
-                                      "type": "object"
-                                    },
-                                    {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "allocationScope": {
-                                          "enum": [
-                                            "account",
-                                            "entity"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "meter_limit"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "overage": {
-                                          "oneOf": [
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "policy": {
-                                                  "enum": [
-                                                    "blocked"
-                                                  ],
-                                                  "type": "string"
-                                                }
-                                              },
-                                              "required": [
-                                                "policy"
-                                              ],
-                                              "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "policy": {
-                                                  "enum": [
-                                                    "allowed"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "price": {
-                                                  "additionalProperties": false,
-                                                  "properties": {
-                                                    "billingInterval": {
-                                                      "enum": [
-                                                        "day",
-                                                        "week",
-                                                        "month",
-                                                        "quarter",
-                                                        "semi_annual",
-                                                        "year"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "billingIntervalCount": {
-                                                      "maximum": 1000,
-                                                      "minimum": 1,
-                                                      "type": "integer"
-                                                    },
-                                                    "billingUnits": {
-                                                      "maxLength": 80,
-                                                      "minLength": 1,
-                                                      "type": "string"
-                                                    },
-                                                    "currency": {
-                                                      "maxLength": 3,
-                                                      "minLength": 3,
-                                                      "type": "string"
-                                                    },
-                                                    "key": {
-                                                      "maxLength": 120,
-                                                      "minLength": 1,
-                                                      "type": "string"
-                                                    },
-                                                    "maximumQuantity": {
-                                                      "maximum": 2147483647,
-                                                      "minimum": 1,
-                                                      "type": [
-                                                        "integer",
-                                                        "null"
-                                                      ]
-                                                    },
-                                                    "minimumQuantity": {
-                                                      "maximum": 2147483647,
-                                                      "minimum": 1,
-                                                      "type": "integer"
-                                                    },
-                                                    "pricingModel": {
-                                                      "enum": [
-                                                        "flat",
-                                                        "graduated",
-                                                        "volume"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "providerBindings": {
-                                                      "items": {
-                                                        "additionalProperties": false,
-                                                        "properties": {
-                                                          "channel": {
-                                                            "enum": [
-                                                              "ios",
-                                                              "android",
-                                                              "web"
-                                                            ],
-                                                            "type": "string"
-                                                          },
-                                                          "productKey": {
-                                                            "maxLength": 120,
-                                                            "minLength": 1,
-                                                            "type": "string"
-                                                          },
-                                                          "provider": {
-                                                            "enum": [
-                                                              "apple",
-                                                              "google",
-                                                              "stripe",
-                                                              "paddle"
-                                                            ],
-                                                            "type": "string"
-                                                          }
-                                                        },
-                                                        "required": [
-                                                          "productKey",
-                                                          "provider",
-                                                          "channel"
-                                                        ],
-                                                        "type": "object"
-                                                      },
-                                                      "maxItems": 20,
-                                                      "minItems": 1,
-                                                      "type": "array"
-                                                    },
-                                                    "taxBehavior": {
-                                                      "enum": [
-                                                        "inclusive",
-                                                        "exclusive",
-                                                        "unspecified"
-                                                      ],
-                                                      "type": "string"
-                                                    },
-                                                    "tiers": {
-                                                      "items": {
-                                                        "additionalProperties": false,
-                                                        "properties": {
-                                                          "flatAmountMinor": {
-                                                            "minimum": 0,
-                                                            "type": "integer"
-                                                          },
-                                                          "unitAmountMinor": {
-                                                            "minimum": 0,
-                                                            "type": "integer"
-                                                          },
-                                                          "upToQuantity": {
-                                                            "maxLength": 80,
-                                                            "minLength": 1,
-                                                            "type": [
-                                                              "string",
-                                                              "null"
-                                                            ]
-                                                          }
-                                                        },
-                                                        "required": [
-                                                          "upToQuantity",
-                                                          "unitAmountMinor"
-                                                        ],
-                                                        "type": "object"
-                                                      },
-                                                      "maxItems": 100,
-                                                      "type": "array"
-                                                    },
-                                                    "unitAmountMinor": {
-                                                      "minimum": 0,
-                                                      "type": "integer"
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "key",
-                                                    "currency",
-                                                    "unitAmountMinor",
-                                                    "billingUnits",
-                                                    "billingInterval",
-                                                    "minimumQuantity",
-                                                    "maximumQuantity",
-                                                    "taxBehavior",
-                                                    "providerBindings"
-                                                  ],
-                                                  "type": "object"
-                                                }
-                                              },
-                                              "required": [
-                                                "policy",
-                                                "price"
-                                              ],
-                                              "type": "object"
-                                            }
-                                          ]
-                                        },
-                                        "quantity": {
-                                          "maxLength": 80,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "reset": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "interval": {
-                                              "enum": [
-                                                "hour",
-                                                "day",
-                                                "week",
-                                                "month",
-                                                "quarter",
-                                                "semi_annual",
-                                                "year"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "intervalCount": {
-                                              "maximum": 1000,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            }
-                                          },
-                                          "required": [
-                                            "interval",
-                                            "intervalCount"
-                                          ],
-                                          "type": "object"
-                                        }
-                                      },
-                                      "required": [
-                                        "itemKind",
-                                        "featureKey",
-                                        "quantity",
-                                        "reset"
-                                      ],
-                                      "type": "object"
-                                    },
-                                    {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "allocationScope": {
-                                          "enum": [
-                                            "account",
-                                            "license_pool"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "licensed_quantity"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "price": {
-                                          "additionalProperties": false,
-                                          "properties": {
-                                            "billingInterval": {
-                                              "enum": [
-                                                "day",
-                                                "week",
-                                                "month",
-                                                "quarter",
-                                                "semi_annual",
-                                                "year"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "billingIntervalCount": {
-                                              "maximum": 1000,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            },
-                                            "billingUnits": {
-                                              "maxLength": 80,
-                                              "minLength": 1,
-                                              "type": "string"
-                                            },
-                                            "currency": {
-                                              "maxLength": 3,
-                                              "minLength": 3,
-                                              "type": "string"
-                                            },
-                                            "key": {
-                                              "maxLength": 120,
-                                              "minLength": 1,
-                                              "type": "string"
-                                            },
-                                            "maximumQuantity": {
-                                              "maximum": 2147483647,
-                                              "minimum": 1,
-                                              "type": [
-                                                "integer",
-                                                "null"
-                                              ]
-                                            },
-                                            "minimumQuantity": {
-                                              "maximum": 2147483647,
-                                              "minimum": 1,
-                                              "type": "integer"
-                                            },
-                                            "pricingModel": {
-                                              "enum": [
-                                                "flat",
-                                                "graduated",
-                                                "volume"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "providerBindings": {
-                                              "items": {
-                                                "additionalProperties": false,
-                                                "properties": {
-                                                  "channel": {
-                                                    "enum": [
-                                                      "ios",
-                                                      "android",
-                                                      "web"
-                                                    ],
-                                                    "type": "string"
-                                                  },
-                                                  "productKey": {
-                                                    "maxLength": 120,
-                                                    "minLength": 1,
-                                                    "type": "string"
-                                                  },
-                                                  "provider": {
-                                                    "enum": [
-                                                      "apple",
-                                                      "google",
-                                                      "stripe",
-                                                      "paddle"
-                                                    ],
-                                                    "type": "string"
-                                                  }
-                                                },
-                                                "required": [
-                                                  "productKey",
-                                                  "provider",
-                                                  "channel"
-                                                ],
-                                                "type": "object"
-                                              },
-                                              "maxItems": 20,
-                                              "minItems": 1,
-                                              "type": "array"
-                                            },
-                                            "taxBehavior": {
-                                              "enum": [
-                                                "inclusive",
-                                                "exclusive",
-                                                "unspecified"
-                                              ],
-                                              "type": "string"
-                                            },
-                                            "tiers": {
-                                              "items": {
-                                                "additionalProperties": false,
-                                                "properties": {
-                                                  "flatAmountMinor": {
-                                                    "minimum": 0,
-                                                    "type": "integer"
-                                                  },
-                                                  "unitAmountMinor": {
-                                                    "minimum": 0,
-                                                    "type": "integer"
-                                                  },
-                                                  "upToQuantity": {
-                                                    "maxLength": 80,
-                                                    "minLength": 1,
-                                                    "type": [
-                                                      "string",
-                                                      "null"
-                                                    ]
-                                                  }
-                                                },
-                                                "required": [
-                                                  "upToQuantity",
-                                                  "unitAmountMinor"
-                                                ],
-                                                "type": "object"
-                                              },
-                                              "maxItems": 100,
-                                              "type": "array"
-                                            },
-                                            "unitAmountMinor": {
-                                              "minimum": 0,
-                                              "type": "integer"
-                                            }
-                                          },
-                                          "required": [
-                                            "key",
-                                            "currency",
-                                            "unitAmountMinor",
-                                            "billingUnits",
-                                            "billingInterval",
-                                            "minimumQuantity",
-                                            "maximumQuantity",
-                                            "taxBehavior",
-                                            "providerBindings"
-                                          ],
-                                          "type": "object"
-                                        },
-                                        "quantity": {
-                                          "maxLength": 80,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": [
-                                        "itemKind",
-                                        "featureKey",
-                                        "quantity",
-                                        "price"
-                                      ],
-                                      "type": "object"
-                                    },
-                                    {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "featureKey": {
-                                          "maxLength": 120,
-                                          "minLength": 1,
-                                          "type": "string"
-                                        },
-                                        "itemKind": {
-                                          "enum": [
-                                            "unlimited_usage"
-                                          ],
-                                          "type": "string"
-                                        }
-                                      },
-                                      "required": [
-                                        "itemKind",
-                                        "featureKey"
-                                      ],
-                                      "type": "object"
+                                      "type": [
+                                        "object",
+                                        "null"
+                                      ]
                                     }
-                                  ]
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey",
+                                    "quantity"
+                                  ],
+                                  "type": "object"
                                 },
                                 {
                                   "additionalProperties": false,
@@ -3981,18 +3071,9 @@
                                     "allocationScope": {
                                       "enum": [
                                         "account",
-                                        "entity",
-                                        "license_pool"
+                                        "entity"
                                       ],
                                       "type": "string"
-                                    },
-                                    "expiresAfterSeconds": {
-                                      "maximum": 315619200,
-                                      "minimum": 1,
-                                      "type": [
-                                        "integer",
-                                        "null"
-                                      ]
                                     },
                                     "featureKey": {
                                       "maxLength": 120,
@@ -4001,17 +3082,253 @@
                                     },
                                     "itemKind": {
                                       "enum": [
-                                        "access",
-                                        "allocation",
-                                        "meter_limit",
-                                        "licensed_quantity"
+                                        "meter_limit"
                                       ],
                                       "type": "string"
                                     },
-                                    "overagePolicy": {
+                                    "overage": {
+                                      "oneOf": [
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "policy": {
+                                              "enum": [
+                                                "blocked"
+                                              ],
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [
+                                            "policy"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "policy": {
+                                              "enum": [
+                                                "allowed"
+                                              ],
+                                              "type": "string"
+                                            },
+                                            "price": {
+                                              "additionalProperties": false,
+                                              "properties": {
+                                                "billingInterval": {
+                                                  "enum": [
+                                                    "day",
+                                                    "week",
+                                                    "month",
+                                                    "quarter",
+                                                    "semi_annual",
+                                                    "year"
+                                                  ],
+                                                  "type": "string"
+                                                },
+                                                "billingIntervalCount": {
+                                                  "maximum": 1000,
+                                                  "minimum": 1,
+                                                  "type": "integer"
+                                                },
+                                                "billingUnits": {
+                                                  "maxLength": 80,
+                                                  "minLength": 1,
+                                                  "type": "string"
+                                                },
+                                                "currency": {
+                                                  "maxLength": 3,
+                                                  "minLength": 3,
+                                                  "type": "string"
+                                                },
+                                                "key": {
+                                                  "maxLength": 120,
+                                                  "minLength": 1,
+                                                  "type": "string"
+                                                },
+                                                "maximumQuantity": {
+                                                  "maximum": 2147483647,
+                                                  "minimum": 1,
+                                                  "type": [
+                                                    "integer",
+                                                    "null"
+                                                  ]
+                                                },
+                                                "minimumQuantity": {
+                                                  "maximum": 2147483647,
+                                                  "minimum": 1,
+                                                  "type": "integer"
+                                                },
+                                                "pricingModel": {
+                                                  "enum": [
+                                                    "flat",
+                                                    "graduated",
+                                                    "volume"
+                                                  ],
+                                                  "type": "string"
+                                                },
+                                                "providerBindings": {
+                                                  "items": {
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                      "channel": {
+                                                        "enum": [
+                                                          "ios",
+                                                          "android",
+                                                          "web"
+                                                        ],
+                                                        "type": "string"
+                                                      },
+                                                      "productKey": {
+                                                        "maxLength": 120,
+                                                        "minLength": 1,
+                                                        "type": "string"
+                                                      },
+                                                      "provider": {
+                                                        "enum": [
+                                                          "apple",
+                                                          "google",
+                                                          "stripe",
+                                                          "paddle"
+                                                        ],
+                                                        "type": "string"
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "productKey",
+                                                      "provider",
+                                                      "channel"
+                                                    ],
+                                                    "type": "object"
+                                                  },
+                                                  "maxItems": 20,
+                                                  "minItems": 1,
+                                                  "type": "array"
+                                                },
+                                                "taxBehavior": {
+                                                  "enum": [
+                                                    "inclusive",
+                                                    "exclusive",
+                                                    "unspecified"
+                                                  ],
+                                                  "type": "string"
+                                                },
+                                                "tiers": {
+                                                  "items": {
+                                                    "additionalProperties": false,
+                                                    "properties": {
+                                                      "flatAmountMinor": {
+                                                        "minimum": 0,
+                                                        "type": "integer"
+                                                      },
+                                                      "unitAmountMinor": {
+                                                        "minimum": 0,
+                                                        "type": "integer"
+                                                      },
+                                                      "upToQuantity": {
+                                                        "maxLength": 80,
+                                                        "minLength": 1,
+                                                        "type": [
+                                                          "string",
+                                                          "null"
+                                                        ]
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "upToQuantity",
+                                                      "unitAmountMinor"
+                                                    ],
+                                                    "type": "object"
+                                                  },
+                                                  "maxItems": 100,
+                                                  "type": "array"
+                                                },
+                                                "unitAmountMinor": {
+                                                  "minimum": 0,
+                                                  "type": "integer"
+                                                }
+                                              },
+                                              "required": [
+                                                "key",
+                                                "currency",
+                                                "unitAmountMinor",
+                                                "billingUnits",
+                                                "billingInterval",
+                                                "minimumQuantity",
+                                                "maximumQuantity",
+                                                "taxBehavior",
+                                                "providerBindings"
+                                              ],
+                                              "type": "object"
+                                            }
+                                          },
+                                          "required": [
+                                            "policy",
+                                            "price"
+                                          ],
+                                          "type": "object"
+                                        }
+                                      ]
+                                    },
+                                    "quantity": {
+                                      "maxLength": 80,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "reset": {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "interval": {
+                                          "enum": [
+                                            "hour",
+                                            "day",
+                                            "week",
+                                            "month",
+                                            "quarter",
+                                            "semi_annual",
+                                            "year"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "intervalCount": {
+                                          "maximum": 1000,
+                                          "minimum": 1,
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": [
+                                        "interval",
+                                        "intervalCount"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey",
+                                    "quantity",
+                                    "reset"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "allocationScope": {
                                       "enum": [
-                                        "blocked",
-                                        "allowed"
+                                        "account",
+                                        "license_pool"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "licensed_quantity"
                                       ],
                                       "type": "string"
                                     },
@@ -4162,146 +3479,40 @@
                                         "taxBehavior",
                                         "providerBindings"
                                       ],
-                                      "type": [
-                                        "object",
-                                        "null"
-                                      ]
+                                      "type": "object"
                                     },
                                     "quantity": {
                                       "maxLength": 80,
                                       "minLength": 1,
-                                      "type": [
-                                        "string",
-                                        "null"
-                                      ]
-                                    },
-                                    "resetInterval": {
-                                      "enum": [
-                                        "hour",
-                                        "day",
-                                        "week",
-                                        "month",
-                                        "quarter",
-                                        "semi_annual",
-                                        "year",
-                                        null
-                                      ],
-                                      "type": [
-                                        "string",
-                                        "null"
-                                      ]
-                                    },
-                                    "resetIntervalCount": {
-                                      "maximum": 1000,
-                                      "minimum": 1,
-                                      "type": [
-                                        "integer",
-                                        "null"
-                                      ]
-                                    },
-                                    "rollover": {
-                                      "additionalProperties": false,
-                                      "properties": {
-                                        "expiry": {
-                                          "oneOf": [
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "mode": {
-                                                  "enum": [
-                                                    "forever"
-                                                  ],
-                                                  "type": "string"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode"
-                                              ],
-                                              "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "interval": {
-                                                  "enum": [
-                                                    "hour",
-                                                    "day",
-                                                    "week",
-                                                    "month",
-                                                    "quarter",
-                                                    "semi_annual",
-                                                    "year"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "intervalCount": {
-                                                  "maximum": 1000,
-                                                  "minimum": 1,
-                                                  "type": "integer"
-                                                },
-                                                "mode": {
-                                                  "enum": [
-                                                    "after"
-                                                  ],
-                                                  "type": "string"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode",
-                                                "interval",
-                                                "intervalCount"
-                                              ],
-                                              "type": "object"
-                                            },
-                                            {
-                                              "additionalProperties": false,
-                                              "properties": {
-                                                "mode": {
-                                                  "enum": [
-                                                    "months"
-                                                  ],
-                                                  "type": "string"
-                                                },
-                                                "months": {
-                                                  "maximum": 120,
-                                                  "minimum": 1,
-                                                  "type": "integer"
-                                                }
-                                              },
-                                              "required": [
-                                                "mode",
-                                                "months"
-                                              ],
-                                              "type": "object"
-                                            }
-                                          ]
-                                        },
-                                        "maxQuantity": {
-                                          "maxLength": 80,
-                                          "minLength": 1,
-                                          "type": [
-                                            "string",
-                                            "null"
-                                          ]
-                                        }
-                                      },
-                                      "required": [
-                                        "maxQuantity",
-                                        "expiry"
-                                      ],
-                                      "type": [
-                                        "object",
-                                        "null"
-                                      ]
+                                      "type": "string"
                                     }
                                   },
                                   "required": [
-                                    "featureKey",
                                     "itemKind",
+                                    "featureKey",
                                     "quantity",
-                                    "resetInterval",
-                                    "expiresAfterSeconds",
-                                    "overagePolicy"
+                                    "price"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "featureKey": {
+                                      "maxLength": 120,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "itemKind": {
+                                      "enum": [
+                                        "unlimited_usage"
+                                      ],
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "itemKind",
+                                    "featureKey"
                                   ],
                                   "type": "object"
                                 }
@@ -4326,43 +3537,6 @@
                             "maxLength": 200,
                             "minLength": 1,
                             "type": "string"
-                          },
-                          "providerBindings": {
-                            "items": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "channel": {
-                                  "enum": [
-                                    "ios",
-                                    "android",
-                                    "web"
-                                  ],
-                                  "type": "string"
-                                },
-                                "productKey": {
-                                  "maxLength": 120,
-                                  "minLength": 1,
-                                  "type": "string"
-                                },
-                                "provider": {
-                                  "enum": [
-                                    "apple",
-                                    "google",
-                                    "stripe",
-                                    "paddle"
-                                  ],
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "productKey",
-                                "provider",
-                                "channel"
-                              ],
-                              "type": "object"
-                            },
-                            "maxItems": 20,
-                            "type": "array"
                           },
                           "providerPriced": {
                             "additionalProperties": false,
@@ -4590,14 +3764,6 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
-                          "expiresAfterSeconds": {
-                            "maximum": 315619200,
-                            "minimum": 1,
-                            "type": [
-                              "integer",
-                              "null"
-                            ]
-                          },
                           "expiry": {
                             "oneOf": [
                               {
@@ -8313,13 +7479,9 @@
                                 "month",
                                 "quarter",
                                 "semi_annual",
-                                "year",
-                                null
+                                "year"
                               ],
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string"
                             },
                             "billingIntervalCount": {
                               "type": "number"
@@ -19848,38 +19010,6 @@
                   "number"
                 ]
               },
-              "deprecations": {
-                "items": {
-                  "properties": {
-                    "canonical": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    "legacy": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "path": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "legacy",
-                    "canonical",
-                    "message"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
               "expiresAt": {
                 "type": "string"
               },
@@ -20034,7 +19164,6 @@
               "expiresAt",
               "impact",
               "providerCompatibility",
-              "deprecations",
               "advisories",
               "scopeImpact"
             ],

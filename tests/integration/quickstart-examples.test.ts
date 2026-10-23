@@ -106,8 +106,8 @@ localDescribe("quickstart examples", () => {
 		const plans = JSON.parse(quickstartFile("catalog-plans.json"));
 		const examples = await publish(1, plans);
 		expect(examples.published.revision).toBe(2);
-		// Written in the canonical spelling: nothing to deprecate and no advice.
-		expect(examples.preview.deprecations).toEqual([]);
+		// Canonical examples need no pricing advice.
+		expect(examples.preview).not.toHaveProperty("deprecations");
 		expect(examples.preview.advisories).toEqual([]);
 		expect(examples.preview.impact).toMatchObject({
 			featuresCreated: 2,

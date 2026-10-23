@@ -1,9 +1,8 @@
-import type { CatalogIntent } from "../../../src/catalog/types";
+import type { AuthoredCatalogIntent } from "../../../src/catalog/types";
 import type { BillingRepository } from "../../../src/db/repository";
 import type { ProjectInstanceContext } from "../../../src/projects/context";
 import { integrationProjectContext } from "./platform-fixture";
-
-export const aiCreditsCatalog: CatalogIntent = {
+export const aiCreditsCatalog: AuthoredCatalogIntent = {
 	features: [
 		{
 			key: "ai_credits",
@@ -29,25 +28,26 @@ export const aiCreditsCatalog: CatalogIntent = {
 			key: "premium",
 			name: "Premium",
 			version: 1,
-			currency: "USD",
-			baseAmountMinor: 999,
-			billingInterval: "month",
 			trialDays: null,
 			items: [
 				{
 					featureKey: "ai_credits",
 					itemKind: "allocation",
 					quantity: "1000",
-					resetInterval: "month",
-					expiresAfterSeconds: null,
-					overagePolicy: "blocked",
+					reset: {
+						interval: "month",
+						intervalCount: 1,
+					},
 				},
 			],
-			providerBindings: [
-				{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
-				{ productKey: "premium_monthly", provider: "google", channel: "android" },
-				{ productKey: "premium_monthly", provider: "stripe", channel: "web" },
-			],
+			providerPriced: {
+				billingInterval: "month",
+				providerBindings: [
+					{ productKey: "premium_monthly", provider: "apple", channel: "ios" },
+					{ productKey: "premium_monthly", provider: "google", channel: "android" },
+					{ productKey: "premium_monthly", provider: "stripe", channel: "web" },
+				],
+			},
 		},
 	],
 	topups: [
@@ -55,12 +55,15 @@ export const aiCreditsCatalog: CatalogIntent = {
 			key: "ai_credits_10",
 			featureKey: "ai_credits",
 			quantity: "10",
-			expiresAfterSeconds: 315_360_000,
 			providerBindings: [
 				{ productKey: "echo_credits_10", provider: "apple", channel: "ios" },
 				{ productKey: "echo_credits_10", provider: "google", channel: "android" },
 				{ productKey: "echo_credits_10", provider: "stripe", channel: "web" },
 			],
+			expiry: {
+				mode: "after_seconds",
+				seconds: 315360000,
+			},
 		},
 	],
 	rateCards: [

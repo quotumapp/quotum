@@ -222,7 +222,7 @@ localDescribe("Apple route flows integration", () => {
 	it("expires a top-up a calendar year after its purchase, leap days included", async () => {
 		const catalog = {
 			...aiCreditsCatalog,
-			topups: aiCreditsCatalog.topups.map(({ expiresAfterSeconds: _seconds, ...topup }) => ({
+			topups: aiCreditsCatalog.topups.map((topup) => ({
 				...topup,
 				expiry: { mode: "after" as const, interval: "year" as const, intervalCount: 1 },
 			})),

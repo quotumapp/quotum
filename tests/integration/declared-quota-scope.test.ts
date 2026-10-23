@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { BillingError } from "../../src/billing/errors";
-import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent, AuthoredPlanIntent } from "../../src/catalog/types";
 import { readProjectionBalances } from "../../src/db/repository/entitlements";
 import type { QueryExecutor } from "../../src/db/repository/types";
 import type { CadenceUnit } from "../../src/shared/cadence";
@@ -17,19 +17,15 @@ import { seedPhase3CatalogMigration, seedPhase3ControlCatalog } from "./helpers/
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
-
 type Scope = "account" | "entity";
-
 /** PC-04: a meter limit's declared scope decides which usage it counts. */
 localDescribe("declared meter-limit scope", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});
@@ -425,7 +421,6 @@ localDescribe("declared meter-limit scope", () => {
 			}),
 		).toMatchObject({ allowed: false, balance: bounds });
 	});
-
 	it("refuses scopes an account could hold together, and postpaid entity limits", async () => {
 		await expect(
 			preview(
@@ -438,23 +433,24 @@ localDescribe("declared meter-limit scope", () => {
 		).rejects.toThrow("must all declare the same allocationScope");
 		const postpaid = plan("metered", "base", 1, cap("100", "month", "entity"));
 		const [item] = postpaid.items;
-		if (item === undefined) throw new Error("plan has no item");
-		item.overagePolicy = "allowed";
-		item.price = {
-			key: "overage",
-			currency: "USD",
-			unitAmountMinor: 1,
-			billingUnits: "1",
-			billingInterval: "month",
-			minimumQuantity: 1,
-			maximumQuantity: null,
-			taxBehavior: "unspecified",
-			providerBindings: [{ productKey: "premium_monthly", provider: "stripe", channel: "web" }],
+		if (item?.itemKind !== "meter_limit") throw new Error("plan has no meter limit");
+		item.overage = {
+			policy: "allowed",
+			price: {
+				key: "overage",
+				currency: "USD",
+				unitAmountMinor: 1,
+				billingUnits: "1",
+				billingInterval: "month",
+				minimumQuantity: 1,
+				maximumQuantity: null,
+				taxBehavior: "unspecified",
+				providerBindings: [{ productKey: "premium_monthly", provider: "stripe", channel: "web" }],
+			},
 		};
 		await expect(preview(catalog([postpaid]), null)).rejects.toThrow(
 			"entity scope is only available to blocked limits",
 		);
-
 		// Two base plans never coexist, so they may differ.
 		await publish(
 			catalog([
@@ -631,13 +627,11 @@ localDescribe("declared meter-limit scope", () => {
 		);
 	});
 });
-
 /** A plan change or migration must not leave an account holding both scopes on one feature. */
 localDescribe("declared meter-limit scope across plan changes", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		await seedPhase3ControlCatalog(context.sql);
@@ -694,7 +688,6 @@ localDescribe("declared meter-limit scope across plan changes", () => {
 			WHERE base.external_subscription_id = 'sub_migrate_stripe'
 		`;
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});
@@ -776,20 +769,16 @@ localDescribe("declared meter-limit scope across plan changes", () => {
 function cap(quantity: string, resetInterval: CadenceUnit, scope: Scope) {
 	return { quantity, resetInterval, scope };
 }
-
 function plan(
 	key: string,
 	kind: "base" | "addon",
 	version: number,
 	limit: ReturnType<typeof cap> | null,
-): CatalogPlanIntent {
+): AuthoredPlanIntent {
 	return {
 		key,
 		name: key,
 		version,
-		currency: "USD",
-		baseAmountMinor: (kind === "base" ? 1000 : 300) * version,
-		billingInterval: "month",
 		trialDays: null,
 		kind,
 		items:
@@ -800,17 +789,16 @@ function plan(
 							featureKey: "api_requests",
 							itemKind: "meter_limit",
 							quantity: limit.quantity,
-							resetInterval: limit.resetInterval,
-							expiresAfterSeconds: null,
-							overagePolicy: "blocked",
 							allocationScope: limit.scope,
+							reset: {
+								interval: limit.resetInterval,
+								intervalCount: 1,
+							},
 						},
 					],
-		providerBindings: [],
 	};
 }
-
-function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
+function catalog(plans: AuthoredPlanIntent[]): AuthoredCatalogIntent {
 	return {
 		features: [
 			{
@@ -828,16 +816,17 @@ function catalog(plans: CatalogPlanIntent[]): CatalogIntent {
 		rateCards: [],
 	};
 }
-
-async function preview(intent: CatalogIntent, expectedRevision: number | null) {
+async function preview(intent: AuthoredCatalogIntent, expectedRevision: number | null) {
 	return await context.repository.previewCatalog(integrationProjectContext(), {
 		expectedRevision,
 		actor: "integration-declared-scope",
 		catalog: intent,
 	});
 }
-
-async function publish(intent: CatalogIntent, expectedRevision: number | null): Promise<void> {
+async function publish(
+	intent: AuthoredCatalogIntent,
+	expectedRevision: number | null,
+): Promise<void> {
 	const created = await preview(intent, expectedRevision);
 	await context.repository.publishCatalog(integrationProjectContext(), {
 		expectedRevision,

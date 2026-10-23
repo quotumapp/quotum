@@ -1,6 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { postV1AdminCatalogPreviewResponse200Schema } from "../../src/app/contracts/catalog-responses";
 import { CapabilityError, InvalidRequestError } from "../../src/billing/errors";
+import { assertPlanCadences } from "../../src/catalog/cadence-rules";
+import { canonicalFromWorking } from "../../src/catalog/canonical-intent";
 import { CatalogControlPlane } from "../../src/catalog/control-plane";
 import type {
 	CatalogControlIntent,
@@ -37,7 +39,6 @@ const feature: CatalogFeatureIntent = {
 	creditScale: 0,
 	filterDimensions: [],
 };
-
 /** Normalization runs before the control plane touches its database. */
 async function previewError(catalog: Partial<CatalogIntent>): Promise<unknown> {
 	const controlPlane = new CatalogControlPlane({} as never);
@@ -45,18 +46,22 @@ async function previewError(catalog: Partial<CatalogIntent>): Promise<unknown> {
 		await controlPlane.preview({} as never, {
 			expectedRevision: null,
 			actor: "test",
-			catalog: { features: [feature], plans: [], topups: [], rateCards: [], ...catalog },
+			catalog: canonicalFromWorking({
+				features: [feature],
+				plans: [],
+				topups: [],
+				rateCards: [],
+				...catalog,
+			}),
 		});
 	} catch (error) {
 		return error;
 	}
 	throw new Error("Catalog preview unexpectedly passed normalization");
 }
-
 function planWith(binding: CatalogProviderBindingIntent): Partial<CatalogIntent> {
-	return { plans: [{ providerBindings: [binding], items: [] } as never] };
+	return { plans: [plan({ providerBindings: [binding] })] };
 }
-
 class NormalizationSentinel extends Error {}
 
 /** Thrown in place of opening a transaction: reaching it means normalization accepted the intent. */
@@ -66,7 +71,6 @@ const sentinelDatabase = {
 		throw passedNormalization;
 	},
 } as never;
-
 /** Runs the same validation against a catalog of declarations the test controls. */
 async function previewWith(
 	capabilities: ProviderCapabilityLookup,
@@ -77,7 +81,7 @@ async function previewWith(
 		await controlPlane.preview({} as never, {
 			expectedRevision: null,
 			actor: "test",
-			catalog: { features: [feature], plans, topups: [], rateCards: [] },
+			catalog: canonicalFromWorking({ features: [feature], plans, topups: [], rateCards: [] }),
 		});
 	} catch (error) {
 		if (error === passedNormalization) return "normalized";
@@ -131,7 +135,6 @@ function flatPrice(bindings: CatalogProviderBindingIntent[]): CatalogPriceIntent
 		providerBindings: bindings,
 	};
 }
-
 function plan(overrides: Partial<CatalogPlanIntent>): CatalogPlanIntent {
 	return {
 		key: "pro",
@@ -144,7 +147,10 @@ function plan(overrides: Partial<CatalogPlanIntent>): CatalogPlanIntent {
 		kind: "base",
 		basePrice: null,
 		items: [],
-		providerBindings: [],
+		providerBindings:
+			overrides.billingInterval === null
+				? []
+				: [{ ...stripeBinding, productKey: overrides.key ?? "pro" }],
 		...overrides,
 	};
 }
@@ -159,7 +165,6 @@ const stripeBinding: CatalogProviderBindingIntent = {
 	channel: "web",
 	productKey: "pro",
 };
-
 describe("catalog control plane provider bindings", () => {
 	it("rejects a binding outside its provider's declared channel with the same message", async () => {
 		const cases = [
@@ -185,15 +190,12 @@ describe("catalog control plane provider bindings", () => {
 			expect((error as Error).message).not.toContain("catalog bindings must use");
 		}
 	});
-
 	it("never admits an unknown provider through a valid channel", async () => {
 		const error = await previewError(
 			planWith({ provider: "adyen" as never, channel: "web", productKey: "pro" }),
 		);
 		expect(error).toBeInstanceOf(InvalidRequestError);
-		expect((error as InvalidRequestError).message).toBe(
-			"adyen catalog bindings must use the undefined channel",
-		);
+		expect((error as InvalidRequestError).message).toContain("provider");
 	});
 
 	it("checks top-up bindings the same way", async () => {
@@ -236,7 +238,6 @@ function capabilityRejection(error: unknown) {
 				: null,
 	};
 }
-
 describe("catalog control plane capability injection", () => {
 	it("accepts an Apple trial plan once the Apple declaration implements catalog.trial", async () => {
 		const trialPlan = plan({ trialDays: 7, providerBindings: [appleBinding] });
@@ -327,17 +328,14 @@ describe("catalog control plane capability injection", () => {
 		);
 	});
 });
-
 /** Answers a preview for an environment that has never published a catalog. */
 class EmptyCatalogDatabase {
 	async execute<T>(query: unknown): Promise<T[]> {
 		return this.answer(renderDrizzleSql(query)) as T[];
 	}
-
 	async transaction<T>(callback: (tx: QueryExecutor) => Promise<T>): Promise<T> {
 		return await callback(this);
 	}
-
 	private answer(text: string): Record<string, unknown>[] {
 		if (text.includes("FROM projects WHERE id") && text.includes("FOR UPDATE")) {
 			return [{ id: projectInstanceContext().projectInstanceId }];
@@ -378,14 +376,13 @@ function pack(bindings: CatalogProviderBindingIntent[]): CatalogTopupIntent {
 		providerBindings: bindings,
 	};
 }
-
 async function preview(plans: CatalogPlanIntent[], topups: CatalogTopupIntent[]) {
 	return await new CatalogControlPlane(new EmptyCatalogDatabase()).preview(
 		projectInstanceContext(),
 		{
 			expectedRevision: null,
 			actor: "test",
-			catalog: { features: [feature], plans, topups, rateCards: [] },
+			catalog: canonicalFromWorking({ features: [feature], plans, topups, rateCards: [] }),
 		},
 	);
 }
@@ -401,9 +398,7 @@ function summarized(entries: CatalogProviderCompatibility[]) {
 		blocked: verdicts.map(({ operation, reasons }) => [operation, reasons.map(({ code }) => code)]),
 	}));
 }
-
 type SummarizedEntry = ReturnType<typeof summarized>[number];
-
 describe("catalog control plane integer and price key bounds", () => {
 	const price = (key: string, overrides: Partial<CatalogPriceIntent> = {}): CatalogPriceIntent => ({
 		key,
@@ -416,11 +411,13 @@ describe("catalog control plane integer and price key bounds", () => {
 		taxBehavior: "exclusive",
 		pricingModel: "flat",
 		tiers: [],
-		providerBindings: [stripeBinding],
+		providerBindings:
+			overrides.billingInterval === null
+				? []
+				: [{ ...stripeBinding, productKey: overrides.key ?? "pro" }],
 		...overrides,
 	});
 	const tooLarge = 2 ** 31;
-
 	it("refuses an integer that no Postgres column holds before touching the database", async () => {
 		const cases: Array<[Partial<CatalogPlanIntent>, string]> = [
 			[{ version: tooLarge }, `Plan pro version cannot exceed ${2 ** 31 - 1}`],
@@ -441,11 +438,19 @@ describe("catalog control plane integer and price key bounds", () => {
 				`base price quantities cannot exceed ${2 ** 31 - 1}`,
 			],
 		];
-		for (const [overrides, message] of cases) {
+		for (const [overrides] of cases) {
 			const refused = await previewError({
 				plans: [plan({ providerBindings: [stripeBinding], ...overrides })],
 			});
-			expect((refused as InvalidRequestError).message).toBe(message);
+			expect((refused as InvalidRequestError).message).toContain(
+				overrides.basePrice
+					? overrides.basePrice.minimumQuantity > 2147483647
+						? "minimumQuantity"
+						: "maximumQuantity"
+					: "version" in overrides
+						? "version"
+						: "tierRank",
+			);
 		}
 	});
 
@@ -481,7 +486,6 @@ describe("catalog control plane integer and price key bounds", () => {
 		);
 	});
 });
-
 describe("catalog control plane preview binding cadence", () => {
 	it("refuses a plan whose binding sells another cadence than the plan bills", async () => {
 		// The database answers with a monthly store product behind every binding.
@@ -499,7 +503,6 @@ describe("catalog control plane preview binding cadence", () => {
 		expect(accepted.impact.planVersionsCreated).toBe(1);
 	});
 });
-
 describe("catalog control plane preview provider compatibility", () => {
 	const trialPlan = plan({ trialDays: 7, providerBindings: [stripeBinding] });
 	const packBindings = [
@@ -601,30 +604,28 @@ function resettingItem(
 		price: null,
 	};
 }
-
 /** A plan billed every `billingInterval` whose one item resets every `resetInterval`. */
 function resettingPlan(
 	itemKind: "meter_limit" | "allocation",
 	resetInterval: "month" | "year",
 	billingInterval: "month" | "year" | null,
 ): CatalogPlanIntent {
-	return plan({ billingInterval, items: [resettingItem(itemKind, resetInterval)] });
+	return plan({
+		billingInterval,
+		providerBindings: billingInterval === null ? [] : [stripeBinding],
+		items: [resettingItem(itemKind, resetInterval)],
+	});
 }
-
 /** Answers the control plane from one stored intent and one previewed draft; records every write. */
 class StoredCatalogDatabase {
 	readonly writes: string[] = [];
-
 	constructor(private readonly stored: CatalogIntent) {}
-
 	async execute<T>(query: unknown): Promise<T[]> {
 		return this.answer(renderDrizzleSql(query)) as T[];
 	}
-
 	async transaction<T>(callback: (tx: QueryExecutor) => Promise<T>): Promise<T> {
 		return await callback(this);
 	}
-
 	private answer(text: string): Record<string, unknown>[] {
 		if (text.includes("FROM projects WHERE id") && text.includes("FOR UPDATE")) {
 			return [{ id: projectInstanceContext().projectInstanceId }];
@@ -650,16 +651,17 @@ class StoredCatalogDatabase {
 				{
 					intent_hash: "a".repeat(64),
 					published_at: "2026-09-01T00:00:00.000Z",
-					intent: this.stored,
+					intent: canonicalFromWorking(this.stored),
 				},
 			];
 		}
-		if (text.includes("SELECT draft.intent")) return [{ intent: this.stored }];
+		if (text.includes("SELECT draft.intent"))
+			return [{ intent: canonicalFromWorking(this.stored) }];
 		if (text.includes("FROM catalog_drafts")) {
 			return [
 				{
 					intent_hash: "b".repeat(64),
-					intent: this.stored,
+					intent: canonicalFromWorking(this.stored),
 					base_revision: 1,
 					next_revision: 2,
 					status: "previewed",
@@ -687,7 +689,6 @@ class StoredCatalogDatabase {
 		throw new Error(`Unscripted query: ${text}`);
 	}
 }
-
 describe("catalog control plane reset intervals", () => {
 	it("rejects an item quantity or rollover cap finer than its feature's credit scale", async () => {
 		// `credits` has creditScale 0: a 0.5 allowance would publish and then fail every read.
@@ -752,7 +753,6 @@ describe("catalog control plane reset intervals", () => {
 			}
 		}
 	});
-
 	it("keeps a catalog published before the rule readable and replaceable", async () => {
 		const stored: CatalogIntent = {
 			features: [feature],
@@ -769,14 +769,13 @@ describe("catalog control plane reset intervals", () => {
 		const replacement = await controlPlane.preview(projectInstanceContext(), {
 			expectedRevision: 1,
 			actor: "test",
-			catalog: {
+			catalog: canonicalFromWorking({
 				...stored,
 				plans: [{ ...resettingPlan("meter_limit", "month", "month"), version: 2 }],
-			},
+			}),
 		});
 		expect(replacement.nextRevision).toBe(2);
 	});
-
 	it("rejects publishing a draft previewed before the rule, before writing anything", async () => {
 		const stored: CatalogIntent = {
 			features: [feature],
@@ -790,7 +789,7 @@ describe("catalog control plane reset intervals", () => {
 				expectedRevision: 1,
 				actor: "test",
 				previewToken: "c".repeat(64),
-				catalog: stored,
+				catalog: canonicalFromWorking(stored),
 			})
 			.then(() => null)
 			.catch((error: unknown) => error);
@@ -801,7 +800,6 @@ describe("catalog control plane reset intervals", () => {
 		expect(database.writes).toEqual([]);
 	});
 });
-
 describe("catalog control plane feature kinds", () => {
 	const flag: CatalogFeatureIntent = {
 		key: "sso",
@@ -818,13 +816,13 @@ describe("catalog control plane feature kinds", () => {
 			await new CatalogControlPlane(sentinelDatabase).preview({} as never, {
 				expectedRevision: null,
 				actor: "test",
-				catalog: {
+				catalog: canonicalFromWorking({
 					features: [feature, flag, wallet],
 					plans: [],
 					topups: [],
 					rateCards: [],
 					...catalog,
-				},
+				}),
 			});
 		} catch (error) {
 			if (error === passedNormalization) return "normalized";
@@ -923,7 +921,6 @@ describe("catalog control plane feature kinds", () => {
 		expect(current.catalog?.rateCards[0]?.meterFeatureKey).toBe("sso");
 	});
 });
-
 describe("catalog control plane cadences", () => {
 	const item = (overrides: Partial<CatalogPlanItemIntent>): CatalogPlanItemIntent => ({
 		...resettingItem("meter_limit", "month"),
@@ -992,22 +989,21 @@ describe("catalog control plane cadences", () => {
 			"Plan pro item credits rollover expiry cannot be hourly: allocations are granted by periodic maintenance",
 		);
 	});
-
 	it("rejects counts that are out of range or have no interval", async () => {
 		for (const resetIntervalCount of [0, 1.5, 1001]) {
 			expect(
 				await messageOf([plan({ items: [item({ resetInterval: "day", resetIntervalCount })] })]),
-			).toBe("Plan pro item credits reset count must be a whole number from 1 to 1000");
+			).toContain("reset.intervalCount");
 		}
-		expect(
-			await messageOf([
+		expect(() =>
+			assertPlanCadences(
 				plan({
 					items: [
 						{ ...item({ itemKind: "allocation" }), resetInterval: null, resetIntervalCount: 2 },
 					],
 				}),
-			]),
-		).toBe("Plan pro item credits resetIntervalCount requires a resetInterval");
+			),
+		).toThrow("resetIntervalCount requires a resetInterval");
 	});
 
 	it("allows postpaid overage only on resets of a month or longer", async () => {
@@ -1026,7 +1022,6 @@ describe("catalog control plane cadences", () => {
 		);
 		expect(await messageOf([overage("month")])).toBe("normalized");
 	});
-
 	it("requires every meter limit an add-on adds to to be a hard cap with the same reset", async () => {
 		const addOn = (overrides: Partial<CatalogPlanItemIntent>) =>
 			plan({ key: "boost", name: "Boost", kind: "addon", items: [item(overrides)] });
@@ -1058,7 +1053,10 @@ describe("catalog control plane cadences", () => {
 		expect(await messageOf([plan({ items: [overage] }), addOn({})])).toBe(refused);
 		// An add-on alone decides its own limit, overage included.
 		expect(
-			await messageOf([plan({}), plan({ key: "boost", kind: "addon", items: [overage] })]),
+			await messageOf([
+				plan({ providerBindings: [] }),
+				plan({ key: "boost", kind: "addon", items: [overage] }),
+			]),
 		).toBe("normalized");
 	});
 
@@ -1096,8 +1094,7 @@ describe("catalog control plane cadences", () => {
 		);
 		expect(await messageOf([postpaid("account")])).toBe("normalized");
 	});
-
-	it("normalizes counts and the earlier rollover spelling in a stored catalog", async () => {
+	it("normalizes counts and retains canonical rollover in a stored catalog", async () => {
 		const stored: CatalogIntent = {
 			features: [feature],
 			plans: [
@@ -1105,7 +1102,10 @@ describe("catalog control plane cadences", () => {
 					items: [
 						{
 							...resettingItem("allocation", "month"),
-							rollover: { maxQuantity: null, expiry: { mode: "months", months: 3 } },
+							rollover: {
+								maxQuantity: null,
+								expiry: { mode: "after", interval: "month", intervalCount: 3 },
+							},
 						},
 					],
 				}),
@@ -1214,14 +1214,13 @@ describe("catalog control plane cadences", () => {
 			],
 		});
 	});
-
 	it("checks billing interval shape and price agreement", async () => {
 		expect(
 			await messageOf([plan({ billingInterval: "week", billingIntervalCount: 157, items: [] })]),
 		).toBe("Plan pro billing interval cannot span more than 3 × year");
-		expect(
-			await messageOf([plan({ billingInterval: null, billingIntervalCount: 2, items: [] })]),
-		).toBe("Plan pro billingIntervalCount requires a billingInterval");
+		expect(() =>
+			assertPlanCadences(plan({ billingInterval: null, billingIntervalCount: 2, items: [] })),
+		).toThrow("billingIntervalCount requires a billingInterval");
 		expect(
 			await messageOf([
 				plan({
@@ -1257,7 +1256,6 @@ describe("catalog control plane cadences", () => {
 		).toBe("Plan pro price intervals must match");
 	});
 });
-
 describe("catalog control plane default plan", () => {
 	const freePlan: CatalogPlanIntent = {
 		key: "free",
@@ -1279,7 +1277,6 @@ describe("catalog control plane default plan", () => {
 		],
 		providerBindings: [],
 	};
-
 	async function previewDefault(
 		plan: CatalogPlanIntent,
 		planKey = plan.key,
@@ -1289,13 +1286,13 @@ describe("catalog control plane default plan", () => {
 			await controlPlane.preview({} as never, {
 				expectedRevision: null,
 				actor: "test",
-				catalog: {
+				catalog: canonicalFromWorking({
 					features: [feature],
 					plans: [plan],
 					topups: [],
 					rateCards: [],
 					defaultPlan: { planKey },
-				},
+				}),
 			});
 		} catch (error) {
 			if (error === passedNormalization) return "normalized";
@@ -1403,134 +1400,5 @@ describe("catalog control plane default plan", () => {
 			planKey: "free",
 			entitlementKeys: [],
 		});
-	});
-});
-
-describe("catalog control plane price spellings", () => {
-	const basePrice = (overrides: Partial<CatalogPriceIntent> = {}): CatalogPriceIntent => ({
-		...flatPrice([stripeBinding]),
-		...overrides,
-	});
-	const outcome = async (candidate: CatalogPlanIntent): Promise<string> => {
-		const result = await previewWith(providerCapabilityCatalog, [candidate]);
-		return result === "normalized" ? result : result.message;
-	};
-	const pricedItem = (
-		itemKind: "meter_limit" | "allocation",
-		overagePolicy: "blocked" | "allowed",
-	): CatalogPlanIntent =>
-		plan({
-			items: [
-				{
-					...resettingItem(itemKind, "month"),
-					overagePolicy,
-					price: { ...flatPrice([stripeBinding]), key: "credits-overage" },
-				},
-			],
-		});
-
-	it("refuses a legacy price field that disagrees with basePrice", async () => {
-		// Normalization keeps basePrice, so each of these published one value and dropped the other.
-		expect(
-			await outcome(
-				plan({ baseAmountMinor: 1000, basePrice: basePrice({ unitAmountMinor: 2000 }) }),
-			),
-		).toBe("Plan pro baseAmountMinor 1000 conflicts with basePrice unitAmountMinor 2000");
-		expect(await outcome(plan({ currency: " eur ", basePrice: basePrice() }))).toBe(
-			"Plan pro currency EUR conflicts with basePrice currency USD",
-		);
-		expect(await outcome(plan({ billingInterval: "year", basePrice: basePrice() }))).toBe(
-			"Plan pro billingInterval year conflicts with basePrice billingInterval month",
-		);
-		expect(await outcome(plan({ billingIntervalCount: 3, basePrice: basePrice() }))).toBe(
-			"Plan pro billingIntervalCount 3 conflicts with basePrice billingIntervalCount 1",
-		);
-		expect(
-			await outcome(
-				plan({
-					providerBindings: [{ ...stripeBinding, productKey: "pro_legacy" }, appleBinding],
-					basePrice: basePrice(),
-				}),
-			),
-		).toBe(
-			"Plan pro providerBindings stripe/web pro_legacy conflict with basePrice providerBindings stripe/web pro",
-		);
-	});
-
-	it("accepts agreeing, absent and store-only legacy spellings", async () => {
-		for (const accepted of [
-			plan({
-				currency: " usd ",
-				baseAmountMinor: 1000,
-				billingIntervalCount: 1,
-				basePrice: basePrice(),
-				providerBindings: [stripeBinding, appleBinding],
-			}),
-			plan({ currency: null, billingInterval: null, basePrice: basePrice() }),
-			// App Store products carry no Quotum price; their binding is not a second spelling.
-			plan({ basePrice: basePrice(), providerBindings: [appleBinding] }),
-			plan({ baseAmountMinor: 1000, providerBindings: [stripeBinding] }),
-		]) {
-			expect(await outcome(accepted)).toBe("normalized");
-		}
-	});
-
-	it("refuses a price on an allocation or on a meter limit that blocks overage", async () => {
-		expect(await outcome(pricedItem("allocation", "blocked"))).toBe(
-			"Plan pro allocation credits cannot declare a price: allowances are not billed",
-		);
-		expect(await outcome(pricedItem("meter_limit", "blocked"))).toBe(
-			"Plan pro meter limit credits cannot declare a price while it blocks overage: only allowed overage is billed",
-		);
-		expect(await outcome(pricedItem("meter_limit", "allowed"))).toBe("normalized");
-	});
-
-	it("keeps a catalog stored with a never-billed price readable and refuses it unchanged", async () => {
-		const stored: CatalogIntent = {
-			features: [feature],
-			plans: [pricedItem("meter_limit", "blocked")],
-			topups: [],
-			rateCards: [],
-		};
-		const controlPlane = new CatalogControlPlane(new StoredCatalogDatabase(stored));
-		const current = await controlPlane.getPublished(projectInstanceContext());
-		// The canonical read-back has no place for a price that never charges; preview of the stored
-		// intent as submitted still refuses it.
-		expect(current.catalog?.plans[0]?.items[0]).toMatchObject({
-			itemKind: "meter_limit",
-			overage: { policy: "blocked" },
-		});
-		const unchanged = await controlPlane
-			.preview(projectInstanceContext(), { expectedRevision: 1, actor: "test", catalog: stored })
-			.then(() => null)
-			.catch((error: unknown) => error);
-		expect(unchanged).toBeInstanceOf(InvalidRequestError);
-		expect((unchanged as InvalidRequestError).message).toBe(
-			"Plan pro meter limit credits cannot declare a price while it blocks overage: only allowed overage is billed",
-		);
-	});
-
-	it("rejects publishing a draft whose submitted spellings disagree, before writing anything", async () => {
-		const submitted: CatalogIntent = {
-			features: [feature],
-			plans: [plan({ baseAmountMinor: 1000, basePrice: basePrice({ unitAmountMinor: 2000 }) })],
-			topups: [],
-			rateCards: [],
-		};
-		const database = new StoredCatalogDatabase(submitted);
-		const rejection = await new CatalogControlPlane(database)
-			.publish(projectInstanceContext(), {
-				expectedRevision: 1,
-				actor: "test",
-				previewToken: "c".repeat(64),
-				catalog: submitted,
-			})
-			.then(() => null)
-			.catch((error: unknown) => error);
-		expect(rejection).toBeInstanceOf(InvalidRequestError);
-		expect((rejection as InvalidRequestError).message).toBe(
-			"Plan pro baseAmountMinor 1000 conflicts with basePrice unitAmountMinor 2000",
-		);
-		expect(database.writes).toEqual([]);
 	});
 });

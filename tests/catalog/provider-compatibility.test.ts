@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { z } from "zod";
 import { CatalogProviderCompatibilitySchema } from "../../src/app/contracts/provider-responses";
 import { CapabilityError, classifyBillingError } from "../../src/billing/errors";
+import { canonicalFromWorking } from "../../src/catalog/canonical-intent";
 import { CatalogControlPlane, parseAuthoredIntent } from "../../src/catalog/control-plane";
 import {
 	assertCatalogProviderCompatibility,
@@ -203,7 +204,6 @@ function reported(error: CapabilityError) {
 		blocked: verdicts.map(({ operation }) => operation),
 	}));
 }
-
 describe("catalog capability targets", () => {
 	it("lists trial and add-on plans, then prices, per plan in catalog order, then top-ups", () => {
 		expect(
@@ -251,7 +251,6 @@ describe("catalog capability targets", () => {
 		expect(planTarget?.bindings).toEqual([stripe("addon-plan-web")]);
 	});
 });
-
 describe("catalog provider compatibility", () => {
 	it("reports every binding with its required operations and only the blocked verdicts", () => {
 		const entries = catalogProviderCompatibility(mixedCatalog);
@@ -367,7 +366,6 @@ function judged(entries: ReturnType<typeof catalogProviderCompatibility>) {
 		]),
 	}));
 }
-
 type JudgedEntry = ReturnType<typeof judged>[number];
 
 /** Stripe's declaration with `catalog.trial` also requiring an enabled connection. */
@@ -386,7 +384,6 @@ const connection = (connectionEnabled: boolean): CapabilityConfigurationFacts =>
 	connectionValidated: true,
 	accountFlags: {},
 });
-
 describe("catalog provider compatibility options", () => {
 	it("keeps the publish gate's output byte for byte under the default options", () => {
 		const legacy = catalogCapabilityTargets(mixedCatalog).flatMap(
@@ -700,7 +697,6 @@ describe("catalog provider compatibility options", () => {
 		expect(unjudged?.verdicts).toEqual([]);
 	});
 });
-
 describe("catalog provider compatibility assert", () => {
 	it("accepts a catalog whose bindings are all compatible", () => {
 		const compatible = catalogOf(
@@ -865,14 +861,18 @@ describe("catalog provider compatibility assert", () => {
 		expect(store.message).toContain("Gift gift-12m cannot bind apple");
 	});
 });
-
 class NormalizationSentinel extends Error {}
 const passedNormalization = new NormalizationSentinel("normalization passed");
-
 async function previewRejection(
 	catalog: CatalogIntent,
 	capabilities: ProviderCapabilityLookup = providerCapabilityCatalog,
-): Promise<{ message: string; details: unknown } | "normalized"> {
+): Promise<
+	| {
+			message: string;
+			details: unknown;
+	  }
+	| "normalized"
+> {
 	const database = {
 		transaction(): never {
 			throw passedNormalization;
@@ -882,7 +882,7 @@ async function previewRejection(
 		await new CatalogControlPlane(database, { capabilities }).preview({} as never, {
 			expectedRevision: null,
 			actor: "test",
-			catalog,
+			catalog: canonicalFromWorking(catalog),
 		});
 	} catch (error) {
 		if (error === passedNormalization) return "normalized";
@@ -891,23 +891,18 @@ async function previewRejection(
 	}
 	throw new Error("Catalog preview resolved without reaching its transaction");
 }
-
 /** Answers the control plane's reads from one published catalog, and records a new draft. */
 class PublishedCatalogDatabase {
 	readonly drafts: unknown[] = [];
 	/** True from a stored-intent read until the next query. */
 	readingStoredIntent = false;
-
 	constructor(private readonly published: CatalogIntent) {}
-
 	async execute<T>(query: unknown): Promise<T[]> {
 		return (await this.answer(renderDrizzleSql(query))) as T[];
 	}
-
 	async transaction<T>(callback: (tx: QueryExecutor) => Promise<T>): Promise<T> {
 		return await callback(this);
 	}
-
 	private async answer(text: string): Promise<Record<string, unknown>[]> {
 		this.readingStoredIntent =
 			text.includes("SELECT revision.intent_hash") || text.includes("SELECT draft.intent");
@@ -935,11 +930,12 @@ class PublishedCatalogDatabase {
 				{
 					intent_hash: "a".repeat(64),
 					published_at: "2026-09-01T00:00:00.000Z",
-					intent: this.published,
+					intent: canonicalFromWorking(this.published),
 				},
 			];
 		}
-		if (text.includes("SELECT draft.intent")) return [{ intent: this.published }];
+		if (text.includes("SELECT draft.intent"))
+			return [{ intent: canonicalFromWorking(this.published) }];
 		if (text.includes("SELECT key, active FROM features")) {
 			return this.published.features.map(({ key }) => ({ key, active: true }));
 		}
@@ -969,7 +965,6 @@ class PublishedCatalogDatabase {
 		throw new Error(`Unscripted query: ${text}`);
 	}
 }
-
 describe("stored catalogs after a declaration changes", () => {
 	const published = catalogOf([
 		plan("pro", {
@@ -984,7 +979,6 @@ describe("stored catalogs after a declaration changes", () => {
 			basePrice: flatPrice("pro-monthly", [stripe("pro-web")]),
 		}),
 	]);
-
 	it("reads stored catalogs through the injected declarations", async () => {
 		for (const read of [
 			(controlPlane: CatalogControlPlane) => controlPlane.getPublished(projectInstanceContext()),
@@ -992,7 +986,7 @@ describe("stored catalogs after a declaration changes", () => {
 				controlPlane.preview(projectInstanceContext(), {
 					expectedRevision: 1,
 					actor: "test",
-					catalog: withoutTrial,
+					catalog: canonicalFromWorking(withoutTrial),
 				}),
 		]) {
 			const database = new PublishedCatalogDatabase(published);
@@ -1018,14 +1012,13 @@ describe("stored catalogs after a declaration changes", () => {
 			{ key: "pro", trialDays: 14 },
 		]);
 	});
-
 	it("previews another change without re-validating the stored catalog", async () => {
 		const database = new PublishedCatalogDatabase(published);
 		const controlPlane = new CatalogControlPlane(database, { capabilities: withoutStripeTrials });
 		const preview = await controlPlane.preview(projectInstanceContext(), {
 			expectedRevision: 1,
 			actor: "test",
-			catalog: withoutTrial,
+			catalog: canonicalFromWorking(withoutTrial),
 		});
 		expect(preview.baseRevision).toBe(1);
 		expect(preview.nextRevision).toBe(2);
@@ -1048,21 +1041,16 @@ describe("stored catalogs after a declaration changes", () => {
 		});
 	});
 });
-
 /** Answers a publish from one catalog draft; records every write so a rejection can prove none ran. */
 class PublishDraftDatabase {
 	readonly writes: string[] = [];
-
 	constructor(private readonly draft: Record<string, unknown>) {}
-
 	async execute<T>(query: unknown): Promise<T[]> {
 		return (await this.answer(renderDrizzleSql(query))) as T[];
 	}
-
 	async transaction<T>(callback: (tx: QueryExecutor) => Promise<T>): Promise<T> {
 		return await callback(this);
 	}
-
 	private async answer(text: string): Promise<Record<string, unknown>[]> {
 		if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(text)) {
 			this.writes.push(text);
@@ -1088,7 +1076,6 @@ class PublishDraftDatabase {
 		throw new Error(`Unscripted query: ${text}`);
 	}
 }
-
 describe("publish retries after a declaration changes", () => {
 	const trialCatalog = catalogOf([
 		plan("pro", {
@@ -1101,13 +1088,12 @@ describe("publish retries after a declaration changes", () => {
 		expectedRevision: 1,
 		actor: "test",
 		previewToken: "c".repeat(64),
-		catalog: trialCatalog,
+		catalog: canonicalFromWorking(trialCatalog),
 	};
-
 	// A draft stores the canonical intent its preview read, under the declarations of that time.
 	const publishedDraft = {
 		intent_hash: "b".repeat(64),
-		intent: parseAuthoredIntent(trialCatalog).canonical,
+		intent: parseAuthoredIntent(canonicalFromWorking(trialCatalog)).canonical,
 		base_revision: 1,
 		next_revision: 2,
 		status: "published",
@@ -1124,7 +1110,6 @@ describe("publish retries after a declaration changes", () => {
 		expect(result).toMatchObject({ revisionId: "8", revision: 2, duplicate: true });
 		expect(database.writes).toEqual([]);
 	});
-
 	it("refuses a replay that names another revision or catalog than the published request", async () => {
 		const rejection = async (input: typeof publishInput) => {
 			const database = new PublishDraftDatabase(publishedDraft);
@@ -1135,7 +1120,6 @@ describe("publish retries after a declaration changes", () => {
 			expect(database.writes).toEqual([]);
 			return error;
 		};
-
 		expect(await rejection({ ...publishInput, expectedRevision: 9999 })).toMatchObject({
 			code: "CATALOG_REVISION_CONFLICT",
 			status: 409,
@@ -1144,7 +1128,9 @@ describe("publish retries after a declaration changes", () => {
 		const otherCatalog = catalogOf([
 			plan("pro", { trialDays: 7, basePrice: flatPrice("pro-monthly", [stripe("pro-web")]) }),
 		]);
-		expect(await rejection({ ...publishInput, catalog: otherCatalog })).toMatchObject({
+		expect(
+			await rejection({ ...publishInput, catalog: canonicalFromWorking(otherCatalog) }),
+		).toMatchObject({
 			code: "CATALOG_PREVIEW_MISMATCH",
 			status: 409,
 		});

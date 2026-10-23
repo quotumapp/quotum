@@ -5,6 +5,7 @@ import { InvalidRequestError } from "../../src/billing/errors";
 import { stripeProviderPricedAdvisory } from "../../src/catalog/canonical-intent";
 import {
 	CatalogControlPlane,
+	checkNewCatalogIntent,
 	decodeStoredIntent,
 	parseAuthoredIntent,
 } from "../../src/catalog/control-plane";
@@ -13,7 +14,6 @@ import type {
 	AuthoredPlanIntent,
 	CatalogExpiryIntent,
 	CatalogFeatureIntent,
-	CatalogPlanIntent,
 	CatalogPriceIntent,
 	CatalogProviderBindingIntent,
 } from "../../src/catalog/types";
@@ -94,86 +94,6 @@ function price(
 
 function catalog(plans: AuthoredPlanIntent[], extra: Partial<AuthoredCatalogIntent> = {}) {
 	return { features, plans, topups: [], rateCards: [], ...extra } satisfies AuthoredCatalogIntent;
-}
-
-/** A legacy plan as the console and earlier catalog files spell it. */
-function legacyPlan(overrides: Partial<CatalogPlanIntent>): CatalogPlanIntent {
-	return {
-		key: "pro",
-		name: "Pro",
-		version: 1,
-		currency: "USD",
-		baseAmountMinor: 2000,
-		billingInterval: "month",
-		trialDays: null,
-		items: [],
-		providerBindings: [],
-		...overrides,
-	};
-}
-
-/** The pro plan spelled the legacy way, with one item of each kind and a top-up. */
-function legacyCatalog(): AuthoredCatalogIntent {
-	return catalog(
-		[
-			legacyPlan({
-				basePrice: price("pro-base", [stripe("pro")]),
-				providerBindings: [stripe("pro"), apple("pro_ios"), google("pro_android")],
-				items: [
-					{
-						featureKey: "support",
-						itemKind: "access",
-						quantity: null,
-						resetInterval: null,
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
-					},
-					{
-						featureKey: "credits",
-						itemKind: "allocation",
-						quantity: "1000",
-						resetInterval: "month",
-						resetIntervalCount: 1,
-						expiresAfterSeconds: 86400,
-						overagePolicy: "blocked",
-						rollover: { maxQuantity: "500", expiry: { mode: "months", months: 3 } },
-					},
-					{
-						featureKey: "api_calls",
-						itemKind: "meter_limit",
-						quantity: "10000",
-						resetInterval: "day",
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
-					},
-					{
-						featureKey: "seats",
-						itemKind: "licensed_quantity",
-						quantity: "5",
-						resetInterval: null,
-						expiresAfterSeconds: null,
-						overagePolicy: "blocked",
-						allocationScope: "license_pool",
-						price: price("seat", [stripe("pro_seat")], {
-							unitAmountMinor: 800,
-							maximumQuantity: null,
-						}),
-					},
-				],
-			}),
-		],
-		{
-			topups: [
-				{
-					key: "credits_1000",
-					featureKey: "credits",
-					quantity: "1000",
-					expiresAfterSeconds: 31536000,
-					providerBindings: [stripe("credits_1000")],
-				},
-			],
-		},
-	);
 }
 
 /** The same catalog in the canonical spelling. */
@@ -260,488 +180,247 @@ async function previewOutcome(authored: AuthoredCatalogIntent): Promise<string> 
 }
 
 describe("canonical catalog intent", () => {
-	it("spells a legacy intent in the canonical shape, with every default explicit", () => {
-		const { canonical } = parseAuthoredIntent(legacyCatalog());
-		expect(canonical.plans[0]).toEqual({
-			key: "pro",
-			name: "Pro",
-			version: 1,
-			kind: "base",
-			visibility: "public",
-			customerBillingAccountId: null,
-			tierRank: 0,
-			trialDays: null,
-			trialRequiresPaymentMethod: true,
-			trialEndBehavior: "cancel",
-			upgradeProrationBehavior: "always_invoice",
-			downgradeProrationBehavior: "none",
-			basePrice: {
-				...price("pro-base", [stripe("pro")]),
-				billingIntervalCount: 1,
-				pricingModel: "flat",
-				tiers: [],
-			},
-			// The plan-level bindings the base price does not hold are the provider-priced products.
-			providerPriced: {
-				billingInterval: "month",
-				billingIntervalCount: 1,
-				providerBindings: [apple("pro_ios"), google("pro_android")],
-			},
-			items: [
-				{ itemKind: "access", featureKey: "support" },
-				{
-					itemKind: "allocation",
-					featureKey: "credits",
-					quantity: "1000",
-					reset: { interval: "month", intervalCount: 1 },
-					expiry: { mode: "after_seconds", seconds: 86400 },
-					allocationScope: "account",
-					rollover: {
-						maxQuantity: "500",
-						expiry: { mode: "after", interval: "month", intervalCount: 3 },
-					},
-				},
-				{
-					itemKind: "meter_limit",
-					featureKey: "api_calls",
-					quantity: "10000",
-					reset: { interval: "day", intervalCount: 1 },
-					overage: { policy: "blocked" },
-					allocationScope: "account",
-				},
-				{
-					itemKind: "licensed_quantity",
-					featureKey: "seats",
-					quantity: "5",
-					price: {
-						...price("seat", [stripe("pro_seat")], {
-							unitAmountMinor: 800,
-							maximumQuantity: null,
-						}),
-						billingIntervalCount: 1,
-						pricingModel: "flat",
-						tiers: [],
-					},
-					allocationScope: "license_pool",
-				},
-			],
-			controls: [],
-		});
-		expect(canonical.topups).toEqual([
-			{
-				key: "credits_1000",
-				featureKey: "credits",
-				quantity: "1000",
-				expiry: { mode: "after_seconds", seconds: 31536000 },
-				providerBindings: [stripe("credits_1000")],
-			},
-		]);
-		expect(canonical).toMatchObject({
-			retiredFeatureKeys: [],
-			retiredPlanKeys: [],
-			retiredTopupKeys: [],
-		});
-		expect(canonical).not.toHaveProperty("defaultPlan");
-		expect(CanonicalCatalogSchema.safeParse(canonical).success).toBe(true);
-	});
-
-	it("gives a legacy and a canonical spelling of one catalog the same intent and hash", () => {
-		const legacy = parseAuthoredIntent(legacyCatalog());
-		const canonical = parseAuthoredIntent(canonicalCatalog());
-		expect(stableJson(canonical.canonical)).toBe(stableJson(legacy.canonical));
-		expect(sha256Hex(stableJson(canonical.canonical))).toBe(
-			sha256Hex(stableJson(legacy.canonical)),
-		);
-		expect(canonical.deprecations).toEqual([]);
-		expect(legacy.deprecations.map(({ path }) => path)).toEqual([
-			"plans[0].items[0]",
-			"plans[0].items[1]",
-			"plans[0].items[2]",
-			"plans[0].items[3]",
-			"plans[0]",
-			"topups[0]",
-		]);
-	});
-
-	it("reads its own canonical form back unchanged", () => {
-		const { canonical } = parseAuthoredIntent(legacyCatalog());
-		expect(parseAuthoredIntent(canonical as AuthoredCatalogIntent).canonical).toEqual(canonical);
-		expect(decodeStoredIntent(canonical)).toEqual(canonical);
-	});
-
-	it("decodes a catalog stored in the legacy normalized shape", () => {
-		// What the control plane stored before the canonical intent: legacy fields filled in, the
-		// legacy binding list kept over the base price's, and a price that never charges.
-		const stored = {
-			...legacyCatalog(),
-			plans: [
-				{
-					...legacyPlan({
-						basePrice: {
-							...price("pro-base", [stripe("pro")]),
-							billingIntervalCount: 1,
-							pricingModel: "flat",
-							tiers: [],
-						},
-						providerBindings: [apple("pro_ios")],
-						billingIntervalCount: 1,
-						items: [
-							{
-								featureKey: "api_calls",
-								itemKind: "meter_limit",
-								quantity: "10000",
-								resetInterval: "day",
-								resetIntervalCount: 1,
-								expiresAfterSeconds: null,
-								overagePolicy: "blocked",
-								allocationScope: "account",
-								rollover: null,
-								price: price("api-overage", [stripe("api_overage")]),
-							},
-						],
-					}),
-					kind: "base",
-					visibility: "public",
-					customerBillingAccountId: null,
-					tierRank: 0,
-					trialRequiresPaymentMethod: true,
-					trialEndBehavior: "cancel",
-					upgradeProrationBehavior: "always_invoice",
-					downgradeProrationBehavior: "none",
-					controls: [],
-				},
-			],
-			retiredFeatureKeys: [],
-			retiredPlanKeys: [],
-			retiredTopupKeys: [],
-		};
-		const decoded = decodeStoredIntent(stored);
-		expect(decoded.plans[0]).toMatchObject({
-			basePrice: { key: "pro-base", providerBindings: [stripe("pro")] },
-			providerPriced: {
-				billingInterval: "month",
-				billingIntervalCount: 1,
-				providerBindings: [apple("pro_ios")],
-			},
-			// A blocked limit's price never charged, so the canonical intent has no place for it.
-			items: [{ itemKind: "meter_limit", overage: { policy: "blocked" } }],
-		});
-		expect(decodeStoredIntent(decoded)).toEqual(decoded);
-		expect(CanonicalCatalogSchema.safeParse(decoded).success).toBe(true);
-	});
-
-	it("maps a provider-priced legacy plan and drops the amounts nothing charges", () => {
-		const { canonical, deprecations, advisories } = parseAuthoredIntent(
-			catalog([
-				legacyPlan({
-					key: "store",
-					baseAmountMinor: 999,
-					providerBindings: [apple("store_ios"), stripe("store_web")],
-				}),
-				legacyPlan({ key: "free", billingInterval: null, baseAmountMinor: 0 }),
-				legacyPlan({ key: "trialware", currency: null, baseAmountMinor: null }),
-			]),
-		);
-		expect(
-			canonical.plans.map(({ basePrice, providerPriced }) => ({ basePrice, providerPriced })),
-		).toEqual([
-			{
-				basePrice: null,
-				providerPriced: {
-					billingInterval: "month",
-					billingIntervalCount: 1,
-					providerBindings: [apple("store_ios"), stripe("store_web")],
-				},
-			},
-			{ basePrice: null, providerPriced: null },
-			{ basePrice: null, providerPriced: null },
-		]);
-		expect(deprecations).toEqual([
-			{
-				path: "plans[0]",
-				legacy: ["currency", "baseAmountMinor", "billingInterval", "providerBindings"],
-				canonical: ["providerPriced"],
-				message:
-					"Plan-level price fields are legacy syntax; use basePrice for a price Quotum models and providerPriced for products a provider prices. baseAmountMinor and currency dropped: the provider owns this plan's price.",
-			},
-			{
-				path: "plans[1]",
-				legacy: ["currency", "baseAmountMinor", "billingInterval", "providerBindings"],
-				canonical: [],
-				message:
-					"Plan-level price fields are legacy syntax; use basePrice for a price Quotum models and providerPriced for products a provider prices. baseAmountMinor and currency dropped: the plan has no price or provider binding.",
-			},
-			{
-				path: "plans[2]",
-				legacy: ["currency", "baseAmountMinor", "billingInterval", "providerBindings"],
-				canonical: [],
-				message:
-					"Plan-level price fields are legacy syntax; use basePrice for a price Quotum models and providerPriced for products a provider prices. billingInterval dropped: the plan has no price or provider binding.",
-			},
-		]);
-		// Advice, not a deprecation: provider-owned Stripe pricing has no retirement plan.
-		expect(advisories).toEqual([
-			{
-				path: "plans[0].providerPriced.providerBindings[1]",
-				message: "Use `basePrice` when Quotum should model the price.",
-			},
-		]);
-		expect(stripeProviderPricedAdvisory).toBe(
-			"Use `basePrice` when Quotum should model the price.",
-		);
-	});
-
-	it("describes each legacy item and top-up spelling it accepted", () => {
-		const { deprecations } = parseAuthoredIntent(legacyCatalog());
-		expect(deprecations.slice(0, 4)).toEqual([
-			{
-				path: "plans[0].items[0]",
-				legacy: ["quantity", "resetInterval", "expiresAfterSeconds", "overagePolicy"],
-				canonical: [],
-				message: "An access item takes only itemKind and featureKey.",
-			},
-			{
-				path: "plans[0].items[1]",
-				legacy: [
-					"quantity",
-					"resetInterval",
-					"resetIntervalCount",
-					"expiresAfterSeconds",
-					"overagePolicy",
-					"rollover",
-				],
-				canonical: ["quantity", "reset", "expiry", "allocationScope", "rollover"],
-				message:
-					"Use the canonical allocation item: quantity, reset, expiry, allocationScope, rollover.",
-			},
-			{
-				path: "plans[0].items[2]",
-				legacy: ["quantity", "resetInterval", "expiresAfterSeconds", "overagePolicy"],
-				canonical: ["quantity", "reset", "overage", "allocationScope"],
-				message: "Use the canonical meter_limit item: quantity, reset, overage, allocationScope.",
-			},
-			{
-				path: "plans[0].items[3]",
-				legacy: [
-					"quantity",
-					"resetInterval",
-					"expiresAfterSeconds",
-					"overagePolicy",
-					"price",
-					"allocationScope",
-				],
-				canonical: ["quantity", "price", "allocationScope"],
-				message: "Use the canonical licensed_quantity item: quantity, price, allocationScope.",
-			},
-		]);
-		expect(deprecations.at(-1)).toEqual({
-			path: "topups[0]",
-			legacy: ["expiresAfterSeconds"],
-			canonical: ["expiry"],
-			message: "Use expiry instead of expiresAfterSeconds.",
-		});
-	});
-
-	it("spells an allowed overage and its price as one overage object", () => {
-		const { canonical } = parseAuthoredIntent(
-			catalog([
-				legacyPlan({
-					basePrice: price("pro-base", [stripe("pro")]),
-					items: [
-						{
-							featureKey: "api_calls",
-							itemKind: "meter_limit",
-							quantity: "10000",
-							resetInterval: "month",
-							expiresAfterSeconds: null,
-							overagePolicy: "allowed",
-							price: price("api-overage", [stripe("api_overage")], {
-								unitAmountMinor: 50,
-								billingUnits: "1000",
-								maximumQuantity: null,
-							}),
-						},
-					],
-				}),
-			]),
-		);
-		expect(canonical.plans[0]?.items[0]).toMatchObject({
-			itemKind: "meter_limit",
-			overage: { policy: "allowed", price: { key: "api-overage", unitAmountMinor: 50 } },
-		});
-	});
-
-	it("binds a plan to the products of both price blocks", () => {
-		const legacy = parseAuthoredIntent(
-			catalog([
-				legacyPlan({
-					basePrice: price("pro-base", [stripe("pro")]),
-					// Before the canonical intent this list replaced the base price's product.
-					providerBindings: [apple("pro_ios")],
-				}),
-			]),
-		);
-		expect(legacy.working.plans[0]?.providerBindings).toEqual([apple("pro_ios"), stripe("pro")]);
-		const canonical = parseAuthoredIntent(canonicalCatalog());
-		expect(canonical.working.plans[0]?.providerBindings).toEqual([
+	it("normalizes defaults, reads its own output and preserves its hash", () => {
+		const first = parseAuthoredIntent(canonicalCatalog());
+		const second = parseAuthoredIntent(first.canonical);
+		expect(second.canonical).toEqual(first.canonical);
+		expect(sha256Hex(stableJson(second.canonical))).toBe(sha256Hex(stableJson(first.canonical)));
+		expect(decodeStoredIntent(first.canonical)).toEqual(first.canonical);
+		expect(CanonicalCatalogSchema.safeParse(first.canonical).success).toBe(true);
+		expect(first.canonical.plans[0]).toMatchObject({ kind: "base", controls: [], trialDays: null });
+		expect(first.working.plans[0]?.providerBindings).toEqual([
 			apple("pro_ios"),
 			google("pro_android"),
 			stripe("pro"),
 		]);
+		expect(first.advisories).toEqual([]);
 	});
 
-	it("derives a seat plan's billing cadence from its item prices and records no plan currency", () => {
-		const { canonical, working } = parseAuthoredIntent(
-			catalog([
-				{
-					key: "team",
-					name: "Team",
-					version: 1,
-					items: [
-						{
-							itemKind: "licensed_quantity",
-							featureKey: "seats",
-							quantity: "5",
-							price: price("seat", [stripe("team_seat")], {
-								billingInterval: "year",
-								maximumQuantity: null,
-							}),
-						},
-					],
-				},
-			]),
-		);
-		expect(canonical.plans[0]).toMatchObject({ basePrice: null, providerPriced: null });
-		// The seat price keeps its own currency; the plan has no base price, so no plan currency
-		// (a currency without a base amount violates `plan_versions_price_check`).
-		expect(working.plans[0]).toMatchObject({
+	it("derives an item-only plan's cadence without a plan amount or currency", () => {
+		const parsed = checkNewCatalogIntent(catalog([seatPlan("year")]));
+		expect(parsed.working.plans[0]).toMatchObject({
 			billingInterval: "year",
 			billingIntervalCount: 1,
 			currency: null,
 			baseAmountMinor: null,
 		});
-		expect(working.plans[0]?.items[0]?.price).toMatchObject({ currency: "USD" });
+		expect(parsed.canonical.plans[0]).toMatchObject({ basePrice: null, providerPriced: null });
 	});
 
-	it("accepts App Store and Google Play plans priced by their store", async () => {
-		const storePlan = (key: string, binding: CatalogProviderBindingIntent): AuthoredPlanIntent => ({
-			key,
-			name: key,
-			version: 1,
-			providerPriced: { billingInterval: "month", providerBindings: [binding] },
-			items: [{ itemKind: "access", featureKey: "support" }],
+	it("rejects disagreeing item prices, including counts of the same unit", () => {
+		for (const other of [
+			price("other", [stripe("other")], { billingInterval: "year" }),
+			price("other", [stripe("other")], { billingIntervalCount: 2 }),
+		]) {
+			const plan = seatPlan("month");
+			plan.items.push({
+				itemKind: "meter_limit",
+				featureKey: "api_calls",
+				quantity: "100",
+				reset: { interval: "month", intervalCount: 1 },
+				overage: { policy: "allowed", price: other },
+			});
+			expect(() => checkNewCatalogIntent(catalog([plan]))).toThrow(
+				"Plan team price intervals must match",
+			);
+		}
+	});
+
+	it("rejects two licensed quantities with different cadences", () => {
+		const plan = seatPlan("month");
+		const seatFeature = features.find((feature) => feature.key === "seats");
+		if (seatFeature === undefined) throw new Error("Missing seat feature fixture");
+		const intent = catalog([plan], {
+			features: [...features, { ...seatFeature, key: "reviewers", name: "Reviewers" }],
 		});
-		const authored = catalog([
-			storePlan("ios_pro", apple("ios_pro")),
-			storePlan("android_pro", google("android_pro")),
-		]);
-		expect(await previewOutcome(authored)).toBe("normalized");
-		const { canonical, advisories, working } = parseAuthoredIntent(authored);
-		expect(advisories).toEqual([]);
-		expect(canonical.plans.map(({ providerPriced }) => providerPriced)).toEqual([
-			{ billingInterval: "month", billingIntervalCount: 1, providerBindings: [apple("ios_pro")] },
-			{
-				billingInterval: "month",
-				billingIntervalCount: 1,
-				providerBindings: [google("android_pro")],
-			},
-		]);
-		expect(working.plans.map(({ billingInterval }) => billingInterval)).toEqual(["month", "month"]);
+		plan.items.push({
+			itemKind: "licensed_quantity",
+			featureKey: "reviewers",
+			quantity: "1",
+			price: price("reviewer", [stripe("reviewer")], { billingInterval: "year" }),
+		});
+		expect(() => checkNewCatalogIntent(intent)).toThrow("Plan team price intervals must match");
 	});
 
-	it("accepts an unpriced default plan with no items", async () => {
-		expect(
-			await previewOutcome(
-				catalog([{ key: "free", name: "Free", version: 1, items: [] }], {
-					defaultPlan: { planKey: "free", entitlementKeys: ["free_tier"] },
+	it("checks allocations and meter limits against the item-derived billing cadence", () => {
+		for (const itemKind of ["allocation", "meter_limit"] as const) {
+			const plan = seatPlan("month");
+			plan.items.push({
+				itemKind,
+				featureKey: "credits",
+				quantity: "1200",
+				reset: { interval: "year", intervalCount: 1 },
+			});
+			expect(() => checkNewCatalogIntent(catalog([plan]))).toThrow(
+				"cannot reset every year on a plan billed every month",
+			);
+		}
+	});
+
+	it("accepts equivalent price cadences and shorter resets", () => {
+		const plan = seatPlan("quarter");
+		plan.items.push({
+			itemKind: "meter_limit",
+			featureKey: "api_calls",
+			quantity: "100",
+			reset: { interval: "month", intervalCount: 1 },
+			overage: {
+				policy: "allowed",
+				price: price("overage", [stripe("overage")], {
+					billingInterval: "month",
+					billingIntervalCount: 3,
 				}),
-			),
-		).toBe("normalized");
+			},
+		});
+		expect(checkNewCatalogIntent(catalog([plan])).working.plans[0]).toMatchObject({
+			billingInterval: "quarter",
+			billingIntervalCount: 1,
+		});
 	});
 
-	it("refuses an authored intent the canonical spelling cannot hold", async () => {
-		const pro: AuthoredPlanIntent = {
+	it("leaves an unpriced plan without a billing cadence", () => {
+		const parsed = checkNewCatalogIntent(
+			catalog([
+				{
+					key: "free",
+					name: "Free",
+					version: 1,
+					items: [
+						{
+							itemKind: "allocation",
+							featureKey: "credits",
+							quantity: "100",
+							reset: { interval: "year", intervalCount: 1 },
+						},
+					],
+				},
+			]),
+		);
+		expect(parsed.working.plans[0]?.billingInterval).toBeNull();
+	});
+
+	it("rejects removed fields in new requests and stored catalogs, even null and empty values", () => {
+		const plan = seatPlan("month");
+		for (const extra of [
+			{ providerBindings: [] },
+			{ billingInterval: null },
+			{ billingIntervalCount: null },
+			{ currency: null },
+			{ baseAmountMinor: null },
+		]) {
+			const intent = catalog([{ ...plan, ...extra }]);
+			expect(() => checkNewCatalogIntent(intent)).toThrow("Unrecognized key");
+			expect(() => decodeStoredIntent(intent)).toThrow("Unrecognized key");
+		}
+		for (const extra of [
+			{ resetInterval: null },
+			{ resetIntervalCount: null },
+			{ expiresAfterSeconds: null },
+			{ overagePolicy: "blocked" },
+		]) {
+			const intent = catalog([
+				{
+					key: "free",
+					name: "Free",
+					version: 1,
+					items: [{ itemKind: "allocation", featureKey: "credits", quantity: "1", ...extra }],
+				},
+			]);
+			expect(() => checkNewCatalogIntent(intent)).toThrow("Unrecognized key");
+		}
+		const topup = {
+			key: "pack",
+			featureKey: "credits",
+			quantity: "1",
+			providerBindings: [stripe("pack")],
+			expiresAfterSeconds: null,
+		};
+		expect(() => checkNewCatalogIntent(catalog([], { topups: [topup] }))).toThrow(
+			"Unrecognized key",
+		);
+		const rollover = { maxQuantity: null, expiry: { mode: "months", months: 3 } };
+		expect(() =>
+			checkNewCatalogIntent(
+				catalog([
+					{
+						key: "free",
+						name: "Free",
+						version: 1,
+						items: [
+							{
+								itemKind: "allocation",
+								featureKey: "credits",
+								quantity: "1",
+								rollover: rollover as never,
+							},
+						],
+					},
+				]),
+			),
+		).toThrow("invalid");
+	});
+
+	it("requires a provider-owned price's cadence and keeps the Stripe advisory", () => {
+		const plan: AuthoredPlanIntent = {
 			key: "pro",
 			name: "Pro",
 			version: 1,
-			basePrice: price("pro-base", [stripe("pro")]),
+			providerPriced: { billingInterval: "month", providerBindings: [stripe("pro")] },
 			items: [],
 		};
-		expect(
-			await previewOutcome(
-				catalog([
-					{
-						...pro,
-						providerPriced: { billingInterval: "year", providerBindings: [apple("pro_ios")] },
-					},
-				]),
-			),
-		).toBe("Plan pro price intervals must match");
-		expect(
-			await previewOutcome(
-				catalog([
-					{
-						...pro,
-						providerPriced: { billingInterval: "month", providerBindings: [stripe("pro")] },
-					},
-				]),
-			),
-		).toBe("Plan pro binds stripe/web/pro in both basePrice and providerPriced");
-		expect(
-			await previewOutcome(
-				catalog([
-					{
-						...pro,
-						currency: "USD",
-						providerPriced: { billingInterval: "month", providerBindings: [apple("pro_ios")] },
-					},
-				]),
-			),
-		).toBe("Plan pro cannot combine providerPriced with the legacy plan-level price fields");
-		expect(
-			await previewOutcome(
-				catalog([legacyPlan({ billingInterval: null, providerBindings: [apple("pro_ios")] })]),
-			),
-		).toBe(
-			"Plan pro provider bindings without a basePrice require a billingInterval: the provider prices them on a cadence",
+		expect(checkNewCatalogIntent(catalog([plan])).advisories[0]?.message).toBe(
+			stripeProviderPricedAdvisory,
 		);
-		expect(
-			await previewOutcome(
+		expect(() =>
+			decodeStoredIntent(
 				catalog([
-					legacyPlan({
-						basePrice: price("pro-base", [stripe("pro")]),
-						items: [
-							{
-								featureKey: "support",
-								itemKind: "access",
-								quantity: null,
-								resetInterval: null,
-								expiresAfterSeconds: 3600,
-								overagePolicy: "blocked",
-							},
-						],
-					}),
+					{
+						...plan,
+						providerPriced: {
+							billingIntervalCount: 1,
+							providerBindings: [stripe("pro")],
+							billingInterval: null as never,
+						},
+					},
 				]),
 			),
-		).toBe("Access item support cannot declare a quantity, reset, expiry or overage");
-		expect(
-			await previewOutcome(
-				catalog([], {
-					topups: [
-						{
-							key: "credits_1000",
-							featureKey: "credits",
-							quantity: "1000",
-							expiry: { mode: "forever" },
-							expiresAfterSeconds: null,
-							providerBindings: [stripe("credits_1000")],
-						},
-					],
-				}),
-			),
-		).toBe("Top-up credits_1000 sets both expiry and expiresAfterSeconds; use expiry");
+		).toThrow("invalid");
+	});
+
+	it("checks agreement and exclusive bindings between both price blocks", () => {
+		const plan: AuthoredPlanIntent = {
+			key: "pro",
+			name: "Pro",
+			version: 1,
+			basePrice: price("base", [stripe("pro")]),
+			providerPriced: { billingInterval: "year", providerBindings: [apple("pro")] },
+			items: [],
+		};
+		expect(() => checkNewCatalogIntent(catalog([plan]))).toThrow(
+			"Plan pro price intervals must match",
+		);
+		plan.providerPriced = { billingInterval: "month", providerBindings: [stripe("pro")] };
+		expect(() => checkNewCatalogIntent(catalog([plan]))).toThrow(
+			"binds stripe/web/pro in both basePrice and providerPriced",
+		);
 	});
 });
+
+function seatPlan(billingInterval: CatalogPriceIntent["billingInterval"]): AuthoredPlanIntent {
+	return {
+		key: "team",
+		name: "Team",
+		version: 1,
+		items: [
+			{
+				itemKind: "licensed_quantity",
+				featureKey: "seats",
+				quantity: "1",
+				price: price("seat", [stripe("seat")], { billingInterval, maximumQuantity: null }),
+			},
+		],
+	};
+}
 
 describe("calendar expiry", () => {
 	/** A monthly plan with one allocation and a top-up, each expiring as given. */
@@ -1028,14 +707,16 @@ describe("gifts", () => {
 	});
 
 	it("bounds the code count and the validity", async () => {
-		for (const [overrides, message] of [
+		for (const [overrides] of [
 			[{ codeCount: 0 }, "gift code count must be an integer from 1 to 100"],
 			[{ codeCount: 101 }, "gift code count must be an integer from 1 to 100"],
 			[{ codeCount: 1.5 }, "gift code count must be an integer from 1 to 100"],
 			[{ codeValidDays: 0 }, "gift code validity in days must be an integer from 1 to 730"],
 			[{ codeValidDays: 731 }, "gift code validity in days must be an integer from 1 to 730"],
 		] as const) {
-			expect(await previewOutcome(catalog([pro], { gifts: [gift(overrides)] }))).toBe(message);
+			expect(await previewOutcome(catalog([pro], { gifts: [gift(overrides)] }))).toContain(
+				"codeCount" in overrides ? "codeCount" : "codeValidDays",
+			);
 		}
 	});
 

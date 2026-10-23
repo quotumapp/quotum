@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import type { CatalogIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent } from "../../src/catalog/types";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -11,9 +11,8 @@ import { aiCreditsCatalog } from "./helpers/metering-catalog";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
-
 /** The metering catalog with a blocked monthly API-call limit on the premium plan. */
-const grantCatalog: CatalogIntent = {
+const grantCatalog: AuthoredCatalogIntent = {
 	...aiCreditsCatalog,
 	features: [
 		...aiCreditsCatalog.features,
@@ -35,21 +34,19 @@ const grantCatalog: CatalogIntent = {
 				featureKey: "api_calls",
 				itemKind: "meter_limit",
 				quantity: "100",
-				resetInterval: "month",
-				expiresAfterSeconds: null,
-				overagePolicy: "blocked",
+				reset: {
+					interval: "month",
+					intervalCount: 1,
+				},
 			},
 		],
 	})),
 };
-
 localDescribe("Plan grant access integration", () => {
 	const project = integrationProjectContext();
-
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		const preview = await context.repository.previewCatalog(project, {
@@ -64,7 +61,6 @@ localDescribe("Plan grant access integration", () => {
 			catalog: grantCatalog,
 		});
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});

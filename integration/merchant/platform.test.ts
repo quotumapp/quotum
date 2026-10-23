@@ -988,21 +988,22 @@ describe("merchant platform transactions", () => {
 					key: "pro",
 					name: "Pro",
 					version: 1,
-					currency: "USD",
-					baseAmountMinor: 999,
-					billingInterval: "month",
 					trialDays: 14,
 					items: [
 						{
 							featureKey: "ai_credits",
 							itemKind: "allocation",
 							quantity: "1000",
-							resetInterval: "month",
-							expiresAfterSeconds: null,
-							overagePolicy: "blocked",
+							reset: {
+								interval: "month",
+								intervalCount: 1,
+							},
 						},
 					],
-					providerBindings: [{ productKey: "pro_monthly", provider: "apple", channel: "ios" }],
+					providerPriced: {
+						billingInterval: "month",
+						providerBindings: [{ productKey: "pro_monthly", provider: "apple", channel: "ios" }],
+					},
 				},
 			],
 			topups: [],
@@ -1014,7 +1015,6 @@ describe("merchant platform transactions", () => {
 			{ expectedRevision: null, catalog },
 			{ headers },
 		);
-
 		expect(response.status).toBe(400);
 		const body = await response.json();
 		expect(body).toMatchObject({

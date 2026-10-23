@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { SQL } from "bun";
-import type { CatalogIntent, CatalogPlanIntent } from "../../src/catalog/types";
+import type { AuthoredCatalogIntent, AuthoredPlanIntent } from "../../src/catalog/types";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -11,7 +11,6 @@ import {
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
 let context: LocalPostgresContext;
-
 /**
  * Each subscription pins the catalog revision it was bought from, so an account that bought its
  * base plan from one revision and an add-on from a later one holds two rate cards for a meter.
@@ -20,13 +19,11 @@ localDescribe("rate cards across an account's pinned revisions", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
 	});
-
 	beforeEach(async () => {
 		await resetAndSeedIntegrationData(context.sql);
 		await publish(catalog("0.005", [plan("pro", "base")]), null);
 		await publish(catalog("0.01", [plan("pro", "base", 2), plan("boost", "addon")]), 1);
 	});
-
 	afterAll(async () => {
 		await context.sql.close();
 	});
@@ -98,23 +95,17 @@ localDescribe("rate cards across an account's pinned revisions", () => {
 		).toMatchObject({ walletQuantity: "1", rateCard: { path: "pinned", revision: 2 } });
 	});
 });
-
-function plan(key: string, kind: "base" | "addon", version = 1): CatalogPlanIntent {
+function plan(key: string, kind: "base" | "addon", version = 1): AuthoredPlanIntent {
 	return {
 		key,
 		name: key,
 		version,
-		currency: "USD",
-		baseAmountMinor: (kind === "base" ? 1000 : 300) * version,
-		billingInterval: "month",
 		trialDays: null,
 		kind,
 		items: [],
-		providerBindings: [],
 	};
 }
-
-function catalog(ratePerUnit: string, plans: CatalogPlanIntent[]): CatalogIntent {
+function catalog(ratePerUnit: string, plans: AuthoredPlanIntent[]): AuthoredCatalogIntent {
 	return {
 		features: [
 			{
@@ -141,8 +132,10 @@ function catalog(ratePerUnit: string, plans: CatalogPlanIntent[]): CatalogIntent
 		rateCards: [{ meterFeatureKey: "model_tokens", walletFeatureKey: "ai_credits", ratePerUnit }],
 	};
 }
-
-async function publish(intent: CatalogIntent, expectedRevision: number | null): Promise<void> {
+async function publish(
+	intent: AuthoredCatalogIntent,
+	expectedRevision: number | null,
+): Promise<void> {
 	const project = integrationProjectContext();
 	const actor = "integration-rate-cards";
 	const preview = await context.repository.previewCatalog(project, {

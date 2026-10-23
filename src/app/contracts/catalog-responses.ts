@@ -117,8 +117,7 @@ export const CanonicalCatalogSchema = z.object({
 			providerPriced: z.union([
 				z.null(),
 				z.object({
-					// Null only for a plan stored before the canonical intent without a billing interval.
-					billingInterval: z.union([z.null(), z.enum(billingCadenceUnits)]),
+					billingInterval: z.enum(billingCadenceUnits),
 					billingIntervalCount: z.number(),
 					providerBindings: z.array(providerBindingSchema),
 				}),
@@ -215,16 +214,7 @@ export const postV1AdminCatalogPreviewResponse200Schema = z.object({
 			defaultPlanAccounts: z.number(),
 		}),
 		providerCompatibility: z.array(CatalogProviderCompatibilitySchema),
-		/** Legacy syntax the intent used; accepted until the 1.0 release candidate. */
-		deprecations: z.array(
-			z.object({
-				path: z.string(),
-				legacy: z.array(z.string()),
-				canonical: z.array(z.string()),
-				message: z.string(),
-			}),
-		),
-		/** Valid shapes the operator may want to reconsider; an advisory never implies removal. */
+		/** Valid shapes the operator may want to reconsider. */
 		advisories: z.array(z.object({ path: z.string(), message: z.string() })),
 		/** Per meter-limited feature: declared scopes, and pinned versions with another scope. */
 		scopeImpact: z.array(

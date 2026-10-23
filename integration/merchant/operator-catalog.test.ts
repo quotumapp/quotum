@@ -41,9 +41,6 @@ const stripePlan = {
 			name: "Pro",
 			version: 1,
 			trialDays: null,
-			currency: "USD",
-			baseAmountMinor: 2000,
-			billingInterval: "month",
 			basePrice: {
 				key: "pro_monthly",
 				currency: "USD",
@@ -55,15 +52,19 @@ const stripePlan = {
 				taxBehavior: "exclusive",
 				providerBindings: [stripeBinding("pro_monthly")],
 			},
-			providerBindings: [stripeBinding("pro_monthly")],
 			items: [
 				{
 					featureKey: "ai_credits",
 					itemKind: "allocation",
 					quantity: "1000",
-					resetInterval: "month",
-					expiresAfterSeconds: 86400,
-					overagePolicy: "blocked",
+					reset: {
+						interval: "month",
+						intervalCount: 1,
+					},
+					expiry: {
+						mode: "after_seconds",
+						seconds: 86400,
+					},
 				},
 			],
 		},
@@ -119,7 +120,6 @@ const publishedRevision = async () =>
 			{ revision: string | null }[]
 		>`SELECT published_catalog_revision_id::text AS revision FROM projects WHERE key='alpha'`
 	)[0]?.revision ?? null;
-
 describe("operator catalog commands with --instance", () => {
 	it("reads, previews and publishes to an active environment without a project key", async () => {
 		await seedOperatorOrganization(f);

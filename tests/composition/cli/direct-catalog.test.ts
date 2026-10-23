@@ -27,9 +27,6 @@ const catalog = {
 			name: "Pro",
 			version: 1,
 			trialDays: null,
-			currency: "USD",
-			baseAmountMinor: 2000,
-			billingInterval: "month",
 			basePrice: {
 				key: "pro_monthly",
 				currency: "USD",
@@ -41,15 +38,19 @@ const catalog = {
 				taxBehavior: "exclusive",
 				providerBindings: [stripe("pro_monthly")],
 			},
-			providerBindings: [stripe("pro_monthly")],
 			items: [
 				{
 					featureKey: "ai_credits",
 					itemKind: "allocation",
 					quantity: "1000",
-					resetInterval: "month",
-					expiresAfterSeconds: 86400,
-					overagePolicy: "blocked",
+					reset: {
+						interval: "month",
+						intervalCount: 1,
+					},
+					expiry: {
+						mode: "after_seconds",
+						seconds: 86400,
+					},
 				},
 			],
 		},
@@ -97,7 +98,6 @@ function harness(overrides: { authorize?: (write: boolean) => Promise<void> } = 
 	});
 	return { api, calls };
 }
-
 describe("direct catalog API", () => {
 	it("authorizes a read, then reads the published catalog and the bindings", async () => {
 		const { api, calls } = harness();

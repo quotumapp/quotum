@@ -14,6 +14,19 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Canonical-only catalogs
+
+Catalog requests, files and stored revisions now require the canonical syntax in
+[catalog publication](catalog.md#canonical-intent). Plan-level price fields, flat item reset/expiry
+and overage fields, top-up `expiresAfterSeconds` and rollover `mode: "months"` are rejected.
+Preview no longer returns `deprecations`, and `providerPriced.billingInterval` is non-null.
+Deploy the matching merchant console and update SDK callers and catalog files together.
+
+This pre-release transition targets fresh disposable databases. There is no stored-data converter,
+runtime compatibility reader or automatic reset. Older noncanonical catalogs are unsupported;
+create a fresh development database and republish canonical catalog files before testing the new
+runtime. No migration baseline or database schema changes accompany this transition.
+
 ## Production active from creation
 
 Sandbox and production now start active. The activation endpoint, CLI subcommand, capability and
