@@ -1,8 +1,8 @@
 {
-	"total": 94.3,
-	"src/billing/": 91.66,
-	"src/db/repository/": 93.77,
-	"src/providers/": 93.75,
-	"src/platform/": 96.19,
+	"total": 95.34,
+	"src/billing/": 94.95,
+	"src/db/repository/": 93.94,
+	"src/providers/": 94.72,
+	"src/platform/": 97.06,
 	"src/http/": 99.5
 }
