@@ -3,6 +3,7 @@ import {
 	loadIntegerSettings,
 	resolveIntegerSettings,
 } from "../shared/integer-settings";
+import { validatePollInterval } from "../shared/poll-interval";
 
 export const workerIntegerSettings = {
 	projectionSyncPollIntervalMs: { variable: "BILLING_PROJECTION_SYNC_POLL_INTERVAL_MS" },
@@ -126,8 +127,23 @@ export function resolveWorkerSettings(
 		workerPollIntervalMs: number;
 		storeEventReplayPollIntervalMs: number;
 		meteringMaintenancePollIntervalMs: number;
+		subscriptionReconciliationPollIntervalMs?: number;
 	},
 ) {
+	validatePollInterval(settings.workerPollIntervalMs, "BILLING_WORKER_POLL_INTERVAL_MS");
+	validatePollInterval(
+		settings.storeEventReplayPollIntervalMs,
+		"BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS",
+	);
+	validatePollInterval(
+		settings.meteringMaintenancePollIntervalMs,
+		"BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS",
+	);
+	if (settings.subscriptionReconciliationPollIntervalMs !== undefined)
+		validatePollInterval(
+			settings.subscriptionReconciliationPollIntervalMs,
+			"BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS",
+		);
 	const resolved = resolveIntegerSettings(workerIntegerSettings, settings);
 	return {
 		...resolved,

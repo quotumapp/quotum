@@ -617,6 +617,10 @@ connections owned by the merchant platform.
 
 ### Worker tuning
 
+All polling intervals, including legacy settings and inherited fallbacks, must be whole milliseconds
+from 1 through 2,147,483,647 (about 24.85 days). Invalid values fail startup; they are never clamped
+to a timer delay. Programmatic runtime configuration enforces the same range.
+
 Every override is optional and takes effect on restart. Defaults and shared polling fallbacks
 remain unchanged when a variable is absent. Workers parse no environment variables themselves;
 the runtime passes the validated settings through their existing ports.

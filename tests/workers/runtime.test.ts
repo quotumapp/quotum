@@ -214,3 +214,44 @@ describe("projection sync runtime", () => {
 		expect(scheduled).toHaveLength(1);
 	});
 });
+
+describe("polling runtime timer bounds", () => {
+	it.each([0, -1, 1.5, NaN, Infinity, 2_147_483_648, 3_000_000_000])(
+		"refuses %s before scheduling",
+		(pollIntervalMs) => {
+			let scheduled = 0;
+			expect(() =>
+				startPollingRuntime({
+					name: "bounded",
+					pollIntervalMs,
+					worker: { async runOnce() {} },
+					timers: {
+						setTimeout() {
+							scheduled++;
+							return 1;
+						},
+						clearTimeout() {},
+					},
+				}),
+			).toThrow("pollIntervalMs must be an integer between");
+			expect(scheduled).toBe(0);
+		},
+	);
+	it.each([1, 2_147_483_647])("preserves valid boundary %s", async (pollIntervalMs) => {
+		const scheduled: number[] = [];
+		const runtime = startPollingRuntime({
+			name: "bounded",
+			pollIntervalMs,
+			worker: { async runOnce() {} },
+			timers: {
+				setTimeout(_callback, delay) {
+					scheduled.push(delay);
+					return 1;
+				},
+				clearTimeout() {},
+			},
+		});
+		expect(scheduled).toEqual([pollIntervalMs]);
+		await runtime.stop();
+	});
+});
