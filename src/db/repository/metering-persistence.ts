@@ -750,11 +750,11 @@ export async function reserveMeterLimit(
 			deductions: [],
 		};
 	}
-	const effectiveAt = new Date();
-	// Expiry is decided on the database clock, like the expiry worker and the held sums.
+	// Both timestamps share one database instant, including while the host clock is skewed.
 	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
 		executor,
 		drizzleSql`
+			WITH reservation_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
 			INSERT INTO reservations (
 				project_id,
 				customer_id,
@@ -771,7 +771,7 @@ export async function reserveMeterLimit(
 				effective_at,
 				expires_at
 			)
-			VALUES (
+			SELECT
 				${input.projectId},
 				${input.customerId},
 				${input.entityId}::bigint,
@@ -784,9 +784,9 @@ export async function reserveMeterLimit(
 				'direct',
 				${input.quantity}::numeric,
 				${input.quantity}::numeric,
-				${effectiveAt.toISOString()},
-				clock_timestamp() + ${input.expiresInSeconds} * interval '1 second'
-			)
+				reservation_clock.at,
+				reservation_clock.at + ${input.expiresInSeconds} * interval '1 second'
+			FROM reservation_clock
 			RETURNING id, expires_at
 		`,
 	);

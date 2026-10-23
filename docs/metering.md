@@ -133,7 +133,7 @@ and license assignments also require `X-Billing-Actor`. Confirming more than the
 returns `RESERVATION_QUANTITY_EXCEEDED`, a changed confirmation returns
 `RESERVATION_ALREADY_CONFIRMED`, and using a newly published meter absent from the account's
 purchased catalog returns `METER_RATE_NOT_ACTIVATED`. Omitted `expiresInSeconds` on a reservation
-defaults to 300, accepts integer overrides from 1 to 86,400 seconds, and cannot be renewed. A reservation's expiry, and whether a correction or confirmation may still use an
+defaults to 300, accepts integer overrides from 1 to 86,400 seconds, and cannot be renewed. A reservation's effective timestamp and expiry share one database instant. Its expiry, and whether a correction or confirmation may still use an
 allocation, are decided on the database clock, so an application host whose clock drifts never
 expires a live hold or refuses a valid refund. An open reservation keeps its hold on an allocation
 that ends while it waits (revoked, expired, or a plan allowance that ended): balance reads, the

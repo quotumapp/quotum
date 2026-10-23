@@ -2040,11 +2040,11 @@ export async function reserveWithinTransaction(
 		return { ...decision, reservationId: null, status: null, expiresAt: null, deductions: [] };
 	}
 
-	const effectiveAt = new Date();
-	// Expiry is decided on the database clock, like the expiry worker and the held sums.
+	// Both timestamps share one database instant, including while the host clock is skewed.
 	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
 		tx,
 		drizzleSql`
+			WITH reservation_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
 			INSERT INTO reservations (
 				project_id,
 				customer_id,
@@ -2059,7 +2059,7 @@ export async function reserveWithinTransaction(
 				effective_at,
 				expires_at
 			)
-			VALUES (
+			SELECT
 				${projectId},
 				${customer.id},
 				${entityId},
@@ -2070,9 +2070,9 @@ export async function reserveWithinTransaction(
 				${rate.path},
 				${requestedQuantity}::numeric,
 				${walletQuantity}::numeric,
-				${effectiveAt.toISOString()},
-				clock_timestamp() + ${input.expiresInSeconds} * interval '1 second'
-			)
+				reservation_clock.at,
+				reservation_clock.at + ${input.expiresInSeconds} * interval '1 second'
+			FROM reservation_clock
 			RETURNING id, expires_at
 		`,
 	);
