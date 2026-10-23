@@ -1860,7 +1860,6 @@
       "code": "UNAUTHORIZED",
       "sources": [
         "src/app.ts",
-        "src/billing/errors.ts",
         "src/platform/mcp/changes.ts"
       ]
     },

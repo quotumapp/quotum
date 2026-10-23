@@ -27,16 +27,6 @@ export const refundRequestStatuses = [
 ] as const;
 export type RefundRequestStatus = (typeof refundRequestStatuses)[number];
 
-/**
- * A request in these states holds the payment's single open refund slot. One whose outcome could
- * not be established keeps it too, because the money may already have gone back.
- */
-export const openRefundStatuses = [
-	"requested",
-	"pending",
-	"requires_review",
-] as const satisfies readonly RefundRequestStatus[];
-
 /** A refund request Quotum made of a provider, with the amount and reason the caller approved. */
 export interface RefundRequest {
 	id: string;

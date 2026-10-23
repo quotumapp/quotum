@@ -238,6 +238,7 @@ describe("error inventory", () => {
 			"PROVIDER_OPERATION_PENDING",
 		]);
 		expect(codes.has("PROVIDER_OPERATION_UNCERTAIN")).toBe(false);
+		expect(codes.get("UNAUTHORIZED")).toContain("src/app.ts");
 		expect(
 			[...codes]
 				.filter(([, sources]) => sources.includes("src/billing/errors.ts"))
@@ -252,7 +253,6 @@ describe("error inventory", () => {
 			"PROVIDER_ACTION_REQUIRED",
 			"PROVIDER_CAPABILITY_NOT_CONFIGURED",
 			"PROVIDER_CAPABILITY_UNSUPPORTED",
-			"UNAUTHORIZED",
 		]);
 	});
 

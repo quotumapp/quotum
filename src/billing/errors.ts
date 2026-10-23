@@ -46,12 +46,6 @@ export class InvalidRequestError extends BillingError {
 	}
 }
 
-export class UnauthorizedBillingError extends BillingError {
-	constructor(message: string, code = "UNAUTHORIZED", status = 401) {
-		super(message, code, status, { classification: "unauthorized" });
-	}
-}
-
 export class NotConfiguredError extends BillingError {
 	constructor(
 		message: string,

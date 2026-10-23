@@ -11,7 +11,7 @@ import {
 	closeUsageWindows,
 	overageFeatureKey,
 	seedOverageSubscriber,
-} from "./helpers/overage-subscriber";
+} from "./helpers/overage-fixtures";
 import { seedPhase3ControlCatalog } from "./helpers/phase3-fixtures";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);

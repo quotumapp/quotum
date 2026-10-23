@@ -174,9 +174,6 @@ export function isSubscribableEventType(type: string): boolean {
 	return Object.hasOwn(domainEventDataSchemas, type);
 }
 
-/** The same rule as the `domain_events.type` check constraint. */
-export const domainEventTypePattern = /^[a-z][a-z_]*\.[a-z][a-z_]*$/;
-
 /**
  * The body of one delivery. `id` is also the `webhook-id` header: it stays the same across retries
  * and replays, so a receiver deduplicates on it.
