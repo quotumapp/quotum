@@ -7,6 +7,7 @@ import { paymentSetupSessions } from "../../src/db/schema";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
+	databaseNow,
 	describeLocalPostgres,
 	integrationProjectContext,
 	type LocalPostgresContext,
@@ -295,8 +296,7 @@ localDescribe("Payment setup persistence", () => {
 
 	it("queues one reconciliation task per setup and brings it forward", async () => {
 		const created = await context.repository.reservePaymentSetup(acme, reservation());
-		const later = new Date(Date.now() + 6 * hour);
-		const sooner = new Date(Date.now() + 5 * 60_000);
+		const before = await databaseNow(context.sql);
 		// Reservation commits its recovery task before any provider call can begin.
 		const initial = await context.sql<Array<{ id: string; customer_id: string }>>`
 			SELECT id, customer_id FROM store_events
@@ -309,11 +309,11 @@ localDescribe("Payment setup persistence", () => {
 
 		const first = await context.repository.schedulePaymentSetupReconciliation(acme, {
 			setupId: created.setup.id,
-			nextAttemptAt: later,
+			retryDelayMs: 3_600_000,
 		});
 		const second = await context.repository.schedulePaymentSetupReconciliation(acme, {
 			setupId: created.setup.id,
-			nextAttemptAt: sooner,
+			retryDelayMs: 60_000,
 		});
 		expect(second).toBe(first);
 		expect(first).toBe(initial[0]?.id);
@@ -323,8 +323,11 @@ localDescribe("Payment setup persistence", () => {
 			WHERE event_type = 'quotum.payment_setup.reconcile'
 		`;
 		expect(rows).toHaveLength(1);
+		expect(new Date(rows[0]?.next_attempt_at ?? 0).getTime()).toBeGreaterThanOrEqual(
+			before.getTime() + 60_000,
+		);
 		expect(new Date(rows[0]?.next_attempt_at ?? 0).getTime()).toBeLessThanOrEqual(
-			sooner.getTime() + 1000,
+			(await databaseNow(context.sql)).getTime() + 60_000,
 		);
 	});
 

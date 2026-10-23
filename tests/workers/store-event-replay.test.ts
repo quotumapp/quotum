@@ -85,14 +85,14 @@ function createRepository(
 							_projectId: string,
 							eventId: string,
 							reason: string,
-							nextAttemptAt: Date,
+							retryDelayMs: number,
 							workerId: string,
 						) => {
 							calls.push({
 								method: "markStoreEventReplayJobDeferred",
 								eventId,
 								reason,
-								nextAttemptAt: nextAttemptAt.toISOString(),
+								retryDelayMs: retryDelayMs,
 								workerId,
 							});
 							if (options.deferError !== undefined) {
@@ -691,10 +691,10 @@ describe("StoreEventReplayWorker", () => {
 
 describe("StoreEventReplayWorker deferrals", () => {
 	const deferredEvent = storeEvent({ provider: "stripe", channel: "web", attempts: 3 });
-	const nextAttemptAt = new Date("2026-05-31T00:30:00.000Z");
+	const retryDelayMs = 30 * 60_000;
 	const deferringProvider = {
 		replayStoreEvent: async () =>
-			({ status: "deferred", reason: "payment_setup_awaiting_customer", nextAttemptAt }) as const,
+			({ status: "deferred", reason: "payment_setup_awaiting_customer", retryDelayMs }) as const,
 	};
 
 	it("passes the configured failure budget to provider recovery", async () => {
@@ -711,7 +711,7 @@ describe("StoreEventReplayWorker deferrals", () => {
 				stripe: {
 					replayStoreEvent: async (_event, options) => {
 						budgets.push(options);
-						return { status: "deferred", reason: "payment_setup_needs_attention", nextAttemptAt };
+						return { status: "deferred", reason: "payment_setup_needs_attention", retryDelayMs };
 					},
 				},
 			},
@@ -748,7 +748,7 @@ describe("StoreEventReplayWorker deferrals", () => {
 			method: "markStoreEventReplayJobDeferred",
 			eventId: "event_1",
 			reason: "payment_setup_awaiting_customer",
-			nextAttemptAt: nextAttemptAt.toISOString(),
+			retryDelayMs: retryDelayMs,
 			workerId: "worker-a",
 		});
 		expect(calls.some((call) => isMethod(call, "markStoreEventReplayJobFailed"))).toBe(false);

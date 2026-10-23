@@ -352,7 +352,9 @@ scan sizes and per-run budgets have optional overrides in [worker tuning](deploy
 Retry backoff and lease ages are durations. Repositories stamp retry deadlines and compare lease ages
 against PostgreSQL time; host clock skew cannot make a failure immediately due or steal a healthy
 claim. Domain delivery, projection delivery, replay, reconciliation, auto top-up and promotion
-maintenance use this rule. Provider business deadlines remain absolute timestamps.
+maintenance use this rule. Payment-setup polling and waiting store-event deferrals also pass
+durations through the facade and worker adapters, preserving their failure attempt budgets.
+Provider business deadlines remain absolute timestamps.
 
 The existing repository caps are enforced at startup. Lease, heartbeat, retry and retention policies
 keep their current behavior. Erased accounts are excluded before bounding candidates.

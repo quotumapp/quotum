@@ -92,6 +92,14 @@ export interface StoreEventReplayJobRepositorySource {
 		eventId: string,
 		workerId: string,
 	): Promise<void>;
+	markStoreEventReplayJobDeferred?(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		retryDelayMs: number,
+		workerId: string,
+	): Promise<void>;
+
 	markStoreEventReplayJobFailed(
 		projectId: string,
 		eventId: string,
@@ -148,6 +156,24 @@ export class StoreEventReplayJobRepository implements StoreEventReplayJobReposit
 			projectId,
 			eventId,
 			errorMessage,
+			retryDelayMs,
+			workerId,
+		);
+	}
+
+	async markStoreEventReplayJobDeferred(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		retryDelayMs: number,
+		workerId: string,
+	): Promise<void> {
+		if (!this.source.markStoreEventReplayJobDeferred)
+			throw new Error("Store event deferral is unavailable");
+		await this.source.markStoreEventReplayJobDeferred(
+			projectId,
+			eventId,
+			reason,
 			retryDelayMs,
 			workerId,
 		);

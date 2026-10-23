@@ -17,6 +17,7 @@ import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import { expectProjectionJob, expectStoreEvent, expectTableCounts } from "./helpers/db-assertions";
 import {
 	createLocalPostgresContext,
+	databaseNow,
 	describeLocalPostgres,
 	integrationProjectContext,
 	type LocalPostgresContext,
@@ -862,24 +863,36 @@ localDescribe("Worker flows integration", () => {
 			});
 
 		// First failure: still inside the backoff window, one minute out.
+		const beforeFirst = (await databaseNow(context.sql)).getTime();
 		expect((await run(reconciliationOutage())).providerFailed).toBe(1);
 		expect(await readReconciliation(context.sql, "purchase_token_stale")).toMatchObject({
 			attempts: 1,
 			error: "provider outage",
 			finite: true,
-			nextAttemptMs: String(now.getTime() + 60_000),
 		});
+
+		const firstRetry = await readReconciliation(context.sql, "purchase_token_stale");
+		expect(Number(firstRetry.nextAttemptMs)).toBeGreaterThanOrEqual(beforeFirst + 60_000);
+		expect(Number(firstRetry.nextAttemptMs)).toBeLessThanOrEqual(
+			(await databaseNow(context.sql)).getTime() + 60_000,
+		);
 
 		// Second failure spends the budget. It used to store 'infinity'; it must stay a day out.
 		await makeReconciliationDue(context.sql, "purchase_token_stale");
+		const beforeSecond = (await databaseNow(context.sql)).getTime();
 		expect((await run(reconciliationOutage())).providerFailed).toBe(1);
 		expect(await readReconciliation(context.sql, "purchase_token_stale")).toMatchObject({
 			attempts: 2,
 			error: "provider outage",
 			locked_by: null,
 			finite: true,
-			nextAttemptMs: String(now.getTime() + day),
 		});
+
+		const secondRetry = await readReconciliation(context.sql, "purchase_token_stale");
+		expect(Number(secondRetry.nextAttemptMs)).toBeGreaterThanOrEqual(beforeSecond + day);
+		expect(Number(secondRetry.nextAttemptMs)).toBeLessThanOrEqual(
+			(await databaseNow(context.sql)).getTime() + day,
+		);
 
 		// Nothing is claimed while the day has not passed, even with the provider back.
 		const calls: string[] = [];

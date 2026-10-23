@@ -116,7 +116,7 @@ export interface PaymentSetupRepositoryDependency {
 	): Promise<PaymentSetupSession>;
 	schedulePaymentSetupReconciliation?(input: {
 		setupId: string;
-		nextAttemptAt: Date;
+		retryDelayMs: number;
 	}): Promise<string>;
 	enqueueProviderStoreEvent?(input: {
 		provider: "stripe";
@@ -406,7 +406,6 @@ export async function applyPaymentSetupEvent(
 	input: { event: NormalizedPaymentSetupEvent; workerId: string },
 ): Promise<StoreEventReplayProviderResult> {
 	const repository = requirePaymentSetupRepository(context.repository);
-	const now = context.now?.() ?? new Date();
 	const claimed = await repository.claimPaymentSetup({
 		setupId: input.event.setupId,
 		workerId: input.workerId,
@@ -417,10 +416,7 @@ export async function applyPaymentSetupEvent(
 		// event has no target in this project, not a creation response that has yet to land.
 		if (known === null || known === undefined)
 			return { status: "ignored", reason: "payment_setup_missing" };
-		return deferred(
-			"payment_setup_claimed_elsewhere",
-			new Date(now.getTime() + PAYMENT_SETUP_MIN_DEFER_MS),
-		);
+		return deferred("payment_setup_claimed_elsewhere", PAYMENT_SETUP_MIN_DEFER_MS);
 	}
 	try {
 		if (claimed.status === "completed") {
@@ -617,10 +613,7 @@ export async function reconcilePaymentSetup(
 		if (known === null || known === undefined) {
 			return { status: "ignored", reason: "payment_setup_missing" };
 		}
-		return deferred(
-			"payment_setup_claimed_elsewhere",
-			new Date(now.getTime() + PAYMENT_SETUP_MIN_DEFER_MS),
-		);
+		return deferred("payment_setup_claimed_elsewhere", PAYMENT_SETUP_MIN_DEFER_MS);
 	}
 	const exhausted =
 		input.attempts + 1 >=
@@ -642,7 +635,7 @@ export async function reconcilePaymentSetup(
 			workerId: input.workerId,
 			reason: errorReason(error),
 		});
-		return deferred(errorReason(error), new Date(now.getTime() + PAYMENT_SETUP_ATTENTION_POLL_MS));
+		return deferred(errorReason(error), PAYMENT_SETUP_ATTENTION_POLL_MS);
 	} finally {
 		await repository.releasePaymentSetupClaim({ setupId: input.setupId, workerId: input.workerId });
 	}
@@ -663,14 +656,14 @@ async function reconcileUnresolvedSetup(
 				reason:
 					"The hosted setup link was never confirmed and its creation or idempotency window has expired; it cannot be recreated safely.",
 			});
-			return deferred(
-				"payment_setup_creation_unconfirmed",
-				new Date(now.getTime() + PAYMENT_SETUP_ATTENTION_POLL_MS),
-			);
+			return deferred("payment_setup_creation_unconfirmed", PAYMENT_SETUP_ATTENTION_POLL_MS);
 		}
 		// Within the retention window Stripe replays the original session for the frozen key.
 		const issued = await issueHostedSetupLink(context, setup);
-		return deferred("payment_setup_link_recovered", nextPollAt(issued.setup, now));
+		return deferred(
+			"payment_setup_link_recovered",
+			nextPollAt(issued.setup, now).getTime() - now.getTime(),
+		);
 	}
 
 	const session = await retrieveSession(context, setup);
@@ -689,7 +682,10 @@ async function reconcileUnresolvedSetup(
 	}
 	// An unknown provider result cannot prove expiry. Keep uncertain setups visible and
 	// retain their slot; a late completion can still apply a card saved before expiry.
-	return deferred("payment_setup_awaiting_customer", nextPollAt(setup, now));
+	return deferred(
+		"payment_setup_awaiting_customer",
+		nextPollAt(setup, now).getTime() - now.getTime(),
+	);
 }
 
 async function retrieveSession(
@@ -719,7 +715,7 @@ async function scheduleReconciliation(
 ): Promise<void> {
 	await context.repository.schedulePaymentSetupReconciliation?.({
 		setupId: setup.id,
-		nextAttemptAt: nextPollAt(setup, now),
+		retryDelayMs: nextPollAt(setup, now).getTime() - now.getTime(),
 	});
 }
 
@@ -766,9 +762,9 @@ function paymentSetupMetadata(setup: PaymentSetupRow): Record<string, string> {
 
 function deferred(
 	reason: string,
-	nextAttemptAt: Date,
+	retryDelayMs: number,
 ): Extract<StoreEventReplayProviderResult, { status: "deferred" }> {
-	return { status: "deferred", reason, nextAttemptAt };
+	return { status: "deferred", reason, retryDelayMs };
 }
 
 function cardSummary(paymentMethod: Record<string, unknown> | null): PaymentSetupCard | null {

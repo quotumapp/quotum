@@ -33,7 +33,7 @@ export type StoreEventReplayProviderResult =
 	 * a hosted session the customer has not finished. It is rescheduled without consuming a retry
 	 * attempt, so waiting can never exhaust the job's budget for real failures.
 	 */
-	| { status: "deferred"; reason: string; nextAttemptAt: Date };
+	| { status: "deferred"; reason: string; retryDelayMs: number };
 
 export interface StoreEventReplayProviders {
 	apple: StoreEventReplayProvider | null;
@@ -94,7 +94,7 @@ export interface StoreEventReplayRepository {
 		projectId: string,
 		eventId: string,
 		reason: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void>;
 	renewStoreEventReplayJobLease?(
@@ -373,7 +373,7 @@ export class StoreEventReplayWorker {
 				event.project_id,
 				event.id,
 				result.reason,
-				result.nextAttemptAt,
+				result.retryDelayMs,
 				this.workerId,
 			);
 			return true;

@@ -494,6 +494,22 @@ export class BillingRepository {
 		return await this.storeEventReplay.claimStoreEventReplayJobById(workerId, project, eventId);
 	}
 
+	async markStoreEventReplayJobDeferred(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		retryDelayMs: number,
+		workerId: string,
+	): Promise<void> {
+		await this.storeEventReplay.markStoreEventReplayJobDeferred(
+			projectId,
+			eventId,
+			reason,
+			retryDelayMs,
+			workerId,
+		);
+	}
+
 	async markStoreEventReplayJobSucceeded(
 		projectId: string,
 		eventId: string,
@@ -1277,7 +1293,7 @@ export class BillingRepository {
 
 	async schedulePaymentSetupReconciliation(
 		project: ProjectInstanceContext,
-		input: { setupId: string; nextAttemptAt: Date },
+		input: { setupId: string; retryDelayMs: number },
 	): Promise<string> {
 		return await schedulePaymentSetupReconciliation(
 			this.database,

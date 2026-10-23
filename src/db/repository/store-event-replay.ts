@@ -185,7 +185,7 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 		projectId: string,
 		eventId: string,
 		reason: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void> {
 		requireNonBlank(reason, "p_processing_error");
@@ -196,7 +196,7 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 			SET
 				processing_status = 'pending',
 				processing_error = ${reason},
-				next_attempt_at = ${nextAttemptAt.toISOString()}::timestamptz,
+				next_attempt_at = ${workerRetryAtSql(retryDelayMs)},
 				locked_at = NULL,
 				locked_by = NULL,
 				updated_at = now()

@@ -611,7 +611,7 @@ export class ProjectScopedBillingRepository {
 
 	async schedulePaymentSetupReconciliation(input: {
 		setupId: string;
-		nextAttemptAt: Date;
+		retryDelayMs: number;
 	}): Promise<string> {
 		return await this.repository.schedulePaymentSetupReconciliation(this.project, input);
 	}
