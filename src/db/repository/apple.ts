@@ -1,7 +1,10 @@
 import { BillingError, NotFoundBillingError } from "../../billing/errors";
 import type { ProjectionPayload } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
-import { restoreAppleRefundAllocations } from "./apple-allocation-restoration";
+import {
+	canRestoreAppleRefund,
+	restoreAppleRefundAllocations,
+} from "./apple-allocation-restoration";
 import { recordApplePromotionInTx } from "./apple-promotions";
 import { RepositoryModule } from "./base";
 import {
@@ -186,7 +189,16 @@ export class AppleBillingRepository extends RepositoryModule {
 				raiseIdentityMismatch: true,
 				replayStoreEventId: input.replayStoreEventId ?? null,
 			});
-			if (!storeEvent.applied) {
+			if (
+				!storeEvent.applied ||
+				(isRefundReversal &&
+					!(await canRestoreAppleRefund(tx, {
+						projectId,
+						customerId: customer.id,
+						transactionId: input.transactionId,
+						subscriptionId,
+					})))
+			) {
 				return processedStoreKitRecordingResult(
 					customer.billing_account_id,
 					await getEntitlementSnapshot(tx, projectId, customer.billing_account_id),

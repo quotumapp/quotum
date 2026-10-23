@@ -143,6 +143,86 @@ localDescribe("Apple refund reversal accounting", () => {
 	});
 
 	it.each(["consumable", "subscription"] as const)(
+		"does not restore a %s refund after an independent revocation",
+		async (kind) => {
+			await publishAiCreditsCatalog(context.repository);
+			await record(kind, "purchase_verified");
+			await record(kind, "REFUND");
+			await record(kind, "REVOKE");
+			const before = await allocations();
+			await context.sql`DELETE FROM projection_sync_jobs WHERE project_id = ${project().projectInstanceId}`;
+			await record(kind, "REFUND_REVERSED");
+			expect(await balance()).toMatchObject({ available: "0" });
+			expect(await allocations()).toEqual(before);
+			expect(
+				await context.sql<{ status: string }[]>`SELECT status FROM purchases
+				WHERE project_id = ${project().projectInstanceId}`,
+			).toEqual([{ status: "revoked" }]);
+			expect(
+				await context.sql<{ id: string }[]>`SELECT id FROM projection_sync_jobs
+				WHERE project_id = ${project().projectInstanceId}`,
+			).toEqual([]);
+			if (kind === "subscription") {
+				expect(
+					await context.sql<{ status: string }[]>`SELECT status FROM subscriptions
+					WHERE project_id = ${project().projectInstanceId}`,
+				).toEqual([{ status: "revoked" }]);
+			}
+		},
+	);
+
+	it("does not restore an older payment after a later subscription payment is refunded", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		await record("subscription", "purchase_verified");
+		await record("subscription", "REFUND");
+		const renewal = {
+			transactionId: "apple_renewal",
+			purchasedAt: new Date(now.getTime() + 28 * 86_400_000),
+			expiresAt: new Date(now.getTime() + 56 * 86_400_000),
+		};
+		await record("subscription", "purchase_verified", renewal);
+		await record("subscription", "REFUND", renewal);
+		const before = await allocations();
+		await record("subscription", "REFUND_REVERSED");
+		expect(await allocations()).toEqual(before);
+		expect(
+			await context.sql<{ status: string }[]>`SELECT status FROM purchases
+			WHERE project_id = ${project().projectInstanceId} ORDER BY transaction_id`,
+		).toEqual([{ status: "refunded" }, { status: "refunded" }]);
+		expect(
+			await context.sql<{ status: string }[]>`SELECT status FROM subscriptions
+			WHERE project_id = ${project().projectInstanceId}`,
+		).toEqual([{ status: "refunded" }]);
+	});
+
+	it.each(["consumable", "subscription"] as const)(
+		"keeps a revoked %s invalid even when another refund is recorded afterwards",
+		async (kind) => {
+			await publishAiCreditsCatalog(context.repository);
+			await record(kind, "purchase_verified");
+			await record(kind, "REVOKE");
+			await record(kind, "REFUND");
+			const before = await allocations();
+			await record(kind, "REFUND_REVERSED");
+			expect(await allocations()).toEqual(before);
+			expect(await balance()).toMatchObject({ available: "0" });
+		},
+	);
+
+	it("leaves a reversal without refund evidence unchanged", async () => {
+		await publishAiCreditsCatalog(context.repository);
+		await record("consumable", "purchase_verified");
+		const before = await allocations();
+		await context.sql`DELETE FROM projection_sync_jobs WHERE project_id = ${project().projectInstanceId}`;
+		await record("consumable", "REFUND_REVERSED");
+		expect(await allocations()).toEqual(before);
+		expect(await balance()).toMatchObject({ available: "10" });
+		const jobs = await context.sql`SELECT id FROM projection_sync_jobs
+			WHERE project_id = ${project().projectInstanceId}`;
+		expect(jobs).toHaveLength(0);
+	});
+
+	it.each(["consumable", "subscription"] as const)(
 		"preserves consumption and an open reservation across a %s refund reversal",
 		async (kind) => {
 			await publishAiCreditsCatalog(context.repository);

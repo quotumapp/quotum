@@ -315,6 +315,10 @@ Top-ups regain their original grant less recorded consumption and holds. Subscri
 keep any existing quantity reversals, including administrative debits; only markers attributable
 to that transaction's refund are cleared. Original expiry and reset windows remain in force, so
 an expired allowance does not become spendable. Duplicate notifications never replenish a grant.
+Before restoring state, Quotum checks the recorded invalidations under the account lock. The latest
+invalidation must be a refund of that transaction; a revocation or a later refund of another payment
+in the subscription prevents restoration. A reversal without a recorded matching refund also leaves
+state unchanged. These notifications are recorded as processed without emitting a purchase projection.
 For reversals processed by an older service that restored purchase state without restoring credits,
 use the [targeted repair procedure](operations.md#apple-refund-reversal-repairs).
 
