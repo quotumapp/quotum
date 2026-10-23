@@ -53,9 +53,9 @@ describe("connection artifact retention", () => {
 			(await sql`SELECT state_hash FROM platform_connection_oauth_states`).map((r) => r.state_hash),
 		).toEqual(["live"]);
 		expect(
-			(await sql`SELECT event_id FROM platform_stripe_app_events WHERE account_id='acct_retention' ORDER BY event_id`).map(
-				(r) => r.event_id,
-			),
+			(
+				await sql`SELECT event_id FROM platform_stripe_app_events WHERE account_id='acct_retention' ORDER BY event_id`
+			).map((r) => r.event_id),
 		).toEqual(["pending", "recent"]);
 	});
 	it("does not let an old deauthorization event disable a replacement version", async () => {
