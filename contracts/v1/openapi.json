@@ -5216,6 +5216,16 @@
         },
         "description": "Request failed (501); see the error code and request ID."
       },
+      "QuotumError502": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/QuotumError"
+            }
+          }
+        },
+        "description": "Request failed (502); see the error code and request ID."
+      },
       "QuotumError503": {
         "content": {
           "application/json": {
@@ -35575,6 +35585,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -35665,6 +35678,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -35749,6 +35765,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -35832,6 +35851,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -35956,6 +35978,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -36052,6 +36077,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -36138,6 +36166,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -36305,6 +36336,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -36398,6 +36432,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -36485,6 +36522,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -36571,6 +36611,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -36661,6 +36704,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -36822,6 +36868,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -37051,6 +37100,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -37182,6 +37234,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -37286,6 +37341,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -37426,6 +37484,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -37518,6 +37579,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -37615,6 +37679,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -37695,6 +37762,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -37830,6 +37900,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -37971,6 +38044,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -38064,6 +38140,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -38150,6 +38229,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -38243,6 +38325,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -38340,6 +38425,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -38432,6 +38520,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -38526,6 +38617,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -38609,6 +38703,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -38726,6 +38823,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -38850,6 +38950,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -38970,6 +39073,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -39087,6 +39193,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -39170,6 +39279,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -39260,6 +39372,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -39378,6 +39493,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -39470,6 +39588,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -39585,6 +39706,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -39674,6 +39798,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -39776,6 +39903,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -39859,6 +39989,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -39988,6 +40121,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -40084,6 +40220,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -40176,6 +40315,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -40272,6 +40414,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -40440,6 +40585,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -40536,6 +40684,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -40628,6 +40779,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -40725,6 +40879,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -40821,6 +40978,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -40901,6 +41061,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -41025,6 +41188,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -41117,6 +41283,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -41238,6 +41407,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -41324,6 +41496,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -41417,6 +41592,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -41535,6 +41713,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -41639,6 +41820,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -41856,6 +42040,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -41978,6 +42165,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -42149,6 +42339,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -42510,6 +42703,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -42632,6 +42828,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -42801,6 +43000,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -43017,6 +43219,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -43167,6 +43372,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -43390,6 +43598,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -43510,6 +43721,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -43624,6 +43838,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -43711,6 +43928,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -43787,6 +44007,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -43950,6 +44173,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -44107,6 +44333,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -44282,6 +44511,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -44470,6 +44702,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -44678,6 +44913,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -44848,6 +45086,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -45005,6 +45246,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -45158,6 +45402,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -45318,6 +45565,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -45482,6 +45732,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -45662,6 +45915,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -45912,6 +46168,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -46009,6 +46268,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -46108,6 +46370,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -46205,6 +46470,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -46295,6 +46563,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -46461,6 +46732,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -46651,6 +46925,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -46840,6 +47117,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -47015,6 +47295,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -47152,6 +47435,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -47369,6 +47655,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -47509,6 +47798,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -47585,6 +47877,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -47695,6 +47990,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -47807,6 +48105,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -47906,6 +48207,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -48018,6 +48322,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -48097,6 +48404,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -48193,6 +48503,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -48288,6 +48601,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -48382,6 +48698,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -48495,6 +48814,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -48612,6 +48934,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -48728,6 +49053,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -48804,6 +49132,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -48896,6 +49227,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -49005,6 +49339,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -49188,6 +49525,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -49267,6 +49607,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -49372,6 +49715,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -49457,6 +49803,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -49573,6 +49922,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -49685,6 +50037,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -49787,6 +50142,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -49908,6 +50266,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -50008,6 +50369,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -50727,6 +51091,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -51032,6 +51399,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -51118,6 +51488,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -51275,6 +51648,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -51344,6 +51720,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -51463,6 +51842,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -51588,6 +51970,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -51728,6 +52113,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -52098,6 +52486,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -52175,6 +52566,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -52254,6 +52648,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -52331,6 +52728,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -52419,6 +52819,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -52493,6 +52896,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -52581,6 +52987,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -52659,6 +53068,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -52736,6 +53148,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -53101,6 +53516,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -53285,6 +53703,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -53453,6 +53874,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -53527,6 +53951,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -53634,6 +54061,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -53748,6 +54178,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -53858,6 +54291,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -53965,6 +54401,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -54038,6 +54477,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -54119,6 +54561,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -54187,6 +54632,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -54403,6 +54851,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -54799,6 +55250,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -54993,6 +55447,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -55228,6 +55685,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -55336,6 +55796,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -55409,6 +55872,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -55512,6 +55978,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -55592,6 +56061,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -55679,6 +56151,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -55753,6 +56228,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -55867,6 +56345,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -55948,6 +56429,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -56025,6 +56509,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -56112,6 +56599,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -56265,6 +56755,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -56346,6 +56839,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -56423,6 +56919,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -56511,6 +57010,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -56591,6 +57093,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -56751,6 +57256,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -57021,6 +57529,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -57090,6 +57601,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -57204,6 +57718,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -57272,6 +57789,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -57356,6 +57876,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -57467,6 +57990,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -57544,6 +58070,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -57617,6 +58146,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -57698,6 +58230,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -57807,6 +58342,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -57902,6 +58440,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -57981,6 +58522,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -58062,6 +58606,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -58270,6 +58817,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -58377,6 +58927,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -58537,6 +59090,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -58886,6 +59442,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -58993,6 +59552,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -59153,6 +59715,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -59354,6 +59919,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -59489,6 +60057,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -59700,6 +60271,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -59805,6 +60379,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -59908,6 +60485,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -60009,6 +60589,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -60121,6 +60704,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -60206,6 +60792,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -60360,6 +60949,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -60432,6 +61024,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -60513,6 +61108,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -60587,6 +61185,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -60660,6 +61261,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -60768,6 +61372,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -60844,6 +61451,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -60919,6 +61529,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -61070,6 +61683,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -61142,6 +61758,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -61247,6 +61866,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -61322,6 +61944,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -61414,6 +62039,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -61487,6 +62115,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -61567,6 +62198,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -61650,6 +62284,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -61726,6 +62363,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -61836,6 +62476,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -61921,6 +62564,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -61993,6 +62639,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -62071,6 +62720,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -62195,6 +62847,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -62273,6 +62928,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -62388,6 +63046,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -62463,6 +63124,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -62866,6 +63530,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -63016,6 +63683,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -63090,6 +63760,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -63162,6 +63835,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -63296,6 +63972,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -63429,6 +64108,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -63505,6 +64187,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -63580,6 +64265,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -63672,6 +64360,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -63891,6 +64582,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -64019,6 +64713,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -64150,6 +64847,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -64364,6 +65064,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -64739,6 +65442,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -64930,6 +65636,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -65160,6 +65869,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -65244,6 +65956,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -65317,6 +66032,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -65462,6 +66180,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -65572,6 +66293,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -65689,6 +66413,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -65782,6 +66509,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -65909,6 +66639,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -65990,6 +66723,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -66265,6 +67001,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -66421,6 +67160,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -66537,6 +67279,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -66711,6 +67456,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -66813,6 +67561,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -66904,6 +67655,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -66989,6 +67743,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -67065,6 +67822,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -67263,6 +68023,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -67369,6 +68132,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -67495,6 +68261,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -67606,6 +68375,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
@@ -67758,6 +68530,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -67895,6 +68670,9 @@
           "501": {
             "$ref": "#/components/responses/QuotumError501"
           },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
           "503": {
             "$ref": "#/components/responses/QuotumError503"
           }
@@ -68031,6 +68809,9 @@
           },
           "501": {
             "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
           },
           "503": {
             "$ref": "#/components/responses/QuotumError503"

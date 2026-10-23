@@ -11,7 +11,7 @@ const OPERATION_METHODS = ["get", "put", "post", "delete", "options", "head", "p
 
 /** Statuses every `/v1` and `/api` operation answers with the shared error envelope. */
 export const STANDARD_ERROR_STATUSES = [
-	400, 401, 403, 404, 409, 410, 413, 415, 422, 429, 500, 501, 503,
+	400, 401, 403, 404, 409, 410, 413, 415, 422, 429, 500, 501, 502, 503,
 ];
 
 /** The response each operation declares for a status in `STANDARD_ERROR_STATUSES`. */
