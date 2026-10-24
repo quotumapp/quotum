@@ -5,6 +5,7 @@ import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
 import type { BillingCadenceUnit } from "../../shared/cadence";
 import { RepositoryModule } from "./base";
+import { sameStoredResetCadenceSql } from "./cadence-sql";
 import {
 	materializeSubscriptionAllocations,
 	materializeTopupAllocation,
@@ -785,8 +786,7 @@ export class StripeBillingRepository extends RepositoryModule {
 							AND (
 								added.overage_policy <> 'blocked'
 								OR held.overage_policy <> 'blocked'
-								OR added.reset_interval IS DISTINCT FROM held.reset_interval
-								OR added.reset_interval_count <> held.reset_interval_count
+								OR NOT ${sameStoredResetCadenceSql("added", "held")}
 							)
 						)
 						OR (

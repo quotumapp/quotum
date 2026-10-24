@@ -1022,6 +1022,33 @@ describe("catalog control plane cadences", () => {
 		);
 		expect(await messageOf([overage("month")])).toBe("normalized");
 	});
+	it.each([
+		["quarter", 1, "month", 3],
+		["semi_annual", 1, "month", 6],
+		["year", 1, "quarter", 4],
+		["week", 1, "day", 7],
+		["day", 1, "hour", 24],
+	] as const)(
+		"combines equivalent add-on resets %s x %s and %s x %s",
+		async (left, leftCount, right, rightCount) => {
+			expect(
+				await messageOf([
+					plan({
+						billingInterval: "year",
+						items: [item({ resetInterval: left, resetIntervalCount: leftCount })],
+					}),
+					plan({
+						key: "boost",
+						name: "Boost",
+						kind: "addon",
+						billingInterval: "year",
+						items: [item({ resetInterval: right, resetIntervalCount: rightCount })],
+					}),
+				]),
+			).toBe("normalized");
+		},
+	);
+
 	it("requires every meter limit an add-on adds to to be a hard cap with the same reset", async () => {
 		const addOn = (overrides: Partial<CatalogPlanItemIntent>) =>
 			plan({ key: "boost", name: "Boost", kind: "addon", items: [item(overrides)] });

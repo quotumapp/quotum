@@ -78,6 +78,48 @@ localDescribe("meter limits from a base plan and its add-ons", () => {
 		expect(await conflicts("raised", "boost", 1)).toEqual([]);
 	});
 
+	it("publishes equivalent reset spellings and combines their quotas", async () => {
+		const equivalent = (
+			key: string,
+			kind: "base" | "addon",
+			quantity: string,
+			interval: "quarter" | "month",
+			intervalCount: number,
+		): AuthoredPlanIntent => ({
+			key,
+			name: key,
+			version: 1,
+			trialDays: null,
+			kind,
+			items: [
+				{
+					featureKey: "api_requests",
+					itemKind: "meter_limit",
+					quantity,
+					reset: { interval, intervalCount },
+				},
+			],
+		});
+		await publish(
+			catalog([
+				equivalent("pro", "base", "100", "quarter", 1),
+				equivalent("boost", "addon", "50", "month", 3),
+			]),
+			null,
+		);
+		await subscribe("equivalent", "pro", 1);
+		await subscribe("equivalent", "boost", 1);
+		expect(await conflicts("equivalent", "boost", 1)).toEqual([]);
+		expect(
+			await context.repository.consumeUsage(integrationProjectContext(), {
+				billingAccountId: "equivalent",
+				featureKey: "api_requests",
+				quantity: "150",
+				idempotencyKey: "equivalent-full",
+			}),
+		).toMatchObject({ allowed: true, balance: { granted: "150", consumed: "150" } });
+	});
+
 	it("keeps a cap that cannot join the base plan's out, and refuses buying it", async () => {
 		await publish(catalog([plan("pro", "base", 1, limit("100", "day"))]), null);
 		// A later revision caps monthly throughout, so its add-on publishes; an account still on the

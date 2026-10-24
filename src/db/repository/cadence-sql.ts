@@ -83,8 +83,17 @@ function cadenceIntervalSql(unitColumn: string, countColumn: string): SQL {
  * and 24 hours, are one cadence, and a lifetime is only the same as a lifetime.
  */
 export function sameStoredCadenceSql(left: string, right: string): SQL {
+	return sameCadenceColumnsSql(left, right, "interval", "interval_count");
+}
+
+/** Compares item resets without equating calendar months to fixed thirty-day durations. */
+export function sameStoredResetCadenceSql(left: string, right: string): SQL {
+	return sameCadenceColumnsSql(left, right, "reset_interval", "reset_interval_count");
+}
+
+function sameCadenceColumnsSql(left: string, right: string, interval: string, count: string): SQL {
 	const measure = (alias: string, unit: (unit: CadenceUnit) => number | null) =>
-		drizzleSql`(${unitCase(`${alias}.interval`, unit)} * ${drizzleSql.raw(`${alias}.interval_count`)})`;
+		drizzleSql`(${unitCase(`${alias}.${interval}`, unit)} * ${drizzleSql.raw(`${alias}.${count}`)})`;
 	return drizzleSql`(
 		${measure(left, unitMonths)} IS NOT DISTINCT FROM ${measure(right, unitMonths)}
 		AND ${measure(left, unitHours)} IS NOT DISTINCT FROM ${measure(right, unitHours)}

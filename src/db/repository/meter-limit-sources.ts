@@ -1,6 +1,6 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import { databaseDecimal, decimalToUnits, unitsToDecimal } from "../../billing/decimal";
-import type { CadenceUnit } from "../../shared/cadence";
+import { type CadenceUnit, sameCadence } from "../../shared/cadence";
 import { defaultPlanReadGrantSql } from "./default-plan-sql";
 import {
 	meterLimitWindowBounds,
@@ -258,8 +258,10 @@ export function meterLimitsJoin(
 	return (
 		left.overage_policy === "blocked" &&
 		right.overage_policy === "blocked" &&
-		left.reset_interval === right.reset_interval &&
-		left.reset_interval_count === right.reset_interval_count &&
+		sameCadence(
+			{ unit: left.reset_interval, count: left.reset_interval_count },
+			{ unit: right.reset_interval, count: right.reset_interval_count },
+		) &&
 		left.allocation_scope === right.allocation_scope
 	);
 }
