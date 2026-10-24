@@ -219,3 +219,5 @@ ALTER TABLE platform_connections
 
 CREATE INDEX platform_connection_operations_retention_idx ON platform_connection_operations(created_at);
 CREATE INDEX platform_stripe_app_events_processed_idx ON platform_stripe_app_events(processed_at) WHERE processed_at IS NOT NULL;
+
+CREATE INDEX platform_stripe_app_events_unmapped_retention_idx ON platform_stripe_app_events(created_at) WHERE processed_at IS NULL;

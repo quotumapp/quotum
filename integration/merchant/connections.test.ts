@@ -302,6 +302,7 @@ describe("Stripe OAuth custody and account isolation", () => {
 					livemode: false,
 				};
 			},
+			installationStatus: async () => "absent" as const,
 			webhookSecret: () => "whsec_synthetic",
 		};
 		const oauth = new MerchantStripeOAuth(

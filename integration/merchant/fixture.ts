@@ -185,7 +185,7 @@ export function merchantFixture(
 			mailer.fail = false;
 			authenticators.clear();
 			recoveryCodes.clear();
-			await sql`TRUNCATE platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links,projects CASCADE`;
+			await sql`TRUNCATE platform_stripe_app_events,platform_idempotency,platform_audit_events,platform_policy_acceptances,platform_service_principals,platform_step_up_grants,platform_project_api_credentials,platform_provisioning_steps,platform_provisioning_operations,platform_projects,platform_onboarding_drafts,platform_invitations,platform_memberships,platform_organizations,platform_merchant_sessions,platform_external_identities,platform_principals,platform_auth_users,platform_auth_verifications,platform_auth_rate_limits,platform_rate_limits,platform_auth_links,projects CASCADE`;
 			// TRUNCATE CASCADE also removes public clients seeded by the baseline migration.
 			await sql`INSERT INTO platform_auth_oauth_clients(client_id,name,redirect_uris,scopes,grant_types,response_types,token_endpoint_auth_method,require_p_k_c_e,skip_consent,created_at,updated_at) VALUES
 			('quotum-claude-code','Claude Code',ARRAY['http://localhost:8788/callback'],ARRAY['quotum.read','offline_access','quotum.billing.write'],ARRAY['authorization_code','refresh_token'],ARRAY['code'],'none',true,false,now(),now()),
@@ -430,6 +430,7 @@ export function isolatedStripeOAuthPort(): StripeOAuthPort {
 			accountId: "acct_isolated",
 			livemode: false,
 		}),
+		installationStatus: async () => "absent",
 		webhookSecret: () => "whsec_app_synthetic",
 	};
 }

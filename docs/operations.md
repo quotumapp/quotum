@@ -437,8 +437,8 @@ rows older than these windows:
 | --- | --- | --- |
 | `platform_connection_versions` and `platform_connection_secrets` | Uncommitted draft expires; no active reference or live refresh lease | 7 days |
 | `platform_connection_oauth_states` | `expires_at` or `consumed_at` is past | 7 days |
-| `platform_connection_operations` | `created_at` is past | 30 days |
-| `platform_stripe_app_events` | `processed_at` is past; unprocessed events stay | 30 days |
+| `platform_connection_operations` | `created_at` is past, except permanent `credential.*` replay receipts | 30 days |
+| `platform_stripe_app_events` | `processed_at` is past, or an unprocessed event has no current OAuth account/mode mapping and `created_at` is past | 30 days |
 | `platform_rate_limits` | `reset_at` is past | 1 day |
 | `platform_auth_links` | `expires_at` or `consumed_at` is past | 7 days |
 | `platform_idempotency` | `created_at` is past, and the stored response is complete | 30 days |
@@ -452,9 +452,17 @@ grant. An elapsed rate-limit window already counts as empty, an expired link or 
 rejected, and a deleted idempotency record only ends replay of an answer older than 30 days. An
 MCP connection whose row is gone answers like a revoked one, `MCP_AUTHORIZATION_REVOKED`. Audit
 events, memberships, sessions, credentials and connections are never touched. Active and retired connection versions and their
-secrets remain. Draft secrets and their parent version are deleted together. Receipt replay and
-processed Stripe event deduplication end after thirty days; old deauthorization events are fenced
-against the active version and its creation time.
+secrets remain. Draft secrets and their parent version are deleted together. Connection receipt replay and processed Stripe event deduplication end after thirty days.
+Credential rotation/revocation receipts remain indefinitely, so replay cannot rotate or revoke a
+later key. Unmapped Stripe events remain quarantined for thirty days after receipt; reconnect or
+investigate them before that deadline. Mapped unresolved events remain until processing succeeds.
+
+Deauthorization reconciles the current installation using the app owner's mode-specific key and
+`STRIPE_APP_ID`. An installed app keeps the connection; a complete empty installation list disables
+it. Transitional states, partial/malformed responses and provider failures defer the event. The
+connection's account, mode and active version are rechecked before the observation and event
+completion commit together. An old event cannot disable a reinstalled app, and provider/database
+clock skew or a missing event timestamp does not silently drop a legitimate revocation.
 
 A run defaults to at most 1,000 rows per statement and 25 statements per table, each its own short
 transaction that locks only the rows it removes and skips rows a request holds, so replicas share

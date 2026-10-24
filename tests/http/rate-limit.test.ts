@@ -784,6 +784,7 @@ describe("limiter isolation", () => {
 		authorize: () => "",
 		exchange: () => Promise.reject(new Error("unused")),
 		refresh: () => Promise.reject(new Error("unused")),
+		installationStatus: async () => "absent",
 		webhookSecret: (environment) => `whsec_${environment}`,
 	};
 	const unusedPersistence = Object.assign(

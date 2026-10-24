@@ -62,13 +62,26 @@ export function createStripeAppEvents(
 						mapping.active_version_id,
 						new Date(event.payload.created * 1000),
 					);
-				if (event.payload.type === "account.application.deauthorized")
-					await events.deauthorize(
-						mapping.id,
-						mapping.active_version_id,
-						new Date(typeof event.payload.created === "number" ? event.payload.created * 1000 : 0),
+				if (event.payload.type === "account.application.deauthorized") {
+					const status = await oauth.installationStatus(
+						event.livemode ? "production" : "sandbox",
+						event.account_id,
 					);
-				else if (lookup.context.lifecycleStatus !== "inactive") {
+					if (
+						status === "indeterminate" ||
+						!(await events.completeDeauthorization({
+							eventId: event.event_id,
+							connectionId: mapping.id,
+							versionId: mapping.active_version_id,
+							accountId: event.account_id,
+							livemode: event.livemode,
+							disable: status === "absent",
+						}))
+					)
+						await events.defer(event.event_id);
+					continue;
+				}
+				if (lookup.context.lifecycleStatus !== "inactive") {
 					const config = await connections.resolve(lookup.context, "stripe", "recovery");
 					if (!config || config.connectedAccountId !== event.account_id) continue;
 					const service = new StripeBillingService({

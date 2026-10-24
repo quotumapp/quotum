@@ -205,6 +205,7 @@ test("runtime shares the OAuth port between authorization and persisted connecti
 			refreshes += 1;
 			return rotated;
 		},
+		installationStatus: async () => "absent",
 		webhookSecret(environment) {
 			expect(environment).toBe("sandbox");
 			return webhookSecret;

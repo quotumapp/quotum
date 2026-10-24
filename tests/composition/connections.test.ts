@@ -132,6 +132,7 @@ function oauthRepository(externalIdentity: string) {
 
 const stripeAppEnv = {
 	STRIPE_APP_CLIENT_ID: "ca_test",
+	STRIPE_APP_ID: "app_quotum",
 	STRIPE_APP_REDIRECT_URI: "https://app.quotum.dev/stripe/callback",
 	STRIPE_APP_TEST_API_KEY: "sk_test_app",
 	STRIPE_APP_TEST_WEBHOOK_SECRET: "whsec_app_test",
@@ -220,6 +221,7 @@ describe("runtime connection resolver account identity", () => {
 			async refresh() {
 				throw new Error("Fresh access must not refresh");
 			},
+			installationStatus: async () => "absent",
 			webhookSecret: () => "whsec_synthetic_injected",
 		};
 		const resolved = await createRuntimeConnectionResolver(repository, persistence, port).resolve(

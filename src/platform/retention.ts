@@ -333,6 +333,7 @@ export class PlatformRetentionSweep {
 						text: `
  WITH removed AS (DELETE FROM platform_connection_operations WHERE ctid = ANY(ARRAY(
  SELECT r.ctid FROM platform_connection_operations r WHERE r.created_at < $1
+ AND r.action NOT LIKE 'credential.%'
  LIMIT $2 FOR UPDATE OF r SKIP LOCKED)) RETURNING 1)
  SELECT count(*)::int AS deleted FROM removed
  `,
@@ -362,7 +363,14 @@ export class PlatformRetentionSweep {
 					this.executor.query<DeletedCount>({
 						text: `
  WITH removed AS (DELETE FROM platform_stripe_app_events WHERE ctid = ANY(ARRAY(
- SELECT r.ctid FROM platform_stripe_app_events r WHERE r.processed_at < $1
+ SELECT r.ctid FROM platform_stripe_app_events r
+ WHERE r.processed_at < $1 OR (
+ r.processed_at IS NULL AND r.created_at < $1 AND NOT EXISTS (
+ SELECT 1 FROM platform_connections c JOIN platform_connection_versions v
+ ON v.connection_id=c.id AND v.id=c.active_version_id
+ WHERE c.stripe_account_id=r.account_id AND c.stripe_livemode=r.livemode
+ AND v.settings->>'authMethod'='oauth'
+ ))
  LIMIT $2 FOR UPDATE OF r SKIP LOCKED)) RETURNING 1)
  SELECT count(*)::int AS deleted FROM removed
  `,

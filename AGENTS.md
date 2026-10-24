@@ -195,7 +195,10 @@ plus Stripe App event processing when Apps OAuth is configured and the `platform
 `src/composition/platform-retention.ts`), which deletes expired rate limits, auth links, completed
 idempotency rows, step-up grants and terminal MCP rows in bounded batches. Headless runtimes sweep connection artifacts
 only; merchant runtimes also sweep identity and MCP rows. Expired drafts and their secrets and OAuth
-states retain seven days, operation receipts and processed Stripe App events thirty days.
+states retain seven days; non-credential operation receipts, processed Stripe App events and
+unmapped event quarantine retain thirty days. Credential operation receipts and mapped unresolved
+events remain. Stripe Apps OAuth requires `STRIPE_APP_ID`; deauthorization checks current provider
+installation state and commits only against the inspected account/mode/version.
 Usage projection jobs retain an immutable payload through retries; their internal coalescing key
 is `usage:<customerId>` and their delivery key includes `:<sequence>`. Drain old workers before
 upgrading this delivery behavior.
