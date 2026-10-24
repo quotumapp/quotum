@@ -123,6 +123,7 @@ import {
 	resolveEntityId,
 	resolveMeterLimit,
 	resolveRateDecision,
+	startReservationLifetime,
 	toTimestamp,
 	validateFilters,
 	validateOccurredAt,
@@ -2041,9 +2042,8 @@ export async function reserveWithinTransaction(
 		return { ...decision, reservationId: null, status: null, expiresAt: null, deductions: [] };
 	}
 
-	const effectiveAt = new Date();
-	// Expiry is decided on the database clock, like the expiry worker and the held sums.
-	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
+	// These provisional timestamps remain private until admission and all its writes finish.
+	const reservation = await executeOne<{ id: string }>(
 		tx,
 		drizzleSql`
 			INSERT INTO reservations (
@@ -2060,7 +2060,7 @@ export async function reserveWithinTransaction(
 				effective_at,
 				expires_at
 			)
-			VALUES (
+			SELECT
 				${projectId},
 				${customer.id},
 				${entityId},
@@ -2071,10 +2071,9 @@ export async function reserveWithinTransaction(
 				${rate.path},
 				${requestedQuantity}::numeric,
 				${walletQuantity}::numeric,
-				${effectiveAt.toISOString()},
-				clock_timestamp() + ${input.expiresInSeconds} * interval '1 second'
-			)
-			RETURNING id, expires_at
+				now(),
+				now() + (${input.expiresInSeconds}::integer * interval '1 second')
+			RETURNING id
 		`,
 	);
 	if (reservation === null) {
@@ -2117,12 +2116,18 @@ export async function reserveWithinTransaction(
 		insertReservationAllocations(tx, projectId, reservation.id, deductions),
 	]);
 	await enqueueUsageProjection(tx, { projectId, customerId: customer.id });
+	const expiresAt = await startReservationLifetime(
+		tx,
+		projectId,
+		reservation.id,
+		input.expiresInSeconds,
+	);
 	return {
 		...decision,
 		balance: balanceFromRows(rate.wallet, deductedRows(rows, deductions, scale, "held_quantity")),
 		reservationId: reservation.id,
 		status: "active",
-		expiresAt: toIso(reservation.expires_at),
+		expiresAt: expiresAt.toISOString(),
 		deductions,
 	};
 }
