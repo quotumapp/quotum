@@ -336,13 +336,15 @@ on the interval shown; unset per-worker overrides preserve the shared fallbacks 
 | [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | `BILLING_USAGE_PARTITION_UPKEEP_POLL_INTERVAL_MS` (900000) |
 | [Merchant platform retention](#merchant-platform-retention), only when `QUOTUM_CONSOLE_ENABLED=true` | `QUOTUM_PLATFORM_RETENTION_POLL_INTERVAL_MS` (900000) |
 
-Automatic top-up and recurring billing renew every outstanding claim in their current batch,
+Automatic top-up, recurring billing and promotion maintenance renew every outstanding claim in their current batch,
 including jobs waiting behind a provider call. The heartbeat runs every 60 seconds against the
 five-minute reclaim window. Each provider dispatch and completion also checks ownership; a lost
 lease skips that work, and a database error during the check leaves the claim for recovery. A
 provider call already in flight cannot be recalled, so completion markers remain fenced and Stripe
 retries keep their existing job-scoped idempotency keys. Heartbeats prevent live-job reclamation;
 they do not extend Stripe's idempotency retention or guarantee recovery after a prolonged outage.
+Promotion runs count skipped claims as `leaseSkipped` and emit the worker metric result
+`lease_skipped`, including ownership-check failures; neither counts as a provider failure.
 Provider event replay and subscription reconciliation also renew their claims. Projection delivery
 defaults to claiming up to 25 jobs per poll from a candidate set bounded by the batch size and
 delivering five concurrently with bounded HTTP timeouts. Batches, existing delivery concurrency,
