@@ -1227,3 +1227,48 @@ receipts, active/retired versions and secrets remain. Unprocessed events without
 account/mode mapping are deleted thirty days after receipt; inspect/reconnect quarantined events
 before their deadline. Mapped unresolved events remain. `001_platform.sql` also adds the partial
 unprocessed-event retention index.
+
+## Pure license reads
+
+License GETs no longer materialize missing pools or update stale quantities. Provider entitlement
+recomputation and assignment perform that work in mutating transactions. Before switching existing
+traffic to pure reads, run `quotum licenses sync --instance <key> --actor <name>` for every instance.
+Each invocation handles 100 customers by default (maximum 500 with `--limit`) and returns
+`nextAfter`; pass it as `--after` until null. Use `--member-override-reason <why>` for a
+member-managed organization. The command is audited and safe to repeat; pool IDs and assignments
+are preserved. Run the new binary for the backfill while old traffic is drained, then start the
+new runtime. No SQL baseline or environment variable changes are required.
+
+Before starting traffic, run this verification query against the upgraded database. It must return
+no rows. `missing_or_stale` means a desired pool is absent or has the wrong capacity;
+`extra_or_stale` means an active stored pool no longer matches an eligible subscription. Repeat the
+paged sync for affected instances and verify again. Skipping the backfill can silently deny license
+access because reads do not create pools.
+
+```sql
+WITH desired AS (
+  SELECT subscription.project_id, subscription.customer_id, subscription.id AS subscription_id,
+    item.id AS plan_item_id,
+    COALESCE(subscription_item.quantity, item.quantity::integer) AS quantity
+  FROM subscriptions subscription
+  JOIN plan_items item ON item.project_id = subscription.project_id
+    AND item.plan_version_id = subscription.plan_version_id
+  JOIN price_components price ON price.project_id = item.project_id
+    AND price.plan_item_id = item.id AND price.component_kind = 'licensed'
+  LEFT JOIN subscription_items subscription_item
+    ON subscription_item.project_id = subscription.project_id
+    AND subscription_item.subscription_id = subscription.id
+    AND subscription_item.price_component_id = price.id AND subscription_item.active = true
+  WHERE subscription.status IN ('active', 'grace_period', 'billing_retry', 'cancelled')
+    AND (subscription.expires_at IS NULL OR subscription.expires_at > now())
+    AND item.item_kind = 'licensed_quantity' AND item.allocation_scope = 'license_pool'
+), stored AS (
+  SELECT project_id, customer_id, subscription_id, plan_item_id, quantity
+  FROM license_pools WHERE active = true
+)
+SELECT 'missing_or_stale' AS mismatch, difference.*
+FROM (SELECT * FROM desired EXCEPT SELECT * FROM stored) difference
+UNION ALL
+SELECT 'extra_or_stale' AS mismatch, difference.*
+FROM (SELECT * FROM stored EXCEPT SELECT * FROM desired) difference;
+```

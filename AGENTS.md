@@ -147,6 +147,10 @@ failures map to a 400 `INVALID_REQUEST` envelope) and `detail: operationDetail(.
   does not match its schema, or a successful request whose body does not match the documented
   request schema fails the test, not just the contract check.
 
+License GETs are pure reads: capacity and expiry come from current subscription items. Provider
+entitlement writes and assignment materialize stable pool IDs; backfill existing instances with
+`quotum licenses sync --instance <key> --actor <name>` before the read cutover.
+
 Public usage check/consume/reserve use `featureId` and `value`; confirm takes actual `value`.
 Reservation reads expose logical expiry without maintenance, and confirmation receipts and recovery
 outcomes commit with accounting. Reserve/confirm/release use recovery version 2; corrections keep

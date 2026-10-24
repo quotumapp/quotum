@@ -63,6 +63,19 @@ function acceptsCatalog(args: readonly string[]): boolean {
 
 export const quotumCommands: readonly QuotumCommand[] = [
 	{
+		path: ["licenses"],
+		file: "composition/cli/licenses.ts",
+		usage: "licenses sync --instance <key> --actor <name> [--after <customer-id>] [--limit <n>]",
+		summary: "Materialize a bounded page of license pools without changing their IDs",
+		environment:
+			"POSTGRES_URI, QUOTUM_AUTH_SECRET, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, optional BILLING_POSTGRES_PREPARED_STATEMENTS",
+		details: [
+			"Defaults to 100 customers, at most 500. Resume with nextAfter until null.",
+			"Member-managed organizations require --member-override-reason <why>.",
+		],
+		accepts: (args) => args[0] === "sync",
+	},
+	{
 		path: ["projections"],
 		file: "composition/cli/projections.ts",
 		usage: "projections check-receiver <url> --project-key <key> --secret-file <path|->",

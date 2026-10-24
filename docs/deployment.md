@@ -51,6 +51,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | --- | --- |
 | `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
 | `quotum partitions status` / `ensure [--months <n>]` | Report or extend the monthly [usage partitions](operations.md#usage-partitions). |
+| `quotum licenses sync --instance <key> --actor <name>` | Materialize up to 100 customers’ license pools (maximum 500 with `--limit`); resume using `--after <nextAfter>` until `nextAfter` is null. Idempotent, preserves pool IDs, and requires `--member-override-reason` for member-managed organizations. |
 | `quotum repair apple-refund-reversals report <instance>` / `apply <instance> <store-event-id> --actor <name>` | Inspect and [repair credits stranded by processed Apple refund reversals](operations.md#apple-refund-reversal-repairs). Reports are read-only; apply is audited and requires a member override when applicable. |
 | `quotum usage scopes report [--project <instance>] [--limit <n>] [--json]` | Read-only report of what [declared meter-limit scope](upgrade-transitions.md#declared-meter-limit-scope) will change; exits `2` while blocking items remain. |
 | `quotum usage scopes snapshot --out <file>` | Records usage windows, active holds and unbilled usage before `quotum migrate` in the [declared-scope transition](upgrade-transitions.md#move-with-a-verified-transition); never overwrites a file. |

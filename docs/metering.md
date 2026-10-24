@@ -147,7 +147,10 @@ from the hold. What a release or a smaller confirmation frees never becomes spen
 expired allocation it stays expired (and follows the allowance's rollover rules), and on a revoked
 operator grant it is revoked too (see
 [Operator grants](grants.md#operator-grants-and-administrative-debits)). License pools follow the
-purchased subscription-item quantity: an entity license check honors active assignments in
+purchased subscription-item quantity. Both license GETs derive current capacity and expiry without
+locking or writing, including when stored pool quantities are stale. Provider entitlement writes
+and license assignment materialize stable pool IDs; existing deployments backfill them with
+`quotum licenses sync --instance <key> --actor <name>` before serving pure reads. An entity license check honors active assignments in
 assignment order up to that capacity, so a seat downgrade stops authorizing the assignments beyond
 it until they are revoked. The entity license check's optional `quantity` query parameter accepts
 decimal digits only, defaults to 1, and must be between 1 and 1,000,000 inclusive. Hexadecimal,

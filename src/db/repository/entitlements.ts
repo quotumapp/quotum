@@ -20,6 +20,7 @@ import {
 	defaultPlanTargetSql,
 } from "./default-plan-sql";
 import { recordProjectionFactEvents } from "./domain-event-facts";
+import { syncLicensePools } from "./license-pools";
 import {
 	governingMeterLimitScope,
 	meterLimitScopeSelector,
@@ -358,6 +359,7 @@ export async function recomputeCustomerEntitlements(
 	// Every place a base plan starts or ends recomputes here, so the default plan follows it:
 	// an account that loses its last base plan falls back to it without a caller action.
 	await reconcileDefaultPlanGrant(executor, projectId, customer.id);
+	await syncLicensePools(executor, projectId, customer.id);
 
 	await executeRows(
 		executor,
