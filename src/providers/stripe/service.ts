@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import type Stripe from "stripe";
-import type { AutoTopupChargeResult, AutoTopupJob } from "../../billing/auto-topup";
+import {
+	type AutoTopupChargeResult,
+	type AutoTopupChargeSucceeded,
+	type AutoTopupCheckpoint,
+	AutoTopupDefinitiveChargeError,
+	type AutoTopupJob,
+} from "../../billing/auto-topup";
 import type {
 	CheckoutSessionHandle,
 	CheckoutUiMode,
@@ -163,7 +169,12 @@ export interface StripeBillingClientDependency
 	): Promise<{ id: string; url: string | null; client_secret?: string | null }>;
 	expireCheckoutSession?(sessionId: string): Promise<unknown>;
 	createPortalSession(params: Stripe.BillingPortal.SessionCreateParams): Promise<{ url: string }>;
-	retrievePaymentIntent(id: string): Promise<Pick<Stripe.PaymentIntent, "id" | "latest_charge">>;
+	retrievePaymentIntent(
+		id: string,
+	): Promise<
+		Pick<Stripe.PaymentIntent, "id" | "latest_charge"> &
+			Partial<Pick<Stripe.PaymentIntent, "status">>
+	>;
 	/** The invoice a PaymentIntent settled, or null for a payment made outside an invoice. */
 	findInvoiceIdForPaymentIntent?(paymentIntentId: string): Promise<string | null>;
 	retrieveCheckoutSession(sessionId: string): Promise<{
@@ -195,6 +206,7 @@ export interface StripeBillingClientDependency
 	retrieveSubscriptionDiscounts?(
 		subscriptionId: string,
 	): Promise<Array<{ id: string; couponId: string | null }>>;
+	retrieveInvoice?(invoiceId: string): Promise<unknown>;
 	createInvoice?(
 		params: Stripe.InvoiceCreateParams,
 		idempotencyKey: string,
@@ -2094,117 +2106,211 @@ export class StripeBillingService
 		return paymentMethodId;
 	}
 
-	async createAutoTopupCharge(job: AutoTopupJob): Promise<AutoTopupChargeResult> {
-		if (job.externalCustomerId === null) {
-			return {
-				status: "action_required",
-				externalInvoiceId: null,
-				externalPaymentId: null,
-				reason: "A linked Stripe customer is required for automatic top-ups",
-			};
-		}
-		if (job.externalPriceId === null) {
-			return {
-				status: "action_required",
-				externalInvoiceId: null,
-				externalPaymentId: null,
-				reason: "The automatic top-up price is unavailable",
-			};
-		}
+	async createAutoTopupCharge(
+		job: AutoTopupJob,
+		checkpoint?: AutoTopupCheckpoint,
+	): Promise<AutoTopupChargeResult> {
+		const client = this.dependencies.client;
 		if (
-			this.dependencies.client.retrieveDefaultPaymentMethod === undefined ||
-			this.dependencies.client.createInvoice === undefined ||
-			this.dependencies.client.addInvoiceLines === undefined ||
-			this.dependencies.client.finalizeInvoice === undefined ||
-			this.dependencies.client.payInvoice === undefined ||
-			this.dependencies.client.voidInvoice === undefined
-		) {
+			!client.createInvoice ||
+			!client.addInvoiceLines ||
+			!client.finalizeInvoice ||
+			!client.payInvoice ||
+			!client.voidInvoice ||
+			!client.retrieveDefaultPaymentMethod
+		)
 			throw new Error("Stripe automatic top-up operations are unavailable");
-		}
-		const paymentMethodId = await this.dependencies.client.retrieveDefaultPaymentMethod(
-			job.externalCustomerId,
-		);
-		if (paymentMethodId === null) {
-			return {
-				status: "action_required",
-				externalInvoiceId: null,
-				externalPaymentId: null,
-				reason: "A saved default payment method is required for automatic top-ups",
-			};
-		}
+		const scope = `billing:auto-topup:${job.jobId}`;
 		const metadata = {
 			billingAccountId: job.billingAccountId,
 			autoTopupJobId: job.jobId,
 			autoTopupPolicyId: job.policyId,
 		};
-		const invoiceParams: Stripe.InvoiceCreateParams = {
-			customer: job.externalCustomerId,
-			currency: job.currency.toLowerCase(),
-			collection_method: "charge_automatically",
-			auto_advance: false,
-			pending_invoice_items_behavior: "exclude",
-			default_payment_method: paymentMethodId,
-			metadata,
-		};
-		if ((this.dependencies.config.taxMode ?? "disabled") !== "disabled") {
-			invoiceParams.automatic_tax = { enabled: true };
+		let invoiceId: string;
+		let snapshot: Record<string, unknown> | null = null;
+		if (job.externalInvoiceId != null) {
+			if (!client.retrieveInvoice) throw new Error("Stripe invoice recovery is unavailable");
+			invoiceId = job.externalInvoiceId;
+			snapshot = requireRecord(await client.retrieveInvoice(invoiceId), "Stripe invoice");
+			const savedMetadata = requireRecord(snapshot.metadata, "Stripe invoice metadata");
+			if (
+				savedMetadata.autoTopupJobId !== job.jobId ||
+				savedMetadata.billingAccountId !== job.billingAccountId
+			)
+				throw new Error("Stripe auto top-up recovery invoice identity mismatch");
+			if (snapshot.status === "paid") await checkpoint?.({ invoiceId, phase: "reconcile" });
+		} else {
+			if (job.externalCustomerId === null || job.externalPriceId === null)
+				return {
+					status: "action_required",
+					externalInvoiceId: null,
+					externalPaymentId: null,
+					reason: "A linked Stripe customer and available top-up price are required",
+				};
+			const paymentMethodId = await client.retrieveDefaultPaymentMethod(job.externalCustomerId);
+			if (paymentMethodId === null)
+				return {
+					status: "action_required",
+					externalInvoiceId: null,
+					externalPaymentId: null,
+					reason: "A saved default payment method is required for automatic top-ups",
+				};
+			const params: Stripe.InvoiceCreateParams = {
+				customer: job.externalCustomerId,
+				currency: job.currency.toLowerCase(),
+				collection_method: "charge_automatically",
+				auto_advance: false,
+				pending_invoice_items_behavior: "exclude",
+				default_payment_method: paymentMethodId,
+				metadata,
+			};
+			if ((this.dependencies.config.taxMode ?? "disabled") !== "disabled")
+				params.automatic_tax = { enabled: true };
+			invoiceId = (await client.createInvoice(params, `${scope}:create`)).id;
+			// A failed checkpoint aborts before finalization or collection.
+			await checkpoint?.({ invoiceId });
 		}
-		const scope = `billing:auto-topup:${job.jobId}`;
-		const invoice = await this.dependencies.client.createInvoice(invoiceParams, `${scope}:create`);
-		await this.dependencies.client.addInvoiceLines(
-			invoice.id,
-			{
-				lines: [
+		if (job.phase === "reconcile" && snapshot?.status !== "paid") {
+			const receipt = invoiceReceipt(snapshot);
+			if (receipt.status === "void" || receipt.status === "uncollectible")
+				return {
+					status: "action_required",
+					externalInvoiceId: invoiceId,
+					externalPaymentId: receipt.externalPaymentId,
+					reason: `Stripe automatic top-up invoice is ${receipt.status}`,
+				};
+			if (receipt.status === "open" && receipt.externalPaymentId?.startsWith("pi_")) {
+				const payment = await client.retrievePaymentIntent(receipt.externalPaymentId);
+				if (payment.id !== receipt.externalPaymentId)
+					throw new Error("Stripe auto top-up recovery payment identity mismatch");
+				if (payment.status === "requires_payment_method" || payment.status === "canceled")
+					throw new AutoTopupDefinitiveChargeError(
+						`Stripe automatic top-up payment is ${payment.status}`,
+						invoiceId,
+						receipt.externalPaymentId,
+					);
+				if (payment.status === "requires_action")
+					return {
+						status: "action_required",
+						externalInvoiceId: invoiceId,
+						externalPaymentId: receipt.externalPaymentId,
+						reason: "Stripe automatic top-up payment requires customer authentication",
+					};
+			}
+			// An uncertain attempt is only inspected. Never repeat collection while its outcome is unknown.
+			throw new Error("Stripe automatic top-up payment outcome is not yet known");
+		}
+		if (snapshot === null || snapshot.status === "draft") {
+			let addLine = true;
+			if (snapshot !== null) {
+				const lines = requireRecord(snapshot.lines, "Stripe invoice lines");
+				if (lines.has_more === true || !Array.isArray(lines.data))
+					throw new Error("Cannot safely recover auto top-up invoice lines");
+				if (lines.data.length > 0) {
+					if (
+						lines.data.length !== 1 ||
+						!isRecord(lines.data[0]) ||
+						!isRecord(lines.data[0].metadata) ||
+						lines.data[0].metadata.autoTopupJobId !== job.jobId ||
+						lines.data[0].quantity !== 1
+					)
+						throw new Error("Auto top-up invoice line identity mismatch");
+					addLine = false;
+				}
+			}
+			if (addLine) {
+				if (job.externalPriceId === null)
+					throw new Error("Auto top-up recovery price is unavailable");
+				await client.addInvoiceLines(
+					invoiceId,
 					{
-						pricing: { price: job.externalPriceId },
-						quantity: 1,
-						description: "Automatic balance top-up",
-						metadata,
+						lines: [
+							{
+								pricing: { price: job.externalPriceId },
+								quantity: 1,
+								description: "Automatic balance top-up",
+								metadata,
+							},
+						],
 					},
-				],
-			},
-			`${scope}:line`,
-		);
-		const finalized = invoiceReceipt(
-			await this.dependencies.client.finalizeInvoice(invoice.id, `${scope}:finalize`),
-		);
-		if (finalized.total > job.maximumChargeMinor) {
-			await this.dependencies.client.voidInvoice(invoice.id, `${scope}:void-safety-limit`);
-			return {
-				status: "safety_limit_exceeded",
-				externalInvoiceId: invoice.id,
-				externalPaymentId: finalized.externalPaymentId,
-				reason: "The finalized Stripe invoice exceeded the automatic top-up safety budget",
-			};
+					`${scope}:line`,
+				);
+			}
+			await checkpoint?.({ invoiceId, phase: "reconcile" });
+			try {
+				snapshot = requireRecord(
+					await client.finalizeInvoice(invoiceId, `${scope}:finalize`),
+					"Stripe invoice",
+				);
+			} catch (error) {
+				if (stripePaymentActionRequired(error))
+					return {
+						status: "action_required",
+						externalInvoiceId: invoiceId,
+						externalPaymentId: stripeErrorPaymentIntentId(error),
+						reason: errorMessage(error).slice(0, 2000),
+					};
+				if (stripeDefinitivePaymentFailure(error))
+					throw new AutoTopupDefinitiveChargeError(
+						errorMessage(error).slice(0, 2000),
+						invoiceId,
+						stripeErrorPaymentIntentId(error),
+					);
+				throw error;
+			}
 		}
-		let paidRaw: unknown;
-		try {
-			paidRaw = await this.dependencies.client.payInvoice(invoice.id, `${scope}:pay`);
-		} catch (error) {
-			if (!stripePaymentActionRequired(error)) throw error;
-			return {
-				status: "action_required",
-				externalInvoiceId: invoice.id,
-				externalPaymentId: stripeErrorPaymentIntentId(error),
-				reason: errorMessage(error).slice(0, 2_000),
-			};
-		}
-		const paid = invoiceReceipt(paidRaw);
+		let paid = invoiceReceipt(snapshot);
 		if (paid.status !== "paid") {
-			throw new Error(
-				`Stripe automatic top-up invoice ${invoice.id} is ${paid.status ?? "unpaid"}`,
-			);
+			if (paid.status !== "open")
+				return {
+					status: "action_required",
+					externalInvoiceId: invoiceId,
+					externalPaymentId: paid.externalPaymentId,
+					reason: `Stripe automatic top-up invoice is ${paid.status ?? "unavailable"}`,
+				};
+			if (paid.total > job.maximumChargeMinor) {
+				await client.voidInvoice(invoiceId, `${scope}:void-safety-limit`);
+				return {
+					status: "safety_limit_exceeded",
+					externalInvoiceId: invoiceId,
+					externalPaymentId: paid.externalPaymentId,
+					reason: "The finalized Stripe invoice exceeded the automatic top-up safety budget",
+				};
+			}
+			await checkpoint?.({ invoiceId, phase: "reconcile" });
+			try {
+				paid = invoiceReceipt(await client.payInvoice(invoiceId, `${scope}:pay`));
+			} catch (error) {
+				if (!stripePaymentActionRequired(error)) {
+					if (stripeDefinitivePaymentFailure(error))
+						throw new AutoTopupDefinitiveChargeError(
+							errorMessage(error).slice(0, 2000),
+							invoiceId,
+							stripeErrorPaymentIntentId(error),
+						);
+					throw error;
+				}
+				return {
+					status: "action_required",
+					externalInvoiceId: invoiceId,
+					externalPaymentId: stripeErrorPaymentIntentId(error),
+					reason: errorMessage(error).slice(0, 2000),
+				};
+			}
 		}
-		if (paid.currency.toUpperCase() !== job.currency.toUpperCase()) {
+		if (paid.status !== "paid")
+			throw new Error(`Stripe automatic top-up invoice ${invoiceId} is ${paid.status ?? "unpaid"}`);
+		if (paid.currency.toUpperCase() !== job.currency.toUpperCase())
 			throw new Error("Stripe automatic top-up invoice currency changed unexpectedly");
-		}
-		return {
+		const result: AutoTopupChargeSucceeded = {
 			status: "succeeded",
-			externalInvoiceId: invoice.id,
+			externalInvoiceId: invoiceId,
 			externalPaymentId: paid.externalPaymentId,
 			amountPaidMinor: paid.amountPaid,
 			currency: paid.currency.toUpperCase(),
 		};
+		await checkpoint?.({ invoiceId, result });
+		return result;
 	}
 
 	async createPortalSession(input: {
@@ -3505,6 +3611,20 @@ function invoicePaymentId(value: unknown): string | null {
 		if (paymentRecord !== null) return paymentRecord;
 	}
 	return null;
+}
+
+function stripeDefinitivePaymentFailure(error: unknown): boolean {
+	if (!isRecord(error)) return false;
+	const raw = isRecord(error.raw) ? error.raw : null;
+	// Rate limiting rejects execution; preserve the operation key on the ordinary retry path.
+	// https://docs.stripe.com/error-low-level#content-errors
+	return (
+		error.type === "StripeCardError" ||
+		error.type === "card_error" ||
+		raw?.type === "card_error" ||
+		error.statusCode === 429 ||
+		raw?.statusCode === 429
+	);
 }
 
 function stripePaymentActionRequired(error: unknown): boolean {

@@ -1,4 +1,8 @@
-import type { AutoTopupChargeResult, AutoTopupJob } from "../../billing/auto-topup";
+import type {
+	AutoTopupChargeResult,
+	AutoTopupCheckpoint,
+	AutoTopupJob,
+} from "../../billing/auto-topup";
 import { changeBillingPolicyFromStripe } from "../../billing/pricing";
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../../billing/recurring";
 import type { ProviderRegistryEntry, ProviderServiceSource } from "../contract";
@@ -73,8 +77,8 @@ export function wrapStripeService(
 			createAutoTopupCharge === undefined
 				? undefined
 				: {
-						async chargeAutomatic(job: AutoTopupJob) {
-							const result = await createAutoTopupCharge.call(service, job);
+						async chargeAutomatic(job: AutoTopupJob, checkpoint?: AutoTopupCheckpoint) {
+							const result = await createAutoTopupCharge.call(service, job, checkpoint);
 							return { ...result, timing: stripeAutoTopupTiming(result) };
 						},
 					},

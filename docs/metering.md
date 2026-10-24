@@ -525,3 +525,8 @@ allocations the operation changed. The first response and every replay answer th
 totals stay exact, and `GET .../balances/:featureKey` still lists every allocation. Only a result
 whose changed allocations alone exceed the bound, such as one consume spread over hundreds of
 allocations, fails with `500 OPERATION_OUTCOME_TOO_LARGE` and rolls back the whole mutation.
+
+Automatic top-up workers persist the charge/reconciliation/completion phase, invoice before
+collection, and paid receipt before local crediting. Definitive declines use the failure circuit;
+unknown payments and local completion failures preserve the budget and stop for operator review
+after ten recovery failures without a false charge-failure event; see [recovery operations](operations.md#automatic-top-up-completion-recovery).

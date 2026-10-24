@@ -78,6 +78,7 @@ interface StripeClientLike {
 		list?(params: Stripe.SubscriptionListParams): Promise<Stripe.ApiList<Stripe.Subscription>>;
 	};
 	invoices?: {
+		retrieve?(invoiceId: string, params?: Stripe.InvoiceRetrieveParams): Promise<Stripe.Invoice>;
 		create(
 			params: Stripe.InvoiceCreateParams,
 			options?: Stripe.RequestOptions,
@@ -404,6 +405,11 @@ export class StripeBillingClient {
 			{ prorate: false, invoice_now: false },
 			{ idempotencyKey },
 		);
+	}
+
+	retrieveInvoice(invoiceId: string) {
+		if (!this.stripe.invoices?.retrieve) throw new Error("Stripe invoice recovery is unavailable");
+		return this.stripe.invoices.retrieve(invoiceId, { expand: ["payments"] });
 	}
 
 	createInvoice(params: Stripe.InvoiceCreateParams, idempotencyKey: string) {

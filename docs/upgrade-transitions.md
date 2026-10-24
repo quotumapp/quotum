@@ -1321,3 +1321,35 @@ failure-attempt budgets are preserved. Store events already parked with `next_at
 'infinity'` are not made due automatically. Inspect them, then replay each applicable event with
 `POST /v1/admin/store-events/:eventId/replay` using the project credential, operator key and
 `X-Billing-Actor`. Do not bulk-reset rows or replay events whose external effect needs reconciliation.
+
+## Automatic top-up payment checkpoints
+
+`003_metering_and_pricing.sql` adds nullable `provider_result`, nonnegative `completion_attempts`,
+and the non-null `phase` (`charge`, `reconcile`, `complete`, default `charge`) to `auto_topup_jobs`,
+and permits the `requires_review` status. The Drizzle mirror changes with it. Drain old workers
+before the [baseline backup/restore transition](#stored-job-provider-identity), then deploy the
+checkpoint-aware worker/provider together. Preserve the job ledger and migration checksums;
+disposable databases are recreated.
+
+After restoring data and before starting workers, set the safe recovery phase for existing jobs:
+
+```sql
+UPDATE auto_topup_jobs SET phase = CASE
+  WHEN provider_result IS NOT NULL THEN 'complete'
+  WHEN external_invoice_id IS NOT NULL THEN 'reconcile'
+  ELSE 'charge'
+END;
+SELECT count(*) AS invalid_jobs FROM auto_topup_jobs
+WHERE (phase = 'complete' AND provider_result IS NULL)
+   OR (phase = 'reconcile' AND external_invoice_id IS NULL)
+   OR (provider_result IS NOT NULL AND phase <> 'complete');
+```
+
+The query must return `0`. Preserved invoice-only jobs are inspected before any further collection.
+The tenth failed reconciliation or local completion moves the same job to `requires_review`;
+its hold/receipt/stamp remain and it blocks new jobs, erasure and unlink. Use the new audited
+[report/resume commands](operations.md#automatic-top-up-completion-recovery) after investigation;
+do not reset rows or insert replacement jobs. Existing paid-but-terminal jobs require manual
+comparison with Stripe before an operator grants credits. No automatic historical payment
+remediation runs. A rollback restores the pre-upgrade backup with the old binary and loses later
+writes.

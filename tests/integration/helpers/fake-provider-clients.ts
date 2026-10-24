@@ -295,6 +295,8 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 		string,
 		{
 			id: string;
+			metadata: unknown;
+			lines: Stripe.InvoiceAddLinesParams.Line[];
 			total: number;
 			status: "draft" | "open" | "paid" | "void";
 			currency: string;
@@ -674,12 +676,23 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 				);
 				return saved?.paymentMethodId ?? "pm_integration";
 			},
+			async retrieveInvoice(invoiceId: string) {
+				const invoice = invoices.get(invoiceId);
+				if (!invoice) throw new Error("Unknown fake invoice");
+				return {
+					...stripeInvoiceReceipt(invoice),
+					metadata: invoice.metadata,
+					lines: { data: invoice.lines, has_more: false },
+				};
+			},
 			async createInvoice(params: Stripe.InvoiceCreateParams, idempotencyKey: string) {
 				calls.push(`createInvoice:${idempotencyKey}`);
 				idempotency.claim(idempotencyKey, "POST /v1/invoices", params);
 				invoiceCreateParams.push(params);
 				const id = `in_integration_${idempotencyKey}`;
 				invoices.set(id, {
+					metadata: params.metadata,
+					lines: [],
 					id,
 					total: 0,
 					status: "draft",
@@ -698,6 +711,7 @@ export function createFakeStripeBillingClient(options: FakeStripeBillingClientOp
 				const invoice = invoices.get(invoiceId);
 				if (invoice === undefined) throw new Error(`Unknown fake Stripe invoice: ${invoiceId}`);
 				invoice.total = seededStripeEchoCreditsAmount;
+				invoice.lines.push(...params.lines);
 				return stripeInvoiceReceipt(invoice);
 			},
 			async finalizeInvoice(invoiceId: string, idempotencyKey: string) {

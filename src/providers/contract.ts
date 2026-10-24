@@ -3,7 +3,11 @@ import type {
 	GooglePlayBillingServiceLike,
 	StripeBillingServiceLike,
 } from "../app/types";
-import type { AutoTopupChargeResult, AutoTopupJob } from "../billing/auto-topup";
+import type {
+	AutoTopupChargeResult,
+	AutoTopupCheckpoint,
+	AutoTopupJob,
+} from "../billing/auto-topup";
 import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../billing/promotions";
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../billing/recurring";
 import type { WebBillingService } from "../billing/web-provider";
@@ -150,7 +154,10 @@ export interface ProviderSettlementGroup {
 }
 
 export interface ProviderTopupGroup {
-	chargeAutomatic(job: AutoTopupJob): Promise<AutoTopupChargeResult & { timing: OperationTiming }>;
+	chargeAutomatic(
+		job: AutoTopupJob,
+		checkpoint?: AutoTopupCheckpoint,
+	): Promise<AutoTopupChargeResult & { timing: OperationTiming }>;
 }
 
 export interface ProviderPromotionGroup {

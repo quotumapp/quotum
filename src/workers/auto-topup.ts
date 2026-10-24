@@ -1,9 +1,11 @@
-import type {
-	AutoTopupChargeResult,
-	AutoTopupChargeSucceeded,
-	AutoTopupFailureResult,
-	AutoTopupJob,
-	AutoTopupRunResult,
+import {
+	type AutoTopupChargeResult,
+	type AutoTopupChargeSucceeded,
+	type AutoTopupCheckpoint,
+	AutoTopupDefinitiveChargeError,
+	type AutoTopupFailureResult,
+	type AutoTopupJob,
+	type AutoTopupRunResult,
 } from "../billing/auto-topup";
 import type { BillingProvider } from "../billing/types";
 import {
@@ -19,6 +21,19 @@ import type { LeaseHeartbeatTimers } from "./lease-heartbeat";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface AutoTopupWorkerRepository {
+	checkpointAutoTopup(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+		checkpoint: Parameters<AutoTopupCheckpoint>[0],
+	): Promise<void>;
+	retryAutoTopupCompletion(
+		projectId: string,
+		jobId: string,
+		workerId: string,
+		error: string,
+		delayMs: number,
+	): Promise<void>;
 	renewAutoTopupJobLease(projectId: string, jobId: string, workerId: string): Promise<boolean>;
 	claimAutoTopupJobs(
 		workerId: string,
@@ -46,7 +61,10 @@ export interface AutoTopupWorkerRepository {
 }
 
 export interface AutoTopupWorkerProvider {
-	createAutoTopupCharge(job: AutoTopupJob): Promise<AutoTopupChargeResult>;
+	createAutoTopupCharge(
+		job: AutoTopupJob,
+		checkpoint?: AutoTopupCheckpoint,
+	): Promise<AutoTopupChargeResult>;
 }
 
 /** The adapter group an automatic top-up job needs from its own provider. */
@@ -122,6 +140,7 @@ export class AutoTopupWorker {
 		});
 		try {
 			for (const job of jobs) {
+				let phase = job.providerResult != null ? "complete" : (job.phase ?? "charge");
 				try {
 					const project = await resolveClaimedProjectInstance(
 						this.dependencies.projectContextResolver,
@@ -130,12 +149,30 @@ export class AutoTopupWorker {
 							projectInstanceKey: job.projectKey,
 						},
 					);
-					const { topups } = await this.dependencies.adapterForJob(project, job.provider);
-					if (topups === undefined) {
-						throw new Error(`${job.provider} provider does not serve topup.automatic`);
-					}
 					if (!(await leases.owns(job))) continue;
-					const { timing: _timing, ...charge } = await topups.chargeAutomatic(job);
+					let charge: AutoTopupChargeResult;
+					if (job.providerResult != null) charge = job.providerResult;
+					else {
+						const { topups } = await this.dependencies.adapterForJob(project, job.provider);
+						if (topups === undefined)
+							throw new Error(`${job.provider} provider does not serve topup.automatic`);
+						const checkpoint: AutoTopupCheckpoint = async (receipt) => {
+							phase = receipt.result === undefined ? (receipt.phase ?? "charge") : "complete";
+							if (!(await leases.owns(job)))
+								throw new JobLeaseRenewalError("Auto top-up lease lost before checkpoint");
+							await this.dependencies.repository.checkpointAutoTopup(
+								job.projectId,
+								job.jobId,
+								this.dependencies.workerId,
+								receipt,
+							);
+						};
+						const { timing: _timing, ...outcome } = await topups.chargeAutomatic(job, checkpoint);
+						charge = outcome;
+						if (!(await leases.owns(job))) continue;
+						if (charge.status === "succeeded")
+							await checkpoint({ invoiceId: charge.externalInvoiceId, result: charge });
+					}
 					if (!(await leases.owns(job))) continue;
 					if (charge.status === "succeeded") {
 						const completion = await this.dependencies.repository.markAutoTopupSucceeded(
@@ -171,6 +208,29 @@ export class AutoTopupWorker {
 					}
 					if (!(await leases.owns(job).catch(() => false))) continue;
 					result.failed += 1;
+					if (phase !== "charge" && !(error instanceof AutoTopupDefinitiveChargeError)) {
+						const delayMs = Math.min(
+							86_400_000,
+							60_000 * 2 ** Math.min(job.completionAttempts ?? 0, 11),
+						);
+						await this.dependencies.repository.retryAutoTopupCompletion(
+							job.projectId,
+							job.jobId,
+							this.dependencies.workerId,
+							normalizeWorkerError(error),
+							delayMs,
+						);
+						const requiresReview = (job.completionAttempts ?? 0) >= 9;
+						if (!requiresReview) result.retryScheduled += 1;
+						this.recordJob(requiresReview ? "requires_review" : "completion_retry");
+						this.dependencies.logger.error("Automatic top-up recovery deferred", error, {
+							phase,
+							requiresReview,
+							jobId: job.jobId,
+							projectKey: job.projectKey,
+						});
+						continue;
+					}
 					const retryDelayMs = calculateRetryDelayMs({
 						attempts: job.consecutiveFailures,
 						maxAttempts: job.maxConsecutiveFailures,
@@ -183,6 +243,9 @@ export class AutoTopupWorker {
 							kind: "retryable",
 							error: normalizeWorkerError(error).slice(0, 2_000),
 							retryDelayMs,
+							...(error instanceof AutoTopupDefinitiveChargeError
+								? { externalInvoiceId: error.invoiceId, externalPaymentId: error.paymentId }
+								: {}),
 						},
 					);
 					if (completion.retryScheduled) result.retryScheduled += 1;

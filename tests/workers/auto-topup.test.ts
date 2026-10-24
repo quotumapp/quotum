@@ -47,6 +47,8 @@ it.each(["before", "during", "unavailable"])(
 				async claimAutoTopupJobs() {
 					return [job];
 				},
+				async checkpointAutoTopup() {},
+				async retryAutoTopupCompletion() {},
 				async renewAutoTopupJobLease() {
 					if (stage === "unavailable") throw new Error("database unavailable");
 					return owned;
@@ -95,6 +97,8 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async checkpointAutoTopup() {},
+				async retryAutoTopupCompletion() {},
 				async renewAutoTopupJobLease() {
 					return true;
 				},
@@ -159,6 +163,8 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async checkpointAutoTopup() {},
+				async retryAutoTopupCompletion() {},
 				async renewAutoTopupJobLease() {
 					return true;
 				},
@@ -219,6 +225,8 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async checkpointAutoTopup() {},
+				async retryAutoTopupCompletion() {},
 				async renewAutoTopupJobLease() {
 					return true;
 				},
@@ -254,6 +262,8 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async checkpointAutoTopup() {},
+				async retryAutoTopupCompletion() {},
 				async renewAutoTopupJobLease() {
 					return true;
 				},
@@ -289,6 +299,8 @@ describe("AutoTopupWorker", () => {
 			projectContextResolver: workerProjectResolver,
 			workerId: "worker-1",
 			repository: {
+				async checkpointAutoTopup() {},
+				async retryAutoTopupCompletion() {},
 				async renewAutoTopupJobLease() {
 					return true;
 				},

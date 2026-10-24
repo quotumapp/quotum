@@ -1178,7 +1178,7 @@ export async function scheduleAutoTopupIfNeeded(
 		drizzleSql`
 		SELECT EXISTS (
 			SELECT 1 FROM auto_topup_jobs WHERE project_id = ${input.projectId}
-				AND policy_id = ${String(policy.id)}::bigint AND status IN ('pending', 'processing')
+				AND policy_id = ${String(policy.id)}::bigint AND status IN ('pending', 'processing', 'requires_review')
 		) AS pending
 	`,
 	);
