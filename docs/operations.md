@@ -349,7 +349,8 @@ Provider event replay and subscription reconciliation also renew their claims. P
 defaults to claiming up to 25 jobs per poll from a candidate set bounded by the batch size and
 delivering five concurrently with bounded HTTP timeouts. Batches, existing delivery concurrency,
 scan sizes and per-run budgets have optional overrides in [worker tuning](deployment.md#worker-tuning).
-Retry backoff and lease ages are durations. Repositories stamp retry deadlines and compare lease ages
+Retry backoff and lease ages are durations; fractional retry jitter rounds up to whole milliseconds.
+Repositories stamp retry deadlines and compare lease ages
 against PostgreSQL time; host clock skew cannot make a failure immediately due or steal a healthy
 claim. Domain delivery, projection delivery, replay, reconciliation, auto top-up and promotion
 maintenance use this rule. Payment-setup polling and waiting store-event deferrals also pass

@@ -3,10 +3,20 @@ import fc from "fast-check";
 import {
 	calculateNextAttemptAt,
 	calculateNextRetryAt,
+	calculateNextRetryDelayMs,
+	calculateRetryDelayMs,
 	normalizeWorkerError,
 } from "../../src/workers/backoff";
 
 describe("projection worker backoff", () => {
+	it("rounds relative retry jitter up without reviving exhausted attempts", () => {
+		expect(calculateRetryDelayMs({ attempts: 0, maxAttempts: 10, jitterMs: 0.25 })).toBe(60_001);
+		expect(calculateRetryDelayMs({ attempts: 9, maxAttempts: 10, jitterMs: 0.25 })).toBeNull();
+		expect(calculateNextRetryDelayMs({ attempts: 9, maxAttempts: 10, jitterMs: 0.25 })).toBe(
+			86_400_001,
+		);
+	});
+
 	it("uses capped exponential backoff", () => {
 		const now = new Date("2026-05-31T00:00:00.000Z");
 
