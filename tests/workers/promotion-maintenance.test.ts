@@ -110,8 +110,8 @@ describe("PromotionMaintenanceWorker", () => {
 			["retry", "failed"],
 			["terminal", "failed"],
 		]);
-		expect(outcomes[2]?.outcome.nextAttemptAt).toBeInstanceOf(Date);
-		expect(outcomes[3]?.outcome.nextAttemptAt).toBeNull();
+		expect(outcomes[2]?.outcome.retryDelayMs).toBeNumber();
+		expect(outcomes[3]?.outcome.retryDelayMs).toBeNull();
 	});
 
 	it("defers projects without Stripe and gives up after the attempt budget", async () => {
@@ -146,7 +146,7 @@ describe("PromotionMaintenanceWorker", () => {
 		expect(outcomes[1]?.outcome).toEqual({
 			kind: "failed",
 			error: "socket hang up",
-			nextAttemptAt: null,
+			retryDelayMs: null,
 		});
 	});
 
@@ -172,7 +172,7 @@ describe("PromotionMaintenanceWorker", () => {
 				outcome: {
 					kind: "failed",
 					error: "google provider does not serve promotion.hosted_code",
-					nextAttemptAt: expect.any(Date),
+					retryDelayMs: expect.any(Number),
 				},
 			},
 		]);

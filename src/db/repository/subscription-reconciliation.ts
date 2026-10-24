@@ -16,6 +16,7 @@ import type {
 	TrialEndingNoticeResult,
 } from "./types";
 import { formatUtcTimestamp, requireNonBlank, requirePositiveLimit } from "./validation";
+import { workerRetryAtSql, workerStaleBeforeSql } from "./worker-clock";
 
 /** Providers whose trial-ending notice Quotum composes from recorded bounds, per their declarations. */
 const composedTrialNoticeProviders = providersComposing("trial.ending_notice");
@@ -26,7 +27,7 @@ const composedTrialNoticeProviders = providersComposing("trial.ending_notice");
  * predicate of `idx_billing_subscriptions_provider_reconciliation_due`: Postgres uses a partial
  * index only when the query implies the predicate, and otherwise every poll scans the table.
  */
-export function dueProviderReconciliationsSql(limit: number, staleBefore: Date): DrizzleSQL {
+export function dueProviderReconciliationsSql(limit: number, staleAfterMs: number): DrizzleSQL {
 	return drizzleSql`
 		SELECT s.id
 		FROM subscriptions s
@@ -38,7 +39,7 @@ export function dueProviderReconciliationsSql(limit: number, staleBefore: Date):
 			)
 			AND (
 				s.provider_reconciled_at IS NULL
-				OR s.provider_reconciled_at <= ${staleBefore.toISOString()}::timestamptz
+				OR s.provider_reconciled_at <= ${workerStaleBeforeSql(staleAfterMs)}
 				OR s.expires_at <= now() + INTERVAL '1 hour'
 			)
 			AND (
@@ -300,14 +301,14 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 	async claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<ProviderSubscriptionReconciliationRow[]> {
 		requireNonBlank(workerId, "p_worker_id");
 		const cappedLimit = requirePositiveLimit(limit);
 		const rows = await executeRows(
 			this.database,
 			drizzleSql`
-			WITH due_subscriptions AS (${dueProviderReconciliationsSql(cappedLimit, staleBefore)})
+			WITH due_subscriptions AS (${dueProviderReconciliationsSql(cappedLimit, staleAfterMs)})
 			UPDATE subscriptions s
 			SET
 				provider_reconciliation_locked_at = now(),
@@ -383,13 +384,13 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void> {
 		requireNonBlank(errorMessage, "p_error");
 		// Bind as ISO: Bun SQL serializes a raw Date via toString (a locale string) that
 		// Postgres rejects for ::timestamptz; the record* paths already do the same.
-		const nextAttemptAtIso = nextAttemptAt.toISOString();
+		const retryAt = workerRetryAtSql(retryDelayMs);
 		await assertUpdated(
 			this.database,
 			drizzleSql`
@@ -397,7 +398,7 @@ export class SubscriptionReconciliationBillingRepository extends RepositoryModul
 			SET
 				provider_reconciliation_attempts = s.provider_reconciliation_attempts + 1,
 				provider_reconciliation_error = ${errorMessage},
-				provider_reconciliation_next_attempt_at = ${nextAttemptAtIso}::timestamptz,
+				provider_reconciliation_next_attempt_at = ${retryAt},
 				provider_reconciliation_locked_at = NULL,
 				provider_reconciliation_locked_by = NULL,
 				updated_at = now()

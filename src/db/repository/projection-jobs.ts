@@ -13,6 +13,7 @@ import { parseProjectionSyncJobRow } from "./parsers";
 import { assertUpdated, executeOne, executeRows, jsonb } from "./query";
 import type { ProjectionSyncJobRow } from "./types";
 import { requireNonBlank, requirePositiveLimit } from "./validation";
+import { workerRetryAtSql } from "./worker-clock";
 
 /** The coalescing usage job of a customer: its payload is materialized per delivery, then cleared. */
 const usageJob = drizzleSql`(jobs.idempotency_key = ${drizzleSql.raw(usageKeySqlPrefix)} || jobs.customer_id::text)`;
@@ -234,12 +235,12 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 		projectId: string,
 		jobId: string,
 		lastError: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void> {
 		// Bind as ISO: Bun SQL serializes a raw Date via toString (a locale string) that
 		// Postgres rejects for ::timestamptz; the record* paths already do the same.
-		const nextAttemptAtIso = nextAttemptAt?.toISOString() ?? null;
+		const retryAt = workerRetryAtSql(retryDelayMs);
 		await assertUpdated(
 			this.database,
 			drizzleSql`
@@ -247,7 +248,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 			SET
 				status = CASE
 					WHEN ${restartsAtOnce} THEN 'pending'
-					WHEN ${nextAttemptAtIso}::timestamptz IS NULL THEN 'failed'
+					WHEN ${retryAt} IS NULL THEN 'failed'
 					ELSE 'pending'
 				END,
 				attempts = CASE
@@ -264,7 +265,7 @@ export class ProjectionJobBillingRepository extends RepositoryModule {
 				END,
 				next_attempt_at = CASE
 					WHEN ${restartsAtOnce} THEN now()
-					ELSE COALESCE(${nextAttemptAtIso}::timestamptz, jobs.next_attempt_at)
+					ELSE COALESCE(${retryAt}, jobs.next_attempt_at)
 				END,
 				locked_at = NULL,
 				locked_by = NULL,

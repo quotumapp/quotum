@@ -15,6 +15,7 @@ import type {
 	StoreEventProcessingResult,
 } from "./types";
 import { isUuid, requireNonBlank } from "./validation";
+import { workerRetryAtSql } from "./worker-clock";
 
 export async function recordStoreEventProcessingResult(
 	executor: QueryExecutor,
@@ -312,7 +313,8 @@ export const paymentSetupReconcileEventType = "quotum.payment_setup.reconcile";
  * work itself happens under a worker lease, outside the request.
  *
  * A second delivery of the same event is a no-op: the row is inserted once and never moved back to
- * `pending` after it has been processed.
+ * `pending` after it has been processed. An explicit retryDelayMs, including zero, takes precedence
+ * over the legacy absolute nextAttemptAt; callers that omit it retain absolute scheduling.
  */
 export async function enqueueStoreEventForReplay(
 	executor: QueryExecutor,
@@ -325,6 +327,7 @@ export async function enqueueStoreEventForReplay(
 		transactionId: string | null;
 		rawPayload: Record<string, unknown>;
 		nextAttemptAt?: Date | null;
+		retryDelayMs?: number;
 	},
 ): Promise<{ storeEventId: string; enqueued: boolean }> {
 	requireNonBlank(input.eventType, "p_event_type");
@@ -337,7 +340,10 @@ export async function enqueueStoreEventForReplay(
 		purchaseKind: null,
 		rawPayload: input.rawPayload,
 	});
-	const nextAttemptAt = input.nextAttemptAt?.toISOString() ?? null;
+	const nextAttemptAt =
+		input.retryDelayMs === undefined
+			? drizzleSql`${input.nextAttemptAt?.toISOString() ?? null}::timestamptz`
+			: workerRetryAtSql(input.retryDelayMs);
 	const conflictTarget =
 		input.externalEventId === null
 			? drizzleSql`(project_id, provider, event_fingerprint) WHERE external_event_id IS NULL AND event_fingerprint IS NOT NULL`
@@ -367,7 +373,7 @@ export async function enqueueStoreEventForReplay(
 			VALUES (
 				${projectId}, ${input.provider}, ${input.channel}, ${input.externalEventId},
 				${eventFingerprint}, ${input.eventType}, ${input.transactionId}, 'pending',
-				${jsonb(input.rawPayload)}, COALESCE(${nextAttemptAt}::timestamptz, now()), ${setupCustomer}
+				${jsonb(input.rawPayload)}, COALESCE(${nextAttemptAt}, now()), ${setupCustomer}
 			)
 			ON CONFLICT ${conflictTarget} DO NOTHING
 			RETURNING id
@@ -404,7 +410,7 @@ export async function enqueueStoreEventForReplay(
 export async function schedulePaymentSetupReconciliation(
 	executor: QueryExecutor,
 	projectId: string,
-	input: { setupId: string; nextAttemptAt: Date },
+	input: { setupId: string; retryDelayMs: number },
 ): Promise<string> {
 	const payload = { quotumPaymentSetupId: input.setupId };
 	const queued = await enqueueStoreEventForReplay(executor, projectId, {
@@ -414,14 +420,14 @@ export async function schedulePaymentSetupReconciliation(
 		eventType: paymentSetupReconcileEventType,
 		transactionId: input.setupId,
 		rawPayload: payload,
-		nextAttemptAt: input.nextAttemptAt,
+		retryDelayMs: input.retryDelayMs,
 	});
 	if (!queued.enqueued) {
 		await executeOne(
 			executor,
 			drizzleSql`
 				UPDATE store_events
-				SET next_attempt_at = LEAST(next_attempt_at, ${input.nextAttemptAt.toISOString()}::timestamptz),
+				SET next_attempt_at = LEAST(next_attempt_at, ${workerRetryAtSql(input.retryDelayMs)}),
 					processing_status = CASE
 						WHEN processing_status IN ('failed', 'skipped') THEN 'pending'
 						ELSE processing_status

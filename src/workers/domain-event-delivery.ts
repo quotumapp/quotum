@@ -18,7 +18,7 @@ import {
 	safelyIncrementBillingMetric,
 } from "../observability/metrics";
 import type { ProjectInstanceContextResolver } from "../projects/context";
-import { calculateNextAttemptAt, normalizeWorkerError } from "./backoff";
+import { calculateRetryDelayMs, normalizeWorkerError } from "./backoff";
 import { resolveClaimedProjectInstance } from "./project-context";
 
 export interface DomainEventDeliveryStore {
@@ -210,7 +210,7 @@ export class DomainEventDeliveryWorker {
 				{
 					error: result.error,
 					statusCode: result.statusCode,
-					nextAttemptAt: this.nextAttemptAt(delivery.attempts, result.retryAfterSeconds),
+					retryDelayMs: this.retryDelayMs(delivery.attempts, result.retryAfterSeconds),
 				},
 			);
 			this.recordDeliveryMetric(
@@ -278,19 +278,15 @@ export class DomainEventDeliveryWorker {
 		};
 	}
 
-	private nextAttemptAt(attempts: number, retryAfterSeconds: number | null): Date | null {
-		const now = this.options.now();
-		const backoff = calculateNextAttemptAt({
+	private retryDelayMs(attempts: number, retryAfterSeconds: number | null): number | null {
+		const backoff = calculateRetryDelayMs({
 			attempts,
 			maxAttempts: this.options.maxAttempts,
-			now,
 			jitterMs: this.options.jitterMs(),
 		});
-		if (backoff === null || retryAfterSeconds === null) return backoff;
-		const requested = new Date(
-			now.getTime() + Math.min(retryAfterSeconds, maxRetryAfterSeconds) * 1000,
-		);
-		return requested > backoff ? requested : backoff;
+		return backoff === null || retryAfterSeconds === null
+			? backoff
+			: Math.max(backoff, Math.min(retryAfterSeconds, maxRetryAfterSeconds) * 1000);
 	}
 
 	/** Public on `/metrics`, so the series carries no project, endpoint or event identity. */

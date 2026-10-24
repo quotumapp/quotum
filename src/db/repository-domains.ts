@@ -27,7 +27,7 @@ export interface ProjectionSyncJobRepositorySource {
 		projectId: string,
 		jobId: string,
 		lastError: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void>;
 }
@@ -67,14 +67,14 @@ export class ProjectionSyncJobRepository implements ProjectionSyncJobRepositoryS
 		projectId: string,
 		jobId: string,
 		lastError: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void> {
 		await this.source.markProjectionSyncJobFailed(
 			projectId,
 			jobId,
 			lastError,
-			nextAttemptAt,
+			retryDelayMs,
 			workerId,
 		);
 	}
@@ -92,11 +92,19 @@ export interface StoreEventReplayJobRepositorySource {
 		eventId: string,
 		workerId: string,
 	): Promise<void>;
+	markStoreEventReplayJobDeferred?(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		retryDelayMs: number,
+		workerId: string,
+	): Promise<void>;
+
 	markStoreEventReplayJobFailed(
 		projectId: string,
 		eventId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void>;
 	renewStoreEventReplayJobLease?(
@@ -141,14 +149,32 @@ export class StoreEventReplayJobRepository implements StoreEventReplayJobReposit
 		projectId: string,
 		eventId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void> {
 		await this.source.markStoreEventReplayJobFailed(
 			projectId,
 			eventId,
 			errorMessage,
-			nextAttemptAt,
+			retryDelayMs,
+			workerId,
+		);
+	}
+
+	async markStoreEventReplayJobDeferred(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		retryDelayMs: number,
+		workerId: string,
+	): Promise<void> {
+		if (!this.source.markStoreEventReplayJobDeferred)
+			throw new Error("Store event deferral is unavailable");
+		await this.source.markStoreEventReplayJobDeferred(
+			projectId,
+			eventId,
+			reason,
+			retryDelayMs,
 			workerId,
 		);
 	}
@@ -180,7 +206,7 @@ export interface ProviderSubscriptionReconciliationRepositorySource {
 	claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<ProviderSubscriptionReconciliationRow[]>;
 	markProviderSubscriptionReconciliationSucceeded(
 		projectId: string,
@@ -191,7 +217,7 @@ export interface ProviderSubscriptionReconciliationRepositorySource {
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void>;
 	renewProviderSubscriptionReconciliationLease?(
@@ -228,9 +254,13 @@ export class ProviderSubscriptionReconciliationRepository
 	async claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<ProviderSubscriptionReconciliationRow[]> {
-		return await this.source.claimProviderSubscriptionReconciliations(workerId, limit, staleBefore);
+		return await this.source.claimProviderSubscriptionReconciliations(
+			workerId,
+			limit,
+			staleAfterMs,
+		);
 	}
 
 	async markProviderSubscriptionReconciliationSucceeded(
@@ -249,14 +279,14 @@ export class ProviderSubscriptionReconciliationRepository
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void> {
 		await this.source.markProviderSubscriptionReconciliationFailed(
 			projectId,
 			subscriptionId,
 			errorMessage,
-			nextAttemptAt,
+			retryDelayMs,
 			workerId,
 		);
 	}

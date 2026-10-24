@@ -381,9 +381,9 @@ export class BillingRepository {
 	async claimAutoTopupJobs(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<AutoTopupJob[]> {
-		return await this.autoTopupJobs.claimAutoTopupJobs(workerId, limit, staleBefore);
+		return await this.autoTopupJobs.claimAutoTopupJobs(workerId, limit, staleAfterMs);
 	}
 
 	async markAutoTopupSucceeded(
@@ -402,7 +402,7 @@ export class BillingRepository {
 		input: {
 			kind: "retryable" | "action_required" | "safety_limit_exceeded";
 			error: string;
-			nextAttemptAt: Date | null;
+			retryDelayMs: number | null;
 			externalInvoiceId?: string | null;
 			externalPaymentId?: string | null;
 		},
@@ -460,14 +460,14 @@ export class BillingRepository {
 		projectId: string,
 		jobId: string,
 		lastError: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void> {
 		await this.projectionJobs.markProjectionSyncJobFailed(
 			projectId,
 			jobId,
 			lastError,
-			nextAttemptAt,
+			retryDelayMs,
 			workerId,
 		);
 	}
@@ -492,6 +492,22 @@ export class BillingRepository {
 		eventId: string,
 	): Promise<StoreEventReplayJobRow> {
 		return await this.storeEventReplay.claimStoreEventReplayJobById(workerId, project, eventId);
+	}
+
+	async markStoreEventReplayJobDeferred(
+		projectId: string,
+		eventId: string,
+		reason: string,
+		retryDelayMs: number,
+		workerId: string,
+	): Promise<void> {
+		await this.storeEventReplay.markStoreEventReplayJobDeferred(
+			projectId,
+			eventId,
+			reason,
+			retryDelayMs,
+			workerId,
+		);
 	}
 
 	async markStoreEventReplayJobSucceeded(
@@ -522,14 +538,14 @@ export class BillingRepository {
 		projectId: string,
 		eventId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void> {
 		await this.storeEventReplay.markStoreEventReplayJobFailed(
 			projectId,
 			eventId,
 			errorMessage,
-			nextAttemptAt,
+			retryDelayMs,
 			workerId,
 		);
 	}
@@ -561,12 +577,12 @@ export class BillingRepository {
 	async claimProviderSubscriptionReconciliations(
 		workerId: string,
 		limit: number,
-		staleBefore: Date,
+		staleAfterMs: number,
 	): Promise<ProviderSubscriptionReconciliationRow[]> {
 		return await this.subscriptionReconciliation.claimProviderSubscriptionReconciliations(
 			workerId,
 			limit,
-			staleBefore,
+			staleAfterMs,
 		);
 	}
 
@@ -598,14 +614,14 @@ export class BillingRepository {
 		projectId: string,
 		subscriptionId: string,
 		errorMessage: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void> {
 		await this.subscriptionReconciliation.markProviderSubscriptionReconciliationFailed(
 			projectId,
 			subscriptionId,
 			errorMessage,
-			nextAttemptAt,
+			retryDelayMs,
 			workerId,
 		);
 	}
@@ -1277,7 +1293,7 @@ export class BillingRepository {
 
 	async schedulePaymentSetupReconciliation(
 		project: ProjectInstanceContext,
-		input: { setupId: string; nextAttemptAt: Date },
+		input: { setupId: string; retryDelayMs: number },
 	): Promise<string> {
 		return await schedulePaymentSetupReconciliation(
 			this.database,

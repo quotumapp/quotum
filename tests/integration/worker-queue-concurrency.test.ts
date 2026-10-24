@@ -20,7 +20,6 @@ import {
 } from "./helpers/queue-fixtures";
 
 const localDescribe = describeLocalPostgres(describe, describe.skip);
-const staleBefore = () => new Date(Date.now() - 5 * 60_000);
 let context: LocalPostgresContext;
 
 localDescribe("Worker queue concurrency", () => {
@@ -39,8 +38,8 @@ localDescribe("Worker queue concurrency", () => {
 	it("claims each auto top-up job exactly once across competing workers", async () => {
 		const ids = await seedAutoTopupJobs(context.sql, context.repository, 4);
 		const [claimedA, claimedB] = await Promise.all([
-			context.repository.claimAutoTopupJobs("worker-a", 4, staleBefore()),
-			context.repository.claimAutoTopupJobs("worker-b", 4, staleBefore()),
+			context.repository.claimAutoTopupJobs("worker-a", 4, 300_000),
+			context.repository.claimAutoTopupJobs("worker-b", 4, 300_000),
 		]);
 		const claimed = [...claimedA, ...claimedB];
 		expect(claimed).toHaveLength(4);
@@ -81,7 +80,7 @@ localDescribe("Worker queue concurrency", () => {
 
 	it("reclaims a stale auto top-up lock without changing the reserved budget", async () => {
 		const [jobId] = await seedAutoTopupJobs(context.sql, context.repository, 1);
-		const [claimed] = await context.repository.claimAutoTopupJobs("worker-a", 1, staleBefore());
+		const [claimed] = await context.repository.claimAutoTopupJobs("worker-a", 1, 300_000);
 		expect(claimed.jobId).toBe(jobId);
 		const [before] = await context.sql<
 			{ budget_reserved_at: string; purchases_in_interval: number }[]
@@ -93,7 +92,7 @@ localDescribe("Worker queue concurrency", () => {
 			WHERE job.id = ${jobId}
 		`;
 		await expireAutoTopupJobLock(context.sql, jobId);
-		const [reclaimed] = await context.repository.claimAutoTopupJobs("worker-b", 1, staleBefore());
+		const [reclaimed] = await context.repository.claimAutoTopupJobs("worker-b", 1, 300_000);
 		expect(reclaimed.jobId).toBe(jobId);
 		const [after] = await context.sql<
 			{ budget_reserved_at: string; purchases_in_interval: number; locked_by: string }[]
@@ -111,9 +110,9 @@ localDescribe("Worker queue concurrency", () => {
 
 	it("fences auto top-up finalizers after a reclaimed lease", async () => {
 		const [jobId] = await seedAutoTopupJobs(context.sql, context.repository, 1);
-		const [claimed] = await context.repository.claimAutoTopupJobs("worker-a", 1, staleBefore());
+		const [claimed] = await context.repository.claimAutoTopupJobs("worker-a", 1, 300_000);
 		await expireAutoTopupJobLock(context.sql, jobId);
-		const [reclaimed] = await context.repository.claimAutoTopupJobs("worker-b", 1, staleBefore());
+		const [reclaimed] = await context.repository.claimAutoTopupJobs("worker-b", 1, 300_000);
 		expect(reclaimed.jobId).toBe(jobId);
 		await expect(
 			context.repository.markAutoTopupSucceeded(claimed.projectId, jobId, "worker-a", {
@@ -128,7 +127,7 @@ localDescribe("Worker queue concurrency", () => {
 			context.repository.markAutoTopupFailed(claimed.projectId, jobId, "worker-a", {
 				kind: "retryable",
 				error: "stale worker",
-				nextAttemptAt: new Date(Date.now() + 60_000),
+				retryDelayMs: 60_000,
 			}),
 		).rejects.toThrow(/is not locked by worker-a/);
 	});
@@ -301,8 +300,8 @@ localDescribe("Worker queue concurrency", () => {
 	it("claims each provider reconciliation exactly once across competing workers", async () => {
 		const ids = await seedReconciliationSubscriptions(context.sql, 6);
 		const [claimedA, claimedB] = await Promise.all([
-			context.repository.claimProviderSubscriptionReconciliations("worker-a", 6, staleBefore()),
-			context.repository.claimProviderSubscriptionReconciliations("worker-b", 6, staleBefore()),
+			context.repository.claimProviderSubscriptionReconciliations("worker-a", 6, 300_000),
+			context.repository.claimProviderSubscriptionReconciliations("worker-b", 6, 300_000),
 		]);
 		const claimed = [...claimedA, ...claimedB];
 		expect(claimed).toHaveLength(6);
@@ -346,14 +345,14 @@ localDescribe("Worker queue concurrency", () => {
 		const [claimed] = await context.repository.claimProviderSubscriptionReconciliations(
 			"worker-a",
 			1,
-			staleBefore(),
+			300_000,
 		);
 		expect(claimed.id).toBe(subscriptionId);
 		await expireSubscriptionReconciliationLock(context.sql, subscriptionId);
 		const [reclaimed] = await context.repository.claimProviderSubscriptionReconciliations(
 			"worker-b",
 			1,
-			staleBefore(),
+			300_000,
 		);
 		expect(reclaimed.id).toBe(subscriptionId);
 		await expect(
@@ -368,7 +367,7 @@ localDescribe("Worker queue concurrency", () => {
 				claimed.project_id,
 				subscriptionId,
 				"stale worker",
-				new Date(Date.now() + 60_000),
+				60_000,
 				"worker-a",
 			),
 		).rejects.toThrow(/is not locked by worker worker-a/);

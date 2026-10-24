@@ -836,23 +836,15 @@ localDescribe("promotion Stripe provisioning", () => {
 		await context.repository.promotions.createPromotion(project, discountPromotion());
 		const repo = context.repository.promotionProviders;
 		await repo.reconcilePromotionCoupons(25);
-		const [claimed] = await repo.claimStripeObjects(
-			"lease-owner",
-			25,
-			new Date(Date.now() - 300_000),
-		);
+		const [claimed] = await repo.claimStripeObjects("lease-owner", 25, 300_000);
 		if (!claimed) throw new Error("No coupon claimed");
 		await context.sql`UPDATE promotion_provider_objects SET locked_at=now()-interval '6 minutes' WHERE id=${claimed.objectId}`;
 		expect(
 			await repo.renewStripeObjectLease(claimed.projectId, claimed.objectId, "lease-owner"),
 		).toBe(true);
-		expect(
-			await repo.claimStripeObjects("second-owner", 25, new Date(Date.now() - 300_000)),
-		).toEqual([]);
+		expect(await repo.claimStripeObjects("second-owner", 25, 300_000)).toEqual([]);
 		await context.sql`UPDATE promotion_provider_objects SET locked_at=now()-interval '6 minutes' WHERE id=${claimed.objectId}`;
-		expect(
-			await repo.claimStripeObjects("second-owner", 25, new Date(Date.now() - 300_000)),
-		).toHaveLength(1);
+		expect(await repo.claimStripeObjects("second-owner", 25, 300_000)).toHaveLength(1);
 		expect(
 			await repo.renewStripeObjectLease(claimed.projectId, claimed.objectId, "lease-owner"),
 		).toBe(false);

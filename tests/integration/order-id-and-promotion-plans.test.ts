@@ -77,7 +77,7 @@ localDescribe("Order id and promotion object index use", () => {
 		`;
 		await context.sql`ANALYZE promotion_provider_objects`;
 
-		const claim = await plan(dueStripePromotionObjectsSql(100, new Date()));
+		const claim = await plan(dueStripePromotionObjectsSql(100, 60_000));
 
 		expect(claim).toContain("idx_billing_promotion_provider_objects_due");
 	});

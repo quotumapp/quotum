@@ -172,7 +172,7 @@ describe("repository domain adapters", () => {
 				return Promise.resolve();
 			},
 		});
-		const staleBefore = new Date("2026-06-07T12:00:00.000Z");
+		const staleBefore = 300_000;
 
 		expect(await replay.claimStoreEventReplayJobs("worker-a", 3)).toBe(replayRows);
 		expect(await reconciliation.reconcileExpiredSubscriptions(10)).toBe(expired);

@@ -407,7 +407,7 @@ localDescribe("Provider job identity integration", () => {
 			const claimed = await context.repository.claimAutoTopupJobs(
 				"identity-topup-worker",
 				10,
-				new Date(Date.now() - 300_000),
+				300_000,
 			);
 			expect(claimed).toHaveLength(1);
 			expect(claimed[0]).toMatchObject({

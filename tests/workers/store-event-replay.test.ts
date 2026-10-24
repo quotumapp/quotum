@@ -85,14 +85,14 @@ function createRepository(
 							_projectId: string,
 							eventId: string,
 							reason: string,
-							nextAttemptAt: Date,
+							retryDelayMs: number,
 							workerId: string,
 						) => {
 							calls.push({
 								method: "markStoreEventReplayJobDeferred",
 								eventId,
 								reason,
-								nextAttemptAt: nextAttemptAt.toISOString(),
+								retryDelayMs: retryDelayMs,
 								workerId,
 							});
 							if (options.deferError !== undefined) {
@@ -103,14 +103,14 @@ function createRepository(
 				_projectId: string,
 				eventId: string,
 				error: string,
-				nextAttemptAt: Date | null,
+				retryDelayMs: number | null,
 				workerId: string,
 			) => {
 				calls.push({
 					method: "markStoreEventReplayJobFailed",
 					eventId,
 					error,
-					nextAttemptAt: nextAttemptAt?.toISOString() ?? null,
+					retryDelayMs: retryDelayMs,
 					workerId,
 				});
 				if (options.failError !== undefined) {
@@ -410,7 +410,7 @@ describe("StoreEventReplayWorker", () => {
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_1",
 			error: "apple_customer_unresolved",
-			nextAttemptAt: "2026-05-31T00:02:00.000Z",
+			retryDelayMs: 120000,
 			workerId: "worker-a",
 		});
 	});
@@ -446,14 +446,14 @@ describe("StoreEventReplayWorker", () => {
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_google",
 			error: "Store event replay provider is not configured: google",
-			nextAttemptAt: "2026-05-31T00:01:00.000Z",
+			retryDelayMs: 60000,
 			workerId: "worker-a",
 		});
 		expect(calls).toContainEqual({
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_unknown",
 			error: "Unsupported store event replay provider: unknown",
-			nextAttemptAt: "2026-05-31T00:01:00.000Z",
+			retryDelayMs: 60000,
 			workerId: "worker-a",
 		});
 	});
@@ -497,7 +497,7 @@ describe("StoreEventReplayWorker", () => {
 			method: "markStoreEventReplayJobFailed",
 			eventId: "event_1",
 			error: "provider unavailable",
-			nextAttemptAt: null,
+			retryDelayMs: null,
 			workerId: "worker-a",
 		});
 		expect(metrics.renderPrometheus()).toContain(
@@ -560,7 +560,7 @@ describe("StoreEventReplayWorker", () => {
 				method: "markStoreEventReplayJobFailed",
 				eventId: "event_failed",
 				error: "provider unavailable",
-				nextAttemptAt: "2026-05-31T00:01:00.000Z",
+				retryDelayMs: 60000,
 				workerId: "worker-a",
 			},
 			{
@@ -691,10 +691,10 @@ describe("StoreEventReplayWorker", () => {
 
 describe("StoreEventReplayWorker deferrals", () => {
 	const deferredEvent = storeEvent({ provider: "stripe", channel: "web", attempts: 3 });
-	const nextAttemptAt = new Date("2026-05-31T00:30:00.000Z");
+	const retryDelayMs = 30 * 60_000;
 	const deferringProvider = {
 		replayStoreEvent: async () =>
-			({ status: "deferred", reason: "payment_setup_awaiting_customer", nextAttemptAt }) as const,
+			({ status: "deferred", reason: "payment_setup_awaiting_customer", retryDelayMs }) as const,
 	};
 
 	it("passes the configured failure budget to provider recovery", async () => {
@@ -711,7 +711,7 @@ describe("StoreEventReplayWorker deferrals", () => {
 				stripe: {
 					replayStoreEvent: async (_event, options) => {
 						budgets.push(options);
-						return { status: "deferred", reason: "payment_setup_needs_attention", nextAttemptAt };
+						return { status: "deferred", reason: "payment_setup_needs_attention", retryDelayMs };
 					},
 				},
 			},
@@ -748,7 +748,7 @@ describe("StoreEventReplayWorker deferrals", () => {
 			method: "markStoreEventReplayJobDeferred",
 			eventId: "event_1",
 			reason: "payment_setup_awaiting_customer",
-			nextAttemptAt: nextAttemptAt.toISOString(),
+			retryDelayMs: retryDelayMs,
 			workerId: "worker-a",
 		});
 		expect(calls.some((call) => isMethod(call, "markStoreEventReplayJobFailed"))).toBe(false);

@@ -156,7 +156,7 @@ export class PaymentSetupRepository extends RepositoryModule {
 				if (!isResolvedPaymentSetupStatus(existingForPreview.status))
 					await schedulePaymentSetupReconciliation(tx, projectId, {
 						setupId: existingForPreview.id,
-						nextAttemptAt: new Date(Date.now() + 30 * 60_000),
+						retryDelayMs: 30 * 60_000,
 					});
 				return reservationFor(existingForPreview);
 			}
@@ -198,7 +198,7 @@ export class PaymentSetupRepository extends RepositoryModule {
 			if (created === null) throw new Error("Payment setup session could not be created");
 			await schedulePaymentSetupReconciliation(tx, projectId, {
 				setupId: created.id,
-				nextAttemptAt: new Date(new Date(created.created_at).getTime() + 30 * 60_000),
+				retryDelayMs: 30 * 60_000,
 			});
 			return { kind: "created", setup: created };
 		});

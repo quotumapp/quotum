@@ -139,7 +139,7 @@ localDescribe("Worker lease fencing", () => {
 				claimed.project_id,
 				job.id,
 				"stale worker",
-				new Date(Date.now() + 60_000),
+				60_000,
 				"worker-a",
 			),
 		).rejects.toThrow(/is not locked by worker worker-a/);

@@ -548,7 +548,7 @@ describe("hosted payment setup reconciliation", () => {
 
 		expect(result).toMatchObject({ status: "deferred", reason: "payment_setup_awaiting_customer" });
 		if (result.status !== "deferred") throw new Error("Expected a deferral");
-		expect(result.nextAttemptAt.getTime()).toBe(now.getTime() + PAYMENT_SETUP_POLL_INTERVAL_MS);
+		expect(result.retryDelayMs).toBe(PAYMENT_SETUP_POLL_INTERVAL_MS);
 	});
 
 	it("applies a completion whose webhook never arrived", async () => {

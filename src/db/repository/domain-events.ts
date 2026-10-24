@@ -9,6 +9,7 @@ import { RepositoryModule } from "./base";
 import { assertUpdated, executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 import { requireNonBlank, requirePositiveLimit } from "./validation";
+import { workerRetryAtSql } from "./worker-clock";
 
 export interface DomainEventInput {
 	type: string;
@@ -104,7 +105,7 @@ export interface WebhookDeliveryFailure {
 	error: string;
 	statusCode: number | null;
 	/** Null when the delivery has used its attempts and fails for good. */
-	nextAttemptAt: Date | null;
+	retryDelayMs: number | null;
 }
 
 /**
@@ -383,18 +384,18 @@ export class DomainEventDeliveryRepository extends RepositoryModule {
 		workerId: string,
 		failure: WebhookDeliveryFailure,
 	): Promise<{ endpointDisabled: boolean }> {
-		const nextAttemptAt = failure.nextAttemptAt?.toISOString() ?? null;
+		const retryAt = workerRetryAtSql(failure.retryDelayMs);
 		return await this.transaction(async (tx) => {
 			const delivery = await executeOne<{ endpoint_id: string }>(
 				tx,
 				drizzleSql`
 					UPDATE webhook_deliveries delivery
-					SET status = CASE WHEN ${nextAttemptAt}::timestamptz IS NULL THEN 'failed' ELSE 'pending' END,
+					SET status = CASE WHEN ${retryAt} IS NULL THEN 'failed' ELSE 'pending' END,
 						attempts = LEAST(delivery.attempts::bigint + 1, 2147483647)::integer,
 						last_error = left(${failure.error}, 1000),
 						last_status_code = ${failure.statusCode},
 						last_attempt_at = now(),
-						next_attempt_at = COALESCE(${nextAttemptAt}::timestamptz, delivery.next_attempt_at),
+						next_attempt_at = COALESCE(${retryAt}, delivery.next_attempt_at),
 						locked_at = NULL, locked_by = NULL, updated_at = now()
 					WHERE delivery.project_id = ${projectId} AND delivery.id = ${deliveryId}
 						AND delivery.status = 'processing' AND delivery.locked_by = ${workerId}

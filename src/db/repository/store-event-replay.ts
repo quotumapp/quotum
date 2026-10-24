@@ -6,6 +6,7 @@ import { parseStoreEventReplayJobRow } from "./parsers";
 import { assertUpdated, executeOne, executeRows } from "./query";
 import type { StoreEventReplayJobRow } from "./types";
 import { requireNonBlank, requirePositiveLimit } from "./validation";
+import { workerRetryAtSql } from "./worker-clock";
 
 export class StoreEventReplayBillingRepository extends RepositoryModule {
 	async claimStoreEventReplayJobs(
@@ -184,7 +185,7 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 		projectId: string,
 		eventId: string,
 		reason: string,
-		nextAttemptAt: Date,
+		retryDelayMs: number,
 		workerId: string,
 	): Promise<void> {
 		requireNonBlank(reason, "p_processing_error");
@@ -195,7 +196,7 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 			SET
 				processing_status = 'pending',
 				processing_error = ${reason},
-				next_attempt_at = ${nextAttemptAt.toISOString()}::timestamptz,
+				next_attempt_at = ${workerRetryAtSql(retryDelayMs)},
 				locked_at = NULL,
 				locked_by = NULL,
 				updated_at = now()
@@ -213,22 +214,22 @@ export class StoreEventReplayBillingRepository extends RepositoryModule {
 		projectId: string,
 		eventId: string,
 		errorMessage: string,
-		nextAttemptAt: Date | null,
+		retryDelayMs: number | null,
 		workerId: string,
 	): Promise<void> {
 		requireNonBlank(errorMessage, "p_processing_error");
 		// Bind as ISO: Bun SQL serializes a raw Date via toString (a locale string) that
 		// Postgres rejects for ::timestamptz; the record* paths already do the same.
-		const nextAttemptAtIso = nextAttemptAt?.toISOString() ?? null;
+		const retryAt = workerRetryAtSql(retryDelayMs);
 		await assertUpdated(
 			this.database,
 			drizzleSql`
 			UPDATE store_events events
 			SET
-				processing_status = CASE WHEN ${nextAttemptAtIso}::timestamptz IS NULL THEN 'failed' ELSE 'pending' END,
+				processing_status = CASE WHEN ${retryAt} IS NULL THEN 'failed' ELSE 'pending' END,
 				processing_error = ${errorMessage},
 				attempts = events.attempts + 1,
-				next_attempt_at = COALESCE(${nextAttemptAtIso}::timestamptz, 'infinity'::timestamptz),
+				next_attempt_at = COALESCE(${retryAt}, 'infinity'::timestamptz),
 				locked_at = NULL,
 				locked_by = NULL,
 				updated_at = now()

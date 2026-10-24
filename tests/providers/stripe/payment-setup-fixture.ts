@@ -19,7 +19,7 @@ import type {
  */
 export class FakePaymentSetupStore implements PaymentSetupRepositoryDependency {
 	readonly rows = new Map<string, PaymentSetupRow>();
-	readonly reconciliations: Array<{ setupId: string; nextAttemptAt: Date }> = [];
+	readonly reconciliations: Array<{ setupId: string; retryDelayMs: number }> = [];
 	readonly enqueuedEvents: Array<{ eventType: string; externalEventId: string | null }> = [];
 	private sequence = 0;
 	now = new Date("2026-09-22T10:00:00.000Z");
@@ -254,7 +254,7 @@ export class FakePaymentSetupStore implements PaymentSetupRepositoryDependency {
 
 	async schedulePaymentSetupReconciliation(input: {
 		setupId: string;
-		nextAttemptAt: Date;
+		retryDelayMs: number;
 	}): Promise<string> {
 		if (!this.reconciliations.some((item) => item.setupId === input.setupId))
 			this.reconciliations.push(input);
