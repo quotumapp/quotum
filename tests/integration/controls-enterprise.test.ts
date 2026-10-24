@@ -2109,7 +2109,16 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 	});
 	it("backfills bounded customer pages idempotently while preserving pool IDs", async () => {
 		await seedCatalogMigration(context.sql);
+		const guide = await Bun.file(
+			new URL("../../docs/upgrade-transitions.md", import.meta.url),
+		).text();
+		const verification = guide
+			.split("## Pure license reads")[1]
+			?.match(/```sql\n([\s\S]*?)```/)?.[1];
+		if (!verification) throw new Error("Missing license backfill verification SQL");
+		const verify = () => context.sql.unsafe<Array<{ mismatch: string }>>(verification);
 		await context.sql`DELETE FROM license_pools`;
+		expect((await verify()).length).toBeGreaterThan(0);
 		expect(
 			await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
 		).toEqual([]);
@@ -2131,15 +2140,42 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			"migration-stripe",
 		);
 		expect(first[0]?.quantity).toBe(7);
+		expect(await verify()).toEqual([]);
+		await context.repository.controlsEnterprise.createEntity(project, {
+			billingAccountId: "migration-stripe",
+			externalId: "backfill-team",
+			kind: "team",
+		});
+		const pool = first[0];
+		if (!pool) throw new Error("Missing backfilled pool");
+		await context.repository.controlsEnterprise.assignLicense(project, {
+			billingAccountId: "migration-stripe",
+			poolId: pool.id,
+			entityId: "backfill-team",
+			quantity: 2,
+			actor: "backfill-test",
+		});
+		const assignments = await context.sql`SELECT * FROM license_assignments ORDER BY id`;
+		const assigned = await context.repository.controlsEnterprise.listLicensePools(
+			project,
+			"migration-stripe",
+		);
+		await context.sql`UPDATE license_pools SET quantity = quantity + 1 WHERE id = ${pool.id}::bigint`;
+		expect((await verify()).map((row) => row.mismatch).sort()).toEqual([
+			"extra_or_stale",
+			"missing_or_stale",
+		]);
 		await syncLicensePoolPage(
 			context.db as unknown as TransactionalQueryExecutor,
 			project.projectInstanceId,
 			null,
 			500,
 		);
+		expect(await verify()).toEqual([]);
+		expect(await context.sql`SELECT * FROM license_assignments ORDER BY id`).toEqual(assignments);
 		expect(
 			await context.repository.controlsEnterprise.listLicensePools(project, "migration-stripe"),
-		).toEqual(first);
+		).toEqual(assigned);
 	});
 
 	it("honors license assignments in assignment order after a partial downgrade", async () => {
