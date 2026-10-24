@@ -51,7 +51,10 @@ export interface PromotionMaintenanceRunResult {
 	retryScheduled: number;
 	failed: number;
 	deferred: number;
+	leaseSkipped: number;
 }
+
+type PromotionJobOutcome = "ready" | "retired" | "retryScheduled" | "failed" | "deferred";
 
 const DEFAULT_MAX_ATTEMPTS = 8;
 const NOT_CONFIGURED_RETRY_MS = 60 * 60_000;
@@ -100,6 +103,7 @@ export class PromotionMaintenanceWorker {
 			retryScheduled: 0,
 			failed: 0,
 			deferred: 0,
+			leaseSkipped: 0,
 		};
 		const staleBefore = new Date(Date.now() - (this.dependencies.staleAfterMs ?? 5 * 60_000));
 		const jobs = await repository.claimStripeObjects(
@@ -127,18 +131,16 @@ export class PromotionMaintenanceWorker {
 		});
 		try {
 			for (const job of jobs) {
+				let outcome: PromotionJobOutcome | null = null;
 				try {
-					if (!(await leases.owns(job))) continue;
-					const outcome = await this.sync(job, () => leases.owns(job));
-					if (outcome !== null) {
-						result[outcome] += 1;
-						this.record(job.objectKind, outcome);
-					}
+					if (await leases.owns(job)) outcome = await this.sync(job, () => leases.owns(job));
 				} catch (error) {
 					if (!(error instanceof JobLeaseRenewalError)) throw error;
 				} finally {
 					leases.release(job);
 				}
+				result[outcome ?? "leaseSkipped"] += 1;
+				this.record(job.objectKind, outcome ?? "lease_skipped");
 			}
 		} finally {
 			await leases.stop();
@@ -150,7 +152,7 @@ export class PromotionMaintenanceWorker {
 	private async sync(
 		job: PromotionStripeSyncJob,
 		owns: () => Promise<boolean>,
-	): Promise<"ready" | "retired" | "retryScheduled" | "failed" | "deferred" | null> {
+	): Promise<PromotionJobOutcome | null> {
 		const { repository, workerId } = this.dependencies;
 		try {
 			const project = await resolveClaimedProjectInstance(

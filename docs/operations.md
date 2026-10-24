@@ -343,6 +343,8 @@ lease skips that work, and a database error during the check leaves the claim fo
 provider call already in flight cannot be recalled, so completion markers remain fenced and Stripe
 retries keep their existing job-scoped idempotency keys. Heartbeats prevent live-job reclamation;
 they do not extend Stripe's idempotency retention or guarantee recovery after a prolonged outage.
+Promotion runs count skipped claims as `leaseSkipped` and emit the worker metric result
+`lease_skipped`, including ownership-check failures; neither counts as a provider failure.
 Provider event replay and subscription reconciliation also renew their claims. Projection delivery
 defaults to claiming up to 25 jobs per poll from a candidate set bounded by the batch size and
 delivering five concurrently with bounded HTTP timeouts. Batches, existing delivery concurrency,

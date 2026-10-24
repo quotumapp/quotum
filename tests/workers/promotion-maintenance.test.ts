@@ -3,6 +3,7 @@ import type {
 	PromotionStripeSyncJob,
 	PromotionStripeSyncOutcome,
 } from "../../src/billing/promotions";
+import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import {
 	type PromotionMaintenanceRepository,
 	PromotionMaintenanceWorker,
@@ -101,6 +102,7 @@ describe("PromotionMaintenanceWorker", () => {
 			retryScheduled: 1,
 			failed: 1,
 			deferred: 0,
+			leaseSkipped: 0,
 		});
 		expect(outcomes.map((entry) => [entry.objectId, entry.outcome.kind])).toEqual([
 			["ready", "ready"],
@@ -181,6 +183,7 @@ it.each(["before", "during", "unavailable"] as const)(
 	"keeps lease %s failures out of provider markers",
 	async (stage) => {
 		const clock = heartbeatTimers();
+		const metrics = createInMemoryBillingMetrics();
 		const f = repository([job("leased")]);
 		let owned = stage !== "before";
 		let calls = 0;
@@ -191,6 +194,7 @@ it.each(["before", "during", "unavailable"] as const)(
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "worker-1",
 			repository: f.repo,
+			metrics,
 			projectContextResolver: resolver,
 			leaseHeartbeatTimers: clock.timers,
 			adapterForJob: () => ({
@@ -204,7 +208,10 @@ it.each(["before", "during", "unavailable"] as const)(
 			}),
 			logger: { error() {} },
 		});
-		await worker.runOnce();
+		expect(await worker.runOnce()).toMatchObject({ claimed: 1, leaseSkipped: 1, failed: 0 });
+		expect(metrics.renderPrometheus()).toBe(
+			'billing_worker_jobs_total{operation="coupon",result="lease_skipped",worker="promotion_maintenance"} 1\n',
+		);
 		expect(calls).toBe(stage === "during" ? 1 : 0);
 		expect(f.outcomes).toEqual([]);
 		expect(clock.active).toBe(0);
