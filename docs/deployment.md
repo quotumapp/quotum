@@ -289,7 +289,7 @@ negative and out-of-range values fail startup. Zero disables a PostgreSQL sessio
 Unset connection-establishment timeout settings leave the Bun option unspecified, preserving the
 driver's existing connection-string behavior. The pool settings also apply to shared-factory
 clients such as bootstrap, catalog provision, usage scopes and partition commands. Separate
-operator clients, secret rotation, migrations and test-only pools retain their existing settings.
+operator clients, secret rotation, migrations and test-only pools retain their existing pool limits.
 The prepared-statement switch remains `BILLING_POSTGRES_PREPARED_STATEMENTS`.
 Bootstrap, catalog provision and connection-secret rotation honor the same setting as the server;
 secret rotation keeps its single-connection pool.
