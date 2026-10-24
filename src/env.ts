@@ -3,6 +3,7 @@ import { z } from "zod";
 import { loadPostgresSettings, type PostgresSettings } from "./db/settings";
 import { type BillingLogLevel, billingLogLevelSchema } from "./observability/log-level";
 import { type ErasureKeyring, erasureKeyFromBase64 } from "./shared/erasure-digest";
+import { MAX_POLL_INTERVAL_MS } from "./shared/poll-interval";
 import { type DestinationPolicy, parseAllowedNetworks } from "./shared/safe-http";
 import { loadWorkerSettings, type WorkerSettings } from "./workers/settings";
 
@@ -129,7 +130,7 @@ const envSchema = z.object({
 	BILLING_TRUST_GATEWAY_PROJECT_HEADER: z.enum(["true", "false"]).default("false"),
 	BILLING_ENV: z.enum(["development", "test", "production"]).default("production"),
 	BILLING_WORKER_ID: z.string().trim().min(1).optional(),
-	BILLING_WORKER_POLL_INTERVAL_MS: positiveIntegerString("BILLING_WORKER_POLL_INTERVAL_MS").default(
+	BILLING_WORKER_POLL_INTERVAL_MS: pollIntervalString("BILLING_WORKER_POLL_INTERVAL_MS").default(
 		"5000",
 	),
 	BILLING_PROJECTION_SYNC_MAX_ATTEMPTS: positiveIntegerString(
@@ -142,10 +143,10 @@ const envSchema = z.object({
 	BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS: positiveIntegerString(
 		"BILLING_STORE_EVENT_REPLAY_MAX_ATTEMPTS",
 	).default("10"),
-	BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS: positiveIntegerString(
+	BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS: pollIntervalString(
 		"BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS",
 	).default("5000"),
-	BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS: positiveIntegerString(
+	BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS: pollIntervalString(
 		"BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS",
 	).default("60000"),
 	BILLING_SUBSCRIPTION_RECONCILIATION_MAX_ATTEMPTS: positiveIntegerString(
@@ -154,7 +155,7 @@ const envSchema = z.object({
 	BILLING_PROVIDER_RECONCILIATION_STALE_AFTER_MS: positiveIntegerString(
 		"BILLING_PROVIDER_RECONCILIATION_STALE_AFTER_MS",
 	).default("21600000"),
-	BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS: positiveIntegerString(
+	BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS: pollIntervalString(
 		"BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS",
 	).default("60000"),
 	BILLING_PROJECTION_ALLOWED_NETWORKS: optionalString(),
@@ -528,6 +529,12 @@ function optionalString(): z.ZodType<string | undefined> {
 		const trimmed = value.trim();
 		return trimmed === "" ? undefined : trimmed;
 	}, z.string().min(1).optional());
+}
+
+function pollIntervalString(name: string): z.ZodType<string> {
+	return positiveIntegerString(name).refine((value) => Number(value) <= MAX_POLL_INTERVAL_MS, {
+		message: `${name} must be an integer between 1 and ${MAX_POLL_INTERVAL_MS}`,
+	});
 }
 
 function positiveIntegerString(name: string): z.ZodType<string> {

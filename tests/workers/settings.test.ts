@@ -115,3 +115,31 @@ describe("worker environment settings", () => {
 		).toBe(299_999);
 	});
 });
+
+describe("legacy polling interval timer bounds", () => {
+	it.each([
+		"BILLING_WORKER_POLL_INTERVAL_MS",
+		"BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS",
+		"BILLING_SUBSCRIPTION_RECONCILIATION_POLL_INTERVAL_MS",
+		"BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS",
+	])("bounds %s even when overrides are present", (variable) => {
+		const source = {
+			POSTGRES_URI: "postgres://localhost/test",
+			BILLING_ENV: "test",
+			BILLING_PROJECTION_SYNC_POLL_INTERVAL_MS: "5",
+		};
+		expect(() => loadEnv({ ...source, [variable]: "2147483647" })).not.toThrow();
+		for (const value of ["2147483648", "3000000000", "0", "-1", "1.5", "Infinity", "NaN"])
+			expect(() => loadEnv({ ...source, [variable]: value })).toThrow(variable);
+	});
+	it.each([
+		"workerPollIntervalMs",
+		"storeEventReplayPollIntervalMs",
+		"meteringMaintenancePollIntervalMs",
+		"subscriptionReconciliationPollIntervalMs",
+	])("validates programmatic %s before fallback resolution", (field) => {
+		expect(() =>
+			resolveWorkerSettings({ ...legacy, [field]: 3_000_000_000, projectionSyncPollIntervalMs: 5 }),
+		).toThrow("POLL_INTERVAL_MS");
+	});
+});
