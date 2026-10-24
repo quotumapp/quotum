@@ -41,6 +41,9 @@ seconds, also repeated as `error.retryAfter`. Responses are sent with `Cache-Con
 `X-Content-Type-Options: nosniff`: billing state is private to the caller and changes with every
 write.
 
+Stripe operations can answer `502` with the standard error envelope when a provider response
+omits required checkout or payment-setup fields. The OpenAPI contract includes this gateway status.
+
 A `/v1` request that fails its schema answers `400 INVALID_REQUEST` and names what was refused:
 the message carries the first issue, such as
 `Request validation failed: body.plans.1.tierRank: Invalid input: expected number, received string (2 more)`,

@@ -196,7 +196,7 @@ describe("shareRepeatedComponents", () => {
 
 		// The point of sharing: no operation spells an error envelope, and the catalog bodies appear once.
 		expect(JSON.stringify(shared.paths)).not.toContain("Request failed");
-		expect(Object.keys(components(shared).responses as Json)).toHaveLength(13);
+		expect(Object.keys(components(shared).responses as Json)).toHaveLength(14);
 		expect(Object.keys(components(shared).requestBodies as Json)).toContain(
 			"postV1AdminCatalogPublishRequest",
 		);
