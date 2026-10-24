@@ -204,8 +204,7 @@ An immediate `subscription_change` intent can carry some of that over, per consu
 - Only the previewed commercial action carries over. `POST .../subscriptions/:subscriptionId/changes`
   refuses the field.
 
-
-Version switches pre-lock existing account allocations in metering spend order before carrying
+Version switches pre-lock participating account allocations in metering spend order before carrying
 balances or usage, reopening a returning allowance, or ending outgoing allowances. This preserves
 carry selection and accounting while preventing opposite allocation lock orders against usage.
 
