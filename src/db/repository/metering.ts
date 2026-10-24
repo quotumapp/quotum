@@ -129,7 +129,7 @@ import {
 } from "./metering-persistence";
 import { openPlanGrantWindows } from "./plan-grant-windows";
 import { catchUpPlanGrants, planGrantsNeedCatchUp } from "./plan-grants";
-import { executeOne, executeRows, jsonb } from "./query";
+import { executeOne, executeRows, jsonb, readAccountingClock } from "./query";
 import { deleteExpiredRawUsageSql } from "./raw-usage-retention";
 import { materializeDueSubscriptionAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
@@ -2040,11 +2040,12 @@ export async function reserveWithinTransaction(
 		return { ...decision, reservationId: null, status: null, expiresAt: null, deductions: [] };
 	}
 
-	// Both timestamps share one database instant, including while the host clock is skewed.
+	// Sample after admission locks so waiting does not spend the reservation lifetime.
+	const effectiveAt = await readAccountingClock(tx);
+	const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
 	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
 		tx,
 		drizzleSql`
-			WITH reservation_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
 			INSERT INTO reservations (
 				project_id,
 				customer_id,
@@ -2070,9 +2071,8 @@ export async function reserveWithinTransaction(
 				${rate.path},
 				${requestedQuantity}::numeric,
 				${walletQuantity}::numeric,
-				reservation_clock.at,
-				reservation_clock.at + ${input.expiresInSeconds} * interval '1 second'
-			FROM reservation_clock
+				${effectiveAt.toISOString()}::timestamptz,
+				${expiresAt.toISOString()}::timestamptz
 			RETURNING id, expires_at
 		`,
 	);

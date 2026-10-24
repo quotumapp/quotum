@@ -34,3 +34,13 @@ export async function assertUpdated(
 export function jsonb(value: unknown): DrizzleSQL {
 	return drizzleSql`${JSON.stringify(value)}::text::jsonb`;
 }
+
+/** The database instant used for persisted metering decisions and accounting timestamps. */
+export async function readAccountingClock(executor: QueryExecutor): Promise<Date> {
+	const row = await executeOne<{ accounting_now: Date | string }>(
+		executor,
+		drizzleSql`SELECT clock_timestamp() AS accounting_now`,
+	);
+	if (row === null) throw new Error("Database accounting clock could not be read");
+	return new Date(row.accounting_now);
+}

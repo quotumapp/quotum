@@ -62,7 +62,7 @@ import {
 	readPendingAllowances,
 	type WindowAllocation,
 } from "./plan-grant-windows";
-import { executeOne, executeRows, jsonb } from "./query";
+import { executeOne, executeRows, jsonb, readAccountingClock } from "./query";
 import type { QueryExecutor } from "./types";
 import {
 	lockUsageInvoicePeriod,
@@ -750,11 +750,12 @@ export async function reserveMeterLimit(
 			deductions: [],
 		};
 	}
-	// Both timestamps share one database instant, including while the host clock is skewed.
+	// Sample after admission locks so waiting does not spend the reservation lifetime.
+	const effectiveAt = await readAccountingClock(executor);
+	const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
 	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
 		executor,
 		drizzleSql`
-			WITH reservation_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
 			INSERT INTO reservations (
 				project_id,
 				customer_id,
@@ -784,9 +785,8 @@ export async function reserveMeterLimit(
 				'direct',
 				${input.quantity}::numeric,
 				${input.quantity}::numeric,
-				reservation_clock.at,
-				reservation_clock.at + ${input.expiresInSeconds} * interval '1 second'
-			FROM reservation_clock
+				${effectiveAt.toISOString()}::timestamptz,
+				${expiresAt.toISOString()}::timestamptz
 			RETURNING id, expires_at
 		`,
 	);
