@@ -714,8 +714,9 @@ and commit steps as the **Integrations** screens, and audit events name the oper
    - Apple: `privateKey`;
    - Google Play: `serviceAccountJson` and `obfuscatedAccountIdSecret`.
 
-   A projection needs only `projectionUrl` and an optional `usageDelivery`, because Quotum generates
-   its secret.
+   A projection needs only `projectionUrl` (the receiver's base URL; see
+   [receiver URLs](#receiver-urls-and-local-testing)) and an optional `usageDelivery`, because
+   Quotum generates its secret.
 2. **Draft.** Run `quotum connections draft <instance> <kind> --settings settings.json --secrets-file -`.
    The `-` reads the secrets from stdin, so they never appear in the process list or shell history.
    - A projection draft takes `--secret-out <new-file>` instead. The generated receiver secret is
@@ -783,8 +784,44 @@ their key.
 Usage deliveries have immutable content and an `idempotencyKey` of
 `usage:<customerId>:<sequence>`; retries retain the payload, sequence and key, and subsequent
 usage receives a new key. The internal coalescing job still uses `usage:<customerId>`.
-Deduplicate deliveries by project and key, and compare sequence to prevent out-of-order state updates. [`scripts/projection-receiver.ts`](../scripts/projection-receiver.ts) is a
-reference receiver.
+Deduplicate deliveries by project and key, and compare sequence to prevent out-of-order state updates.
+
+### Receiver URLs and local testing
+
+`projectionUrl` is the receiver's **base URL**. Quotum appends
+`/internal/billing/projections` for deliveries and `/internal/billing/projections/verify` for the
+signed verification challenge. For example, `https://backend.example.com/billing` delivers to
+`https://backend.example.com/billing/internal/billing/projections`. A custom receiver must mount
+both endpoints beneath that optional prefix.
+
+Do not include `/internal/billing/projections` or `/verify` in `projectionUrl`: Quotum appends the
+path again, which commonly produces a receiver HTTP 404. Connection validation reports it as
+`422 PROJECTION_VERIFICATION_FAILED` with `httpStatus: 404` in `details.checks`.
+
+[`scripts/projection-receiver.ts`](../scripts/projection-receiver.ts) implements both endpoints at
+the root, so its base URL has no prefix. Run it from a source checkout with dependencies installed:
+
+```sh
+bun scripts/projection-receiver.ts --host=0.0.0.0 --port=4101 --secret='<generated projection secret>'
+```
+
+The default listen address is `127.0.0.1`. Use `--host=0.0.0.0` inside a receiver container to accept
+requests from other containers on its private network; use the receiver's service name, such as
+`http://receiver:4101`, in `projectionUrl`. `0.0.0.0` is a bind address, not the receiver's destination.
+The [private container setup](self-hosting.md#6-keep-backends-on-a-private-network-optional) shows
+the network and HTTP settings required by a normal headless runtime. Loopback cannot be allowlisted.
+
+The reference receiver's `GET /__stats` exposes recorded payloads and headers, and `GET /__reset`
+clears its state. Both require the configured bearer secret, including when listening on loopback;
+existing debug clients must add that header. They do not require the projection HMAC headers:
+
+```sh
+curl -H 'Authorization: Bearer <generated projection secret>' http://receiver:4101/__stats
+curl -H 'Authorization: Bearer <generated projection secret>' http://receiver:4101/__reset
+```
+
+Run those commands from the shared network. Keep the reference receiver's port unpublished. A
+missing or incorrect bearer secret returns 401 without changing counters or recorded deliveries.
 
 ### Delivery contract
 
