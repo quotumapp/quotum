@@ -1628,8 +1628,9 @@ CREATE TABLE IF NOT EXISTS auto_topup_jobs (
 	provider TEXT NOT NULL CHECK (provider IN ('apple', 'google', 'stripe', 'paddle')),
 	provider_account_id TEXT,
 	status TEXT NOT NULL DEFAULT 'pending' CHECK (
-		status IN ('pending', 'processing', 'succeeded', 'failed', 'provider_action_required')
+		status IN ('pending', 'processing', 'succeeded', 'failed', 'provider_action_required', 'requires_review')
 	),
+	phase TEXT NOT NULL DEFAULT 'charge' CHECK (phase IN ('charge', 'reconcile', 'complete')),
 	amount_minor BIGINT CHECK (amount_minor IS NULL OR amount_minor >= 0),
 	charged_amount_minor BIGINT CHECK (charged_amount_minor IS NULL OR charged_amount_minor >= 0),
 	currency TEXT COLLATE "C",
@@ -1660,7 +1661,7 @@ CREATE TABLE IF NOT EXISTS auto_topup_jobs (
 			AND charged_amount_minor IS NOT NULL AND external_invoice_id IS NOT NULL)
 		OR (status IN ('failed', 'provider_action_required')
 			AND completed_at IS NOT NULL AND last_error IS NOT NULL)
-		OR (status IN ('pending', 'processing') AND completed_at IS NULL)
+		OR (status IN ('pending', 'processing', 'requires_review') AND completed_at IS NULL)
 	)
 );
 

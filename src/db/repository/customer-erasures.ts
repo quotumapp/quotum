@@ -623,7 +623,7 @@ async function erasureBlockers(
 				SELECT 11, 'auto_topup_job', count(*)
 				FROM auto_topup_jobs j
 				WHERE j.project_id = ${projectId} AND j.customer_id = ${customer.id}
-					AND j.status IN ('pending', 'processing')
+					AND j.status IN ('pending', 'processing', 'requires_review')
 				UNION ALL
 				SELECT 12, 'usage_invoice', (
 					SELECT count(*) FROM usage_invoice_periods period

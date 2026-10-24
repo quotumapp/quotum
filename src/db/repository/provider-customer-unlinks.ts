@@ -196,7 +196,7 @@ async function unlinkBlockers(
 				SELECT 4, 'auto_topup_job', count(*)
 				FROM auto_topup_jobs j
 				WHERE j.project_id = ${projectId} AND j.customer_id = ${customer.id}
-					AND j.provider = 'stripe' AND j.status IN ('pending', 'processing')
+					AND j.provider = 'stripe' AND j.status IN ('pending', 'processing', 'requires_review')
 				UNION ALL
 				SELECT 5, 'usage_invoice', (
 					SELECT count(*)

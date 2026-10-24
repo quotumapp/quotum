@@ -4682,9 +4682,17 @@ export const autoTopupJobs = pgTable(
 		provider: text("provider").$type<BillingProvider>().notNull(),
 		providerAccountId: text("provider_account_id"),
 		status: text("status")
-			.$type<"pending" | "processing" | "succeeded" | "failed" | "provider_action_required">()
+			.$type<
+				| "pending"
+				| "processing"
+				| "succeeded"
+				| "failed"
+				| "provider_action_required"
+				| "requires_review"
+			>()
 			.notNull()
 			.default("pending"),
+		phase: text("phase").$type<"charge" | "reconcile" | "complete">().notNull().default("charge"),
 		amountMinor: bigint("amount_minor", { mode: "number" }),
 		chargedAmountMinor: bigint("charged_amount_minor", { mode: "number" }),
 		currency: text("currency"),
@@ -4717,7 +4725,7 @@ export const autoTopupJobs = pgTable(
 		),
 		check(
 			"auto_topup_jobs_status_check",
-			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'succeeded'::text, 'failed'::text, 'provider_action_required'::text])))`,
+			sql`((status = ANY (ARRAY['pending'::text, 'processing'::text, 'succeeded'::text, 'failed'::text, 'provider_action_required'::text, 'requires_review'::text])))`,
 		),
 		check(
 			"auto_topup_jobs_charged_amount_minor_check",
@@ -4727,11 +4735,12 @@ export const autoTopupJobs = pgTable(
 			"auto_topup_jobs_provider_result_check",
 			sql`(((provider_result IS NULL) OR (jsonb_typeof(provider_result) = 'object'::text)))`,
 		),
+		check("auto_topup_jobs_phase_check", sql`(phase IN ('charge','reconcile','complete'))`),
 		check("auto_topup_jobs_completion_attempts_check", sql`((completion_attempts >= 0))`),
 		check("auto_topup_jobs_attempts_check", sql`((attempts >= 0))`),
 		check(
 			"auto_topup_jobs_state_check",
-			sql`((((status = 'succeeded'::text) AND (completed_at IS NOT NULL) AND (charged_amount_minor IS NOT NULL) AND (external_invoice_id IS NOT NULL)) OR ((status = ANY (ARRAY['failed'::text, 'provider_action_required'::text])) AND (completed_at IS NOT NULL) AND (last_error IS NOT NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text])) AND (completed_at IS NULL))))`,
+			sql`((((status = 'succeeded'::text) AND (completed_at IS NOT NULL) AND (charged_amount_minor IS NOT NULL) AND (external_invoice_id IS NOT NULL)) OR ((status = ANY (ARRAY['failed'::text, 'provider_action_required'::text])) AND (completed_at IS NOT NULL) AND (last_error IS NOT NULL)) OR ((status = ANY (ARRAY['pending'::text, 'processing'::text, 'requires_review'::text])) AND (completed_at IS NULL))))`,
 		),
 		foreignKey({
 			name: "auto_topup_jobs_project_policy_fk",

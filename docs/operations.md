@@ -437,15 +437,40 @@ circuit reset. Use replay/retry routes for durable work; do not manually advance
 
 ### Automatic top-up completion recovery
 
-The worker checkpoints the invoice ID before finalization or collection and saves the paid receipt
-before crediting. Failure after an invoice checkpoint keeps the safety budget reserved and retries
-that invoice or local completion; it does not report a charge failure or consume the charge failure
-budget. Completion retries continue with a daily maximum delay. A saved paid receipt completes
-without calling Stripe, including if the policy was disabled after payment. A known invoice is
-retrieved on recovery, so recovery does not depend on the lifetime of Stripe's creation key.
-A failed checkpoint before collection can leave an unpaid draft for operator inspection.
-Historical stranded jobs still need operator reconciliation against Stripe; this change does not
-retry or credit terminal historical jobs automatically.
+The worker persists a `charge`, `reconcile` or `complete` phase. It checkpoints the invoice ID
+before finalization and the reconciliation phase before a money-changing request. A definitive
+card decline or rejected rate-limited request follows the ordinary consecutive-failure budget, circuit and failure event path.
+An unknown provider outcome only inspects the saved invoice and payment; it never repeats
+collection while that outcome remains unknown. A saved paid receipt performs only local crediting,
+even if the policy was disabled or the provider connection is unavailable.
+
+Recovery keeps the original safety-budget interval stamp. If that interval expires, completion
+counts the purchase and actual spend once in the current interval. After ten failed recovery
+attempts the job becomes `requires_review`, clears its worker lease, and stops polling. Its budget
+hold and provider receipt remain, it blocks another job for that policy, and customer erasure and
+Stripe customer unlink remain blocked. No false payment-failure event is emitted.
+
+Inspect those jobs with:
+
+```sh
+quotum repair auto-topups report <instance> [--after <job-id>] [--limit <n>]
+```
+
+The report is read-only, defaults to 100 jobs (maximum 500), returns `nextAfter` for paging, and
+exits 2 while its page contains review work. Check the invoice/payment in Stripe and repair local
+crediting failures first. For a still-unknown payment, establish its outcome at Stripe before
+resuming; an unresolved open invoice remains in reconciliation and can return to review. Then:
+
+```sh
+quotum repair auto-topups resume <instance> <job-id> --actor <name>
+```
+
+Resume is audited and resets the recovery counter on the same job. It preserves the phase, invoice,
+paid receipt and budget stamp; it never creates another charge job or grants credits directly.
+Organizations managed by members also require `--member-override-reason <why>`. Repeating resume
+on a job already resumed returns `unchanged`. A failed invoice checkpoint can leave an unpaid
+draft; inspect it separately. Historical paid-but-terminal jobs still require manual comparison
+with Stripe before any corrective grant.
 
 ### Merchant platform retention
 

@@ -1,8 +1,10 @@
 import { sql as drizzleSql } from "drizzle-orm";
 import type {
 	AutoTopupChargeSucceeded,
+	AutoTopupCheckpoint,
 	AutoTopupFailureResult,
 	AutoTopupJob,
+	AutoTopupPhase,
 } from "../../billing/auto-topup";
 import type { BillingProvider } from "../../billing/types";
 import { providerCapabilityDeclaration } from "../../providers/capabilities";
@@ -35,6 +37,7 @@ interface ClaimedJobRow {
 	external_invoice_id: string | null;
 	provider_result: AutoTopupChargeSucceeded | null;
 	completion_attempts: number;
+	phase: AutoTopupPhase;
 	budget_reserved_at: Date | string | null;
 	budget_interval_started_at: Date | string | null;
 	policy_active: boolean;
@@ -54,7 +57,13 @@ interface LockedJobRow extends ClaimedJobRow {
 	/** The entity an entity-scoped policy credits; null for the account's shared pool. */
 	policy_entity_id: string | number | bigint | null;
 	trigger_key: string;
-	status: "pending" | "processing" | "succeeded" | "failed" | "provider_action_required";
+	status:
+		| "pending"
+		| "processing"
+		| "succeeded"
+		| "failed"
+		| "provider_action_required"
+		| "requires_review";
 	locked_by: string | null;
 	external_invoice_id: string | null;
 	external_payment_id: string | null;
@@ -67,7 +76,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 		projectId: string,
 		jobId: string,
 		workerId: string,
-		checkpoint: { invoiceId: string; result?: AutoTopupChargeSucceeded },
+		checkpoint: Parameters<AutoTopupCheckpoint>[0],
 	): Promise<void> {
 		if (
 			checkpoint.invoiceId.trim() === "" ||
@@ -79,6 +88,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 			this.database,
 			drizzleSql`
    UPDATE auto_topup_jobs SET external_invoice_id = ${checkpoint.invoiceId},
+    phase = ${checkpoint.result === undefined ? (checkpoint.phase ?? "charge") : "complete"},
     provider_result = CASE WHEN ${checkpoint.result === undefined} THEN provider_result ELSE ${jsonb(checkpoint.result ?? null)} END, updated_at = now()
    WHERE project_id = ${projectId} AND id = ${jobId} AND status = 'processing' AND locked_by = ${workerId}
     AND (external_invoice_id IS NULL OR external_invoice_id = ${checkpoint.invoiceId})
@@ -99,7 +109,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 		const row = await executeOne(
 			this.database,
 			drizzleSql`
-   UPDATE auto_topup_jobs SET status = 'pending', completion_attempts = LEAST(completion_attempts::bigint + 1, 2147483647)::integer,
+   UPDATE auto_topup_jobs SET status = CASE WHEN completion_attempts >= 9 THEN 'requires_review' ELSE 'pending' END, completion_attempts = LEAST(completion_attempts::bigint + 1, 2147483647)::integer,
     next_attempt_at = clock_timestamp() + ${delayMs} * interval '1 millisecond',
     last_error = ${error.slice(0, 2000)}, locked_at = NULL, locked_by = NULL, updated_at = now()
    WHERE project_id = ${projectId} AND id = ${jobId} AND status = 'processing' AND locked_by = ${workerId}
@@ -345,7 +355,7 @@ export class AutoTopupJobRepository extends RepositoryModule {
 					external_invoice_id = COALESCE(${input.externalInvoiceId ?? null}, external_invoice_id),
 					external_payment_id = COALESCE(${input.externalPaymentId ?? null}, external_payment_id),
 					last_error = ${error}, completed_at = ${retryScheduled ? null : now.toISOString()},
-					budget_reserved_at = NULL, budget_interval_started_at = NULL,
+					budget_reserved_at = NULL, budget_interval_started_at = NULL, phase = 'charge',
 					locked_at = NULL, locked_by = NULL, updated_at = now()
 				WHERE project_id = ${projectId} AND id = ${jobId}
 				RETURNING id
@@ -401,7 +411,7 @@ async function lockClaimedJob(
 		SELECT job.id, job.project_id, project.key AS project_key, job.provider,
 			job.provider_account_id, job.policy_id, job.customer_id,
 			customer.billing_account_id, provider_customer.external_customer_id,
-			job.store_product_id, store.external_price_id, job.amount_minor, job.currency, job.attempts, job.external_invoice_id, job.provider_result, job.completion_attempts,
+			job.store_product_id, store.external_price_id, job.amount_minor, job.currency, job.attempts, job.external_invoice_id, job.provider_result, job.completion_attempts, job.phase,
 			job.budget_reserved_at, job.budget_interval_started_at, policy.active AS policy_active,
 			policy.limit_interval_seconds, policy.max_purchases_per_interval, policy.max_spend_minor,
 			policy.max_consecutive_failures, state.status AS state_status,
@@ -433,7 +443,7 @@ async function prepareClaimedJob(
 ): Promise<AutoTopupJob | null> {
 	const now = await readWorkerClock(executor);
 	const normalized = await normalizeInterval(executor, row, now);
-	const recovering = row.external_invoice_id !== null || row.provider_result !== null;
+	const recovering = row.phase !== "charge" || row.provider_result !== null;
 	if (!recovering && (!row.policy_active || row.state_status === "suspended")) {
 		await terminateUnclaimableJob(
 			executor,
@@ -482,7 +492,7 @@ async function prepareClaimedJob(
 		UPDATE auto_topup_jobs
 		SET status = 'processing', attempts = attempts + 1, locked_at = clock_timestamp(),
 			locked_by = ${workerId}, budget_reserved_at = COALESCE(budget_reserved_at, ${now.toISOString()}),
-			budget_interval_started_at = ${normalized.intervalStartedAt.toISOString()}, updated_at = now()
+			budget_interval_started_at = CASE WHEN ${recovering} THEN budget_interval_started_at ELSE ${normalized.intervalStartedAt.toISOString()}::timestamptz END, updated_at = now()
 		WHERE project_id = ${row.project_id} AND id = ${row.id}
 		RETURNING attempts
 	`,
@@ -512,6 +522,7 @@ async function prepareClaimedJob(
 		externalInvoiceId: row.external_invoice_id,
 		providerResult: row.provider_result,
 		completionAttempts: row.completion_attempts,
+		phase: row.phase,
 	};
 }
 
@@ -527,7 +538,7 @@ async function lockJobForCompletion(
 			job.provider_account_id, job.policy_id, job.customer_id,
 			customer.billing_account_id, provider_customer.external_customer_id,
 			job.store_product_id, store.product_id, store.external_price_id, job.amount_minor,
-			job.charged_amount_minor, job.currency, job.attempts, job.provider_result, job.completion_attempts, job.external_invoice_id, job.provider_result, job.completion_attempts, job.trigger_key, job.status,
+			job.charged_amount_minor, job.currency, job.attempts, job.provider_result, job.completion_attempts, job.phase, job.trigger_key, job.status,
 			job.locked_by, job.external_invoice_id, job.external_payment_id,
 			job.budget_reserved_at, job.budget_interval_started_at, policy.active AS policy_active,
 			policy.entity_id AS policy_entity_id,

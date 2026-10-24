@@ -49,6 +49,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 
 | Command | Purpose |
 | --- | --- |
+| `quotum repair auto-topups report` / `resume` | Inspect jobs requiring review or resume the saved operation after investigation; see [recovery operations](operations.md#automatic-top-up-completion-recovery). |
 | `quotum migrate` / `quotum migrate status` | Apply pending migrations, or verify the applied checksums. |
 | `quotum partitions status` / `ensure [--months <n>]` | Report or extend the monthly [usage partitions](operations.md#usage-partitions). |
 | `quotum licenses sync --instance <key> --actor <name>` | Materialize up to 100 customers’ license pools (maximum 500 with `--limit`); resume using `--after <nextAfter>` until `nextAfter` is null. Idempotent, preserves pool IDs, and requires `--member-override-reason` for member-managed organizations. |

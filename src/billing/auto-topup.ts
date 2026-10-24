@@ -1,5 +1,19 @@
 import type { BillingProvider } from "./types";
 
+export type AutoTopupPhase = "charge" | "reconcile" | "complete";
+
+/** The provider has conclusively rejected collection; ordinary failure policy applies. */
+export class AutoTopupDefinitiveChargeError extends Error {
+	constructor(
+		message: string,
+		readonly invoiceId: string,
+		readonly paymentId: string | null,
+	) {
+		super(message);
+		this.name = "AutoTopupDefinitiveChargeError";
+	}
+}
+
 export interface AutoTopupJob {
 	jobId: string;
 	projectId: string;
@@ -21,6 +35,7 @@ export interface AutoTopupJob {
 	externalInvoiceId?: string | null;
 	providerResult?: AutoTopupChargeSucceeded | null;
 	completionAttempts?: number;
+	phase?: AutoTopupPhase;
 }
 
 export interface AutoTopupChargeSucceeded {
@@ -57,5 +72,6 @@ export interface AutoTopupRunResult {
 /** Persisted before collection; failures must abort the provider workflow. */
 export type AutoTopupCheckpoint = (checkpoint: {
 	invoiceId: string;
+	phase?: AutoTopupPhase;
 	result?: AutoTopupChargeSucceeded;
 }) => Promise<void>;

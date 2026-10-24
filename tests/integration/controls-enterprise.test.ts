@@ -1229,7 +1229,7 @@ localDescribe("Phase 3 controls and automatic top-ups", () => {
 			JOIN auto_topup_states state
 				ON state.project_id = job.project_id AND state.policy_id = job.policy_id
 		`;
-		expect(retrying).toEqual({ status: "pending", reserved: true, purchases: 1 });
+		expect(retrying).toEqual({ status: "pending", reserved: false, purchases: 0 });
 		await context.sql`
 			UPDATE auto_topup_jobs SET next_attempt_at = now() - INTERVAL '1 second'
 		`;

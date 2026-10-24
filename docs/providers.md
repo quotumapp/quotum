@@ -676,7 +676,7 @@ unlink is refused while any of this work is open:
 | `subscription` | A Stripe subscription in `active`, `grace_period` or `billing_retry`. One that Stripe has ended (`cancelled`, `expired`) does not hold it, even with paid time left. |
 | `provider_operation` | A Stripe provider operation in `prepared`, `in_flight`, `reconciling` or `requires_review`. |
 | `payment_setup` | A hosted payment setup that is neither `completed` nor `expired`. |
-| `auto_topup_job` | An automatic top-up job in `pending` or `processing`. |
+| `auto_topup_job` | An automatic top-up job in `pending`, `processing` or `requires_review`. |
 | `usage_invoice` | A usage invoice period or adjustment in `pending` or `processing`. One that ended `failed` does not hold it. |
 
 An automatic top-up policy does not hold the link and stays in place. A top-up that comes due while

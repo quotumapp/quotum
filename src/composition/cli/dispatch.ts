@@ -108,6 +108,23 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => args[0] === "status" || args[0] === "ensure",
 	},
 	{
+		path: ["repair", "auto-topups"],
+		file: "composition/cli/auto-topups.ts",
+		usage: "repair auto-topups report|resume <instance> ...",
+		summary: "Inspect automatic top-ups requiring review and resume their saved operation",
+		environment:
+			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET, optional QUOTUM_ACTOR",
+		details: [
+			"  repair auto-topups report <instance> [--after <job-id>] [--limit <n>]",
+			"  repair auto-topups resume <instance> <job-id> --actor <name>",
+			"      [--member-override-reason <why>]",
+			"report is read-only and exits 2 when jobs need review. Resume is audited, resets the recovery",
+			"counter, and preserves the same job, provider receipt and budget hold. Check the provider",
+			"outcome and repair local completion errors first; resume never creates a replacement job.",
+		],
+		accepts: (args) => args[0] === "report" || args[0] === "resume",
+	},
+	{
 		path: ["repair", "apple-refund-reversals"],
 		file: "composition/cli/apple-refund-reversals.ts",
 		usage: "repair apple-refund-reversals report|apply <instance> ...",
