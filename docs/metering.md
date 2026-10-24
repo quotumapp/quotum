@@ -379,6 +379,7 @@ higher of that and the count of the one it replaced. The count is read once, whe
 window, from the same events a usage alert starts from, and `check` and `GET /controls` read it the
 same way before then. Lifetime controls and alerts read net durable monthly rollups, including
 closed months and later corrections, so pruning raw events cannot restore lifetime allowance.
+Closing a monthly rollup preserves late increments from usage recorded before the boundary.
 Existing lifetime windows catch up from that history before authorizing new usage. A spend limit has no recorded charge to read back from usage: it counts the spend charged
 after it took effect, and a replacing spend limit with the same window keeps the count of the one it
 replaced. Usage that a confirmation charged to an earlier window of the same cadence, the one its
