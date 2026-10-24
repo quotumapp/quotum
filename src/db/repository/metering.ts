@@ -123,13 +123,14 @@ import {
 	resolveEntityId,
 	resolveMeterLimit,
 	resolveRateDecision,
+	startReservationLifetime,
 	toTimestamp,
 	validateFilters,
 	validateOccurredAt,
 } from "./metering-persistence";
 import { openPlanGrantWindows } from "./plan-grant-windows";
 import { catchUpPlanGrants, planGrantsNeedCatchUp } from "./plan-grants";
-import { executeOne, executeRows, jsonb, readAccountingClock } from "./query";
+import { executeOne, executeRows, jsonb } from "./query";
 import { deleteExpiredRawUsageSql } from "./raw-usage-retention";
 import { materializeDueSubscriptionAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
@@ -2040,10 +2041,8 @@ export async function reserveWithinTransaction(
 		return { ...decision, reservationId: null, status: null, expiresAt: null, deductions: [] };
 	}
 
-	// Sample after admission locks so waiting does not spend the reservation lifetime.
-	const effectiveAt = await readAccountingClock(tx);
-	const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
-	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
+	// These provisional timestamps remain private until admission and all its writes finish.
+	const reservation = await executeOne<{ id: string }>(
 		tx,
 		drizzleSql`
 			INSERT INTO reservations (
@@ -2071,9 +2070,9 @@ export async function reserveWithinTransaction(
 				${rate.path},
 				${requestedQuantity}::numeric,
 				${walletQuantity}::numeric,
-				${effectiveAt.toISOString()}::timestamptz,
-				${expiresAt.toISOString()}::timestamptz
-			RETURNING id, expires_at
+				now(),
+				now() + (${input.expiresInSeconds}::integer * interval '1 second')
+			RETURNING id
 		`,
 	);
 	if (reservation === null) {
@@ -2116,12 +2115,18 @@ export async function reserveWithinTransaction(
 		insertReservationAllocations(tx, projectId, reservation.id, deductions),
 	]);
 	await enqueueUsageProjection(tx, { projectId, customerId: customer.id });
+	const expiresAt = await startReservationLifetime(
+		tx,
+		projectId,
+		reservation.id,
+		input.expiresInSeconds,
+	);
 	return {
 		...decision,
 		balance: balanceFromRows(rate.wallet, deductedRows(rows, deductions, scale, "held_quantity")),
 		reservationId: reservation.id,
 		status: "active",
-		expiresAt: toIso(reservation.expires_at),
+		expiresAt: expiresAt.toISOString(),
 		deductions,
 	};
 }

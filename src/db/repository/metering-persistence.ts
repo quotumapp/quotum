@@ -750,10 +750,8 @@ export async function reserveMeterLimit(
 			deductions: [],
 		};
 	}
-	// Sample after admission locks so waiting does not spend the reservation lifetime.
-	const effectiveAt = await readAccountingClock(executor);
-	const expiresAt = new Date(effectiveAt.getTime() + input.expiresInSeconds * 1000);
-	const reservation = await executeOne<{ id: string; expires_at: Date | string }>(
+	// These provisional timestamps remain private until admission and all its writes finish.
+	const reservation = await executeOne<{ id: string }>(
 		executor,
 		drizzleSql`
 			INSERT INTO reservations (
@@ -785,9 +783,9 @@ export async function reserveMeterLimit(
 				'direct',
 				${input.quantity}::numeric,
 				${input.quantity}::numeric,
-				${effectiveAt.toISOString()}::timestamptz,
-				${expiresAt.toISOString()}::timestamptz
-			RETURNING id, expires_at
+				now(),
+				now() + (${input.expiresInSeconds}::integer * interval '1 second')
+			RETURNING id
 		`,
 	);
 	if (reservation === null) throw new Error("Meter-limit reservation could not be persisted");
@@ -823,6 +821,12 @@ export async function reserveMeterLimit(
 		};
 	}
 	await enqueueMeteringProjection(executor, input.projectId, input.customerId, input.projectionKey);
+	const expiresAt = await startReservationLifetime(
+		executor,
+		input.projectId,
+		reservation.id,
+		input.expiresInSeconds,
+	);
 	return {
 		...decision,
 		balance: meterLimitBalance(
@@ -837,9 +841,32 @@ export async function reserveMeterLimit(
 		),
 		reservationId: reservation.id,
 		status: "active",
-		expiresAt: toIso(reservation.expires_at),
+		expiresAt: expiresAt.toISOString(),
 		deductions: [],
 	};
+}
+
+/** Start the lifetime only after every admission, hold and projection lock has been acquired. */
+export async function startReservationLifetime(
+	executor: QueryExecutor,
+	projectId: string,
+	reservationId: string,
+	expiresInSeconds: number,
+): Promise<Date> {
+	const effectiveAt = await readAccountingClock(executor);
+	const expiresAt = new Date(effectiveAt.getTime() + expiresInSeconds * 1000);
+	const reservation = await executeOne<{ id: string }>(
+		executor,
+		drizzleSql`
+			UPDATE reservations
+			SET effective_at = ${effectiveAt.toISOString()}::timestamptz,
+				expires_at = ${expiresAt.toISOString()}::timestamptz
+			WHERE project_id = ${projectId} AND id = ${reservationId} AND status = 'active'
+			RETURNING id
+		`,
+	);
+	if (reservation === null) throw new Error("Admitted reservation could not be timestamped");
+	return expiresAt;
 }
 
 async function checkMeterLimitFromBalance(
