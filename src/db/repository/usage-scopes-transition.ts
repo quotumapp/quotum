@@ -11,7 +11,7 @@ import {
 	meterLimitBounds,
 	queryMeterLimitRows,
 } from "./meter-limit-sources";
-import { executeRows } from "./query";
+import { executeRows, readAccountingClock } from "./query";
 import type { QueryExecutor, TransactionalQueryExecutor } from "./types";
 import {
 	type MixedScopeAccount,
@@ -365,7 +365,7 @@ async function governingScopes(
 ): Promise<Map<string, GroupLimit | null>> {
 	const groups = new Map<string, GroupLimit | null>();
 	const sources = new Map<string, Awaited<ReturnType<typeof queryMeterLimitRows>>>();
-	const now = new Date();
+	const now = await readAccountingClock(executor);
 	for (const row of rows) {
 		const key = groupKey(row);
 		if (groups.has(key)) continue;

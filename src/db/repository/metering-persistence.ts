@@ -2757,7 +2757,7 @@ export async function confirmMeterLimitReservation(
 			usageEventId: event.id,
 			usageEventRecordedAtExact: event.recorded_at_exact,
 			quantity,
-			now: new Date(reservation.db_now),
+			now: await readAccountingClock(executor),
 		});
 	}
 	await executeOne(
