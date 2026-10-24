@@ -9,6 +9,7 @@ export function createStripeOAuthPort(
 ): StripeOAuthPort | null {
 	if (!env.STRIPE_APP_CLIENT_ID) return null;
 	const clientId = z.string().min(1).parse(env.STRIPE_APP_CLIENT_ID);
+	const appId = z.string().startsWith("app_").parse(env.STRIPE_APP_ID);
 	const redirect = z.url().parse(env.STRIPE_APP_REDIRECT_URI);
 	if (new URL(redirect).protocol !== "https:")
 		throw new Error("Stripe app redirect must use HTTPS");
@@ -92,6 +93,45 @@ export function createStripeOAuthPort(
 			tokens(environment, new URLSearchParams({ grant_type: "authorization_code", code })),
 		refresh: (environment, refresh_token) =>
 			tokens(environment, new URLSearchParams({ grant_type: "refresh_token", refresh_token })),
+		async installationStatus(environment, accountId) {
+			try {
+				const client = new Stripe(config(environment).apiKey, {
+					timeout: 10_000,
+					maxNetworkRetries: 0,
+					httpClient: deps.fetch ? Stripe.createFetchHttpClient(deps.fetch) : undefined,
+				});
+				const result = z
+					.object({
+						has_more: z.boolean(),
+						data: z.array(
+							z.object({
+								object: z.literal("apps.install"),
+								account: z.string(),
+								app: z.string(),
+								livemode: z.boolean(),
+								status: z.string(),
+							}),
+						),
+					})
+					.parse(await client.apps.installs.list({ app: appId, account: accountId, limit: 100 }));
+				// A partial or mismatched response proves neither installation nor absence.
+				if (
+					result.has_more ||
+					result.data.some(
+						(install) =>
+							install.account !== accountId ||
+							install.app !== appId ||
+							install.livemode !== (environment === "production"),
+					)
+				)
+					return "indeterminate";
+				if (result.data.some((install) => install.status === "installed")) return "installed";
+				// Uninstalling and failed/unknown states must settle at Stripe before we act.
+				return result.data.length === 0 ? "absent" : "indeterminate";
+			} catch {
+				return "indeterminate";
+			}
+		},
 		webhookSecret: (environment) => config(environment).webhookSecret,
 	};
 }

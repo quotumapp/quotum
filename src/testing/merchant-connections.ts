@@ -58,6 +58,7 @@ export function merchantTestConnections(database: SQL, fallback: RuntimeConnecti
 				livemode: environment === "production",
 			};
 		},
+		installationStatus: async () => "absent",
 		webhookSecret: () => "whsec_synthetic_oauth",
 	};
 	const managed = createRuntimeConnectionResolver(repository, persistence, oauth);

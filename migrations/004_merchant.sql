@@ -319,7 +319,7 @@ CREATE INDEX platform_connection_oauth_principal_idx ON platform_connection_oaut
 
 CREATE INDEX platform_connection_oauth_session_idx ON platform_connection_oauth_states(session_id);
 
-CREATE INDEX platform_connection_oauth_expiry_idx ON platform_connection_oauth_states(expires_at) WHERE consumed_at IS NULL;
+CREATE INDEX platform_connection_oauth_expiry_idx ON platform_connection_oauth_states(expires_at);
 
 CREATE TABLE platform_auth_jwks (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -561,3 +561,5 @@ CREATE TABLE platform_mcp_changes (
 );
 CREATE INDEX platform_mcp_changes_owner_idx ON platform_mcp_changes(principal_id, project_instance_id, created_at DESC);
 CREATE INDEX platform_mcp_changes_created_idx ON platform_mcp_changes(created_at);
+
+CREATE INDEX platform_connection_oauth_consumed_idx ON platform_connection_oauth_states(consumed_at) WHERE consumed_at IS NOT NULL;

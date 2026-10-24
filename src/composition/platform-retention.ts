@@ -16,8 +16,7 @@ export const PLATFORM_RETENTION_JOB_NAME = "platform_retention";
 export const PLATFORM_RETENTION_POLL_INTERVAL_MS = 15 * 60_000;
 
 /**
- * The merchant platform's retention sweep as one more scheduled job. Only a runtime that serves the
- * merchant platform schedules it: a headless process writes none of these tables.
+ * The merchant platform's retention sweep as one more scheduled job. Headless runtimes sweep connection artifacts; merchant runtimes also sweep identity and MCP rows.
  */
 export function platformRetentionJobs(input: {
 	merchantEnabled: boolean;
@@ -26,7 +25,12 @@ export function platformRetentionJobs(input: {
 	options?: PlatformRetentionOptions;
 	pollIntervalMs?: number;
 }): QuotumScheduledJob[] {
-	return input.merchantEnabled ? [createPlatformRetentionJob(input)] : [];
+	return [
+		createPlatformRetentionJob({
+			...input,
+			options: { ...input.options, connectionsOnly: !input.merchantEnabled },
+		}),
+	];
 }
 
 export function createPlatformRetentionJob(input: {

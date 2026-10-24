@@ -522,13 +522,14 @@ instead of entering a restricted key. `STRIPE_APP_CLIENT_ID` enables it and requ
 
 | Variable | Purpose |
 | --- | --- |
+| `STRIPE_APP_ID` | The Stripe App resource id (`app_…`), required when OAuth is enabled; distinct from the OAuth client id and manifest package id. Used to reconcile current installations before disabling a connection. |
 | `STRIPE_APP_CLIENT_ID` | The app's OAuth client id. Unset or empty disables Stripe Apps OAuth. |
 | `STRIPE_APP_REDIRECT_URI` | The HTTPS OAuth callback registered with the app, served by the merchant application. |
 | `STRIPE_APP_TEST_AUTHORIZE_URL`, `STRIPE_APP_LIVE_AUTHORIZE_URL` | The app's install links from the Stripe Dashboard, under `https://marketplace.stripe.com/oauth/v2/authorize`. |
-| `STRIPE_APP_TEST_API_KEY`, `STRIPE_APP_LIVE_API_KEY` | The app owner's `sk_test_` and `sk_live_` secret keys, which exchange and refresh OAuth tokens. |
+| `STRIPE_APP_TEST_API_KEY`, `STRIPE_APP_LIVE_API_KEY` | The app owner's `sk_test_` and `sk_live_` secret keys, which exchange/refresh OAuth tokens and read this app’s installations. |
 | `STRIPE_APP_TEST_WEBHOOK_SECRET`, `STRIPE_APP_LIVE_WEBHOOK_SECRET` | Signing secrets for app events delivered to `/v1/stripe-app/webhooks/test` and `/v1/stripe-app/webhooks/live`. |
 
-The client id and redirect URI are checked at startup; each mode's key, secret and install link are
+The app resource id, client id and redirect URI are checked at startup; each mode's key, secret and install link are
 checked when that mode is first used. Installing the app happens in the merchant application. With
 the settings present, a [headless](#headless-mode) process still refreshes existing OAuth
 connections and processes app events, including deauthorization.

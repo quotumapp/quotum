@@ -199,6 +199,11 @@ describe("platform retention sweep", () => {
 		expect(result.capped).toEqual([]);
 		expect(result.deleted).toEqual({
 			platform_rate_limits: 1,
+			platform_connection_versions: 0,
+			platform_connection_secrets: 0,
+			platform_connection_operations: 0,
+			platform_connection_oauth_states: 0,
+			platform_stripe_app_events: 0,
 			platform_auth_links: 2,
 			platform_idempotency: 2,
 			platform_step_up_grants: 2,
@@ -362,7 +367,7 @@ describe("platform retention sweep", () => {
 
 	it("is a no-op on empty tables and on a second run", async () => {
 		const empty = await sweep().runOnce();
-		expect(Object.values(empty.deleted)).toEqual([0, 0, 0, 0, 0, 0]);
+		expect(Object.values(empty.deleted)).toEqual(PLATFORM_RETENTION_TABLES.map(() => 0));
 		await rateLimit("rate-old", ago(2 * DAY));
 		expect((await sweep().runOnce()).deleted.platform_rate_limits).toBe(1);
 		expect((await sweep().runOnce()).deleted.platform_rate_limits).toBe(0);
@@ -417,7 +422,7 @@ describe("platform retention plans", () => {
 	it("reads every table through the indexes on its window columns", async () => {
 		await seedLiveRows();
 		const statements = await sweepStatements();
-		expect(statements).toHaveLength(PLATFORM_RETENTION_TABLES.length);
+		expect(statements).toHaveLength(PLATFORM_RETENTION_TABLES.length - 1);
 
 		// With sequential scans off, a plan names an index only when the statement can use one.
 		const plans = await sql.begin(async (transaction) => {
@@ -436,6 +441,14 @@ describe("platform retention plans", () => {
 		// Rows go by either instant of a pair, and an OR is served only when both arms have an index.
 		const expected: Record<(typeof PLATFORM_RETENTION_TABLES)[number], string[]> = {
 			platform_rate_limits: ["platform_rate_limits_reset_idx"],
+			platform_connection_versions: ["platform_connection_versions_expiry_idx"],
+			platform_connection_secrets: ["platform_connection_secrets_pkey"],
+			platform_connection_operations: ["platform_connection_operations_retention_idx"],
+			platform_connection_oauth_states: [
+				"platform_connection_oauth_expiry_idx",
+				"platform_connection_oauth_consumed_idx",
+			],
+			platform_stripe_app_events: ["platform_stripe_app_events_processed_idx"],
 			platform_auth_links: ["platform_auth_links_expiry_idx", "platform_auth_links_consumed_idx"],
 			platform_idempotency: ["platform_idempotency_created_idx"],
 			platform_step_up_grants: ["platform_step_up_expiry_idx", "platform_step_up_consumed_idx"],
@@ -540,7 +553,7 @@ describe("runtime wiring", () => {
 				expect(intervals.stripe_app_events).toBe(112);
 				expect(intervals.platform_retention).toBe(113);
 			} else {
-				expect(intervals).not.toHaveProperty("platform_retention");
+				expect(intervals.platform_retention).toBe(113);
 			}
 		}
 		const disabled = await scheduledJobs("headless", { ...overrides, usagePartitionUpkeep: false });
@@ -565,9 +578,9 @@ describe("runtime wiring", () => {
 		expect(await sql`SELECT key FROM platform_idempotency`).toHaveLength(0);
 	});
 
-	it("does not schedule the sweep in a headless process", async () => {
+	it("schedules a connection-only sweep in a headless process", async () => {
 		const jobs = await scheduledJobs("headless");
 		expect(jobs.length).toBeGreaterThan(0);
-		expect(jobs.map((job) => job.name)).not.toContain("platform_retention");
+		expect(jobs.map((job) => job.name)).toContain("platform_retention");
 	});
 });

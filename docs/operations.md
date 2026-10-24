@@ -334,7 +334,7 @@ on the interval shown; unset per-worker overrides preserve the shared fallbacks 
 | [Customer erasure](#customer-erasure) | `BILLING_CUSTOMER_ERASURE_POLL_INTERVAL_MS` (falls back to `BILLING_WORKER_POLL_INTERVAL_MS`) |
 | Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STRIPE_APP_EVENTS_POLL_INTERVAL_MS` (falls back to `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS`) |
 | [Usage partition upkeep](#usage-partitions), unless `BILLING_USAGE_PARTITION_UPKEEP=false` | `BILLING_USAGE_PARTITION_UPKEEP_POLL_INTERVAL_MS` (900000) |
-| [Merchant platform retention](#merchant-platform-retention), only when `QUOTUM_CONSOLE_ENABLED=true` | `QUOTUM_PLATFORM_RETENTION_POLL_INTERVAL_MS` (900000) |
+| [Platform retention](#merchant-platform-retention) | `QUOTUM_PLATFORM_RETENTION_POLL_INTERVAL_MS` (900000) |
 
 Automatic top-up, recurring billing and promotion maintenance renew every outstanding claim in their current batch,
 including jobs waiting behind a provider call. The heartbeat runs every 60 seconds against the
@@ -431,11 +431,16 @@ circuit reset. Use replay/retry routes for durable work; do not manually advance
 
 The merchant platform keeps short-lived operational rows that nothing else prunes. A runtime that
 serves the merchant platform (`QUOTUM_CONSOLE_ENABLED=true`) schedules the `platform_retention` job
-every 15 minutes by default; a headless process writes none of these tables and does not. Each run deletes
+every 15 minutes by default. Headless runtimes schedule the same job for connection artifacts only.
+The sweep reads PostgreSQL time. Each run deletes
 rows older than these windows:
 
 | Table | Deleted once | Window |
 | --- | --- | --- |
+| `platform_connection_versions` and `platform_connection_secrets` | Uncommitted draft expires; no active reference or live refresh lease | 7 days |
+| `platform_connection_oauth_states` | `expires_at` or `consumed_at` is past | 7 days |
+| `platform_connection_operations` | `created_at` is past, except permanent `credential.*` replay receipts | 30 days |
+| `platform_stripe_app_events` | `processed_at` is past, or an unprocessed event has no current OAuth account/mode mapping and `created_at` is past | 30 days |
 | `platform_rate_limits` | `reset_at` is past | 1 day |
 | `platform_auth_links` | `expires_at` or `consumed_at` is past | 7 days |
 | `platform_idempotency` | `created_at` is past, and the stored response is complete | 30 days |
@@ -448,7 +453,18 @@ answering `OPERATION_IN_PROGRESS`, and a proposal that is `applying` or `needs_r
 grant. An elapsed rate-limit window already counts as empty, an expired link or grant is already
 rejected, and a deleted idempotency record only ends replay of an answer older than 30 days. An
 MCP connection whose row is gone answers like a revoked one, `MCP_AUTHORIZATION_REVOKED`. Audit
-events, memberships, sessions, credentials and connections are never touched.
+events, memberships, sessions, credentials and connections are never touched. Active and retired connection versions and their
+secrets remain. Draft secrets and their parent version are deleted together. Connection receipt replay and processed Stripe event deduplication end after thirty days.
+Credential rotation/revocation receipts remain indefinitely, so replay cannot rotate or revoke a
+later key. Unmapped Stripe events remain quarantined for thirty days after receipt; reconnect or
+investigate them before that deadline. Mapped unresolved events remain until processing succeeds.
+
+Deauthorization reconciles the current installation using the app owner's mode-specific key and
+`STRIPE_APP_ID`. An installed app keeps the connection; a complete empty installation list disables
+it. Transitional states, partial/malformed responses and provider failures defer the event. The
+connection's account, mode and active version are rechecked before the observation and event
+completion commit together. An old event cannot disable a reinstalled app, and provider/database
+clock skew or a missing event timestamp does not silently drop a legitimate revocation.
 
 A run defaults to at most 1,000 rows per statement and 25 statements per table, each its own short
 transaction that locks only the rows it removes and skips rows a request holds, so replicas share

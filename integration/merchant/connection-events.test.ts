@@ -6,6 +6,7 @@ import { createStripeAppEvents } from "../../src/composition/stripe-app-events";
 import { closePool } from "../../src/db/client";
 import type { BillingLogger } from "../../src/observability/logger";
 import { StripeAppEvents } from "../../src/platform/connections/stripe-events";
+import { createDeferred } from "../../tests/helpers/deferred";
 import {
 	createGoogleOidcTestKeys,
 	createTestGoogleOidcVerifier,
@@ -379,6 +380,126 @@ describe("connection-event webhook verification", () => {
 });
 
 describe("Stripe App webhook verification", () => {
+	it.each(["installed", "absent", "indeterminate"] as const)(
+		"reconciles %s installations without trusting event time",
+		async (status) => {
+			const browser = new MerchantBrowser(f);
+			await onboard(browser);
+			const provider = { ...isolatedStripeOAuthPort(), installationStatus: async () => status };
+			await authorizeStripeApp(f, browser, provider, stubConnectionValidation());
+			const events = createStripeAppEvents(f.connectionRepository, provider, f.sql);
+			for (const [key, created] of [
+				["missing", undefined],
+				["old", 1],
+				["current-second", Math.floor(Date.now() / 1000)],
+			] as const) {
+				expect(
+					(
+						await postStripeApp(
+							events.app,
+							stripeAppEvent("account.application.deauthorized", `evt_${key}`, { created }),
+							"test",
+						)
+					).status,
+				).toBe(200);
+			}
+			await events.runOnce();
+			expect(
+				(
+					await f.sql`SELECT enabled FROM platform_connections WHERE stripe_account_id='acct_isolated'`
+				)[0]?.enabled,
+			).toBe(status !== "absent");
+			const rows =
+				await f.sql`SELECT processed_at, next_attempt_at>clock_timestamp() AS deferred FROM platform_stripe_app_events WHERE event_id IN ('evt_missing','evt_old','evt_current-second')`;
+			expect(rows).toHaveLength(3);
+			for (const row of rows) {
+				expect(row.processed_at !== null).toBe(status !== "indeterminate");
+				if (status === "indeterminate") expect(row.deferred).toBe(true);
+			}
+			// A replay after retention still reconciles the replacement's current installation.
+			if (status === "installed") {
+				await f.sql`DELETE FROM platform_stripe_app_events WHERE event_id='evt_old'`;
+				expect(
+					(
+						await postStripeApp(
+							events.app,
+							stripeAppEvent("account.application.deauthorized", "evt_old", { created: 1 }),
+							"test",
+						)
+					).status,
+				).toBe(200);
+				await events.runOnce();
+				expect(
+					(
+						await f.sql`SELECT enabled FROM platform_connections WHERE stripe_account_id='acct_isolated'`
+					)[0]?.enabled,
+				).toBe(true);
+			}
+		},
+	);
+
+	it("retries against a replacement when the active version changes during provider lookup", async () => {
+		const browser = new MerchantBrowser(f);
+		await onboard(browser);
+		const started = createDeferred<void>();
+		const release = createDeferred<void>();
+		let current: "installed" | "absent" = "absent";
+		const provider = {
+			...isolatedStripeOAuthPort(),
+			installationStatus: async () => {
+				const observed = current;
+				started.resolve();
+				await release.promise;
+				return observed;
+			},
+		};
+		await authorizeStripeApp(f, browser, provider, stubConnectionValidation());
+		const events = createStripeAppEvents(f.connectionRepository, provider, f.sql);
+		expect(
+			(
+				await postStripeApp(
+					events.app,
+					stripeAppEvent("account.application.deauthorized", "evt_concurrent"),
+					"test",
+				)
+			).status,
+		).toBe(200);
+		const running = events.runOnce();
+		await started.promise;
+		try {
+			const [replacement] = await f.sql<
+				{ id: string; connection_id: string }[]
+			>`INSERT INTO platform_connection_versions(connection_id,project_instance_id,expected_revision,settings,status,request_key,request_fingerprint) SELECT id,project_instance_id,revision,'{"authMethod":"oauth"}','active','replacement-version','hash' FROM platform_connections WHERE stripe_account_id='acct_isolated' RETURNING id,connection_id`;
+			await f.sql`UPDATE platform_connections SET active_version_id=${replacement.id},revision=revision+1 WHERE id=${replacement.connection_id}`;
+			current = "installed";
+		} finally {
+			release.resolve();
+		}
+		await running;
+		expect(
+			(
+				await f.sql`SELECT enabled FROM platform_connections WHERE stripe_account_id='acct_isolated'`
+			)[0]?.enabled,
+		).toBe(true);
+		expect(
+			(
+				await f.sql`SELECT processed_at FROM platform_stripe_app_events WHERE event_id='evt_concurrent'`
+			)[0]?.processed_at,
+		).toBeNull();
+		await f.sql`UPDATE platform_stripe_app_events SET next_attempt_at=clock_timestamp() WHERE event_id='evt_concurrent'`;
+		await events.runOnce();
+		expect(
+			(
+				await f.sql`SELECT processed_at FROM platform_stripe_app_events WHERE event_id='evt_concurrent'`
+			)[0]?.processed_at,
+		).not.toBeNull();
+		expect(
+			(
+				await f.sql`SELECT enabled FROM platform_connections WHERE stripe_account_id='acct_isolated'`
+			)[0]?.enabled,
+		).toBe(true);
+	});
+
 	it("processes only the configured number of pending App events per pass", async () => {
 		const browser = new MerchantBrowser(f);
 		await onboard(browser);

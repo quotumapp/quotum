@@ -9,5 +9,9 @@ export interface StripeOAuthPort {
 	authorize(environment: "sandbox" | "production", state: string): string;
 	exchange(environment: "sandbox" | "production", code: string): Promise<StripeOAuthTokens>;
 	refresh(environment: "sandbox" | "production", token: string): Promise<StripeOAuthTokens>;
+	installationStatus(
+		environment: "sandbox" | "production",
+		accountId: string,
+	): Promise<"installed" | "absent" | "indeterminate">;
 	webhookSecret(environment: "sandbox" | "production"): string;
 }

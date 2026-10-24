@@ -176,7 +176,7 @@ CREATE TABLE platform_connection_versions (
 
 CREATE INDEX platform_connection_versions_instance_idx ON platform_connection_versions(project_instance_id);
 
-CREATE INDEX platform_connection_versions_expiry_idx ON platform_connection_versions(expires_at) WHERE status IN ('draft','validated');
+CREATE INDEX platform_connection_versions_expiry_idx ON platform_connection_versions(expires_at) WHERE status IN ('draft','validated','expired');
 
 CREATE TABLE platform_connection_secrets (
 	connection_id uuid NOT NULL,
@@ -216,3 +216,8 @@ CREATE INDEX platform_stripe_app_events_retry_idx ON platform_stripe_app_events(
 ALTER TABLE platform_connections
 	ADD CONSTRAINT platform_connections_active_version_fk
  FOREIGN KEY(id,active_version_id) REFERENCES platform_connection_versions(connection_id,id) DEFERRABLE INITIALLY DEFERRED;
+
+CREATE INDEX platform_connection_operations_retention_idx ON platform_connection_operations(created_at);
+CREATE INDEX platform_stripe_app_events_processed_idx ON platform_stripe_app_events(processed_at) WHERE processed_at IS NOT NULL;
+
+CREATE INDEX platform_stripe_app_events_unmapped_retention_idx ON platform_stripe_app_events(created_at) WHERE processed_at IS NULL;

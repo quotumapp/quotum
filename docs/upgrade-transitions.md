@@ -1211,3 +1211,19 @@ never becomes ready. [Postgres](deployment.md#postgres) lists the session limits
 
 The older image's migration check rejects the new ledger, so a rollback restores the pre-upgrade
 backup with the old binary and loses writes made since.
+
+## Connection artifact retention
+
+The pre-1.0 baselines `001_platform.sql` and `004_merchant.sql` add retention indexes.
+Drain old workers and back up a populated database before applying the documented baseline
+backup/restore transition; never bypass checksum verification. Disposable databases are recreated.
+Set the required `STRIPE_APP_ID` (`app_…`, not `STRIPE_APP_CLIENT_ID` or the manifest package id)
+where Stripe Apps OAuth is configured before starting the new binary. Its existing app-owner
+mode-specific keys must belong to that app. Deploy the installation-reconciling Stripe App event
+handler before enabling the new sweep across replicas.
+The job now runs for connection artifacts in headless mode too. Drafts/OAuth states retain seven
+days after expiry, and non-credential receipts/processed events thirty days. Credential operation
+receipts, active/retired versions and secrets remain. Unprocessed events without an OAuth
+account/mode mapping are deleted thirty days after receipt; inspect/reconnect quarantined events
+before their deadline. Mapped unresolved events remain. `001_platform.sql` also adds the partial
+unprocessed-event retention index.

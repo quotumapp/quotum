@@ -40,7 +40,7 @@ How the runtime fits together, and the repository checks that most often reject 
 
 - `src/index.ts` -> `src/composition/public-runtime.ts` (`createQuotumRuntime`) ->
   `src/runtime.ts` (`createBillingRuntime`) builds everything: repositories, the provider registry,
-  eleven polling billing workers (plus the merchant-only `platform_retention` sweep), shutdown hooks,
+  eleven polling billing workers (plus the `platform_retention` sweep), shutdown hooks,
   then the "staff" Elysia app from `src/app.ts` (`createApp`) and, through `attachMerchantRuntime`
   in `src/composition/merchant-runtime.ts`, the merchant app. `composeRuntimeApp` there routes
   setup-only ingress (connection and Stripe App events) first, then the remote MCP and OAuth
@@ -191,10 +191,14 @@ outbound domain event delivery (`src/workers/domain-event-delivery.ts`), store-e
 subscription reconciliation, metering maintenance, recurring billing, auto
 top-up, promotion maintenance, customer erasure, provider operation recovery, usage partition upkeep (`src/workers/usage-partition-upkeep.ts`,
 which adds monthly `usage_events` partitions ahead of time; `quotum partitions` runs it on demand),
-plus Stripe App event processing when Apps OAuth is configured and, only when the merchant platform
-is enabled, the `platform_retention` sweep (`src/platform/retention.ts`, wired by
+plus Stripe App event processing when Apps OAuth is configured and the `platform_retention` sweep (`src/platform/retention.ts`, wired by
 `src/composition/platform-retention.ts`), which deletes expired rate limits, auth links, completed
-idempotency rows, step-up grants and terminal MCP rows in bounded batches.
+idempotency rows, step-up grants and terminal MCP rows in bounded batches. Headless runtimes sweep connection artifacts
+only; merchant runtimes also sweep identity and MCP rows. Expired drafts and their secrets and OAuth
+states retain seven days; non-credential operation receipts, processed Stripe App events and
+unmapped event quarantine retain thirty days. Credential operation receipts and mapped unresolved
+events remain. Stripe Apps OAuth requires `STRIPE_APP_ID`; deauthorization checks current provider
+installation state and commits only against the inspected account/mode/version.
 Usage projection jobs retain an immutable payload through retries; their internal coalescing key
 is `usage:<customerId>` and their delivery key includes `:<sequence>`. Drain old workers before
 upgrading this delivery behavior.

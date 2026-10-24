@@ -30,9 +30,33 @@ export class StripeAppEvents {
 		await this
 			.sql`UPDATE platform_connection_versions SET event_verified_at=now() WHERE connection_id=${id} AND id=${versionId} AND status='active' AND created_at<=${occurred}`;
 	}
-	async deauthorize(id: string) {
-		await this
-			.sql`UPDATE platform_connections SET enabled=false,revision=revision+1,updated_at=now() WHERE id=${id} AND enabled`;
+	/** Commit a provider observation only for the installation that was inspected. */
+	async completeDeauthorization(input: {
+		eventId: string;
+		connectionId: string;
+		versionId: string;
+		accountId: string;
+		livemode: boolean;
+		disable: boolean;
+	}): Promise<boolean> {
+		return this.sql.begin(async (tx) => {
+			const [current] = await tx`
+				SELECT c.id FROM platform_connections c
+				JOIN platform_connection_versions v ON v.connection_id=c.id AND v.id=c.active_version_id
+				WHERE c.id=${input.connectionId} AND c.active_version_id=${input.versionId}
+				AND c.stripe_account_id=${input.accountId} AND c.stripe_livemode=${input.livemode}
+				AND v.settings->>'authMethod'='oauth' FOR UPDATE OF c`;
+			if (!current) return false;
+			const [event] = await tx`
+				SELECT processed_at FROM platform_stripe_app_events WHERE event_id=${input.eventId}
+				AND account_id=${input.accountId} AND livemode=${input.livemode} FOR UPDATE`;
+			if (!event) return false;
+			if (event.processed_at !== null) return true;
+			if (input.disable)
+				await tx`UPDATE platform_connections SET enabled=false,revision=revision+1,updated_at=now() WHERE id=${input.connectionId} AND enabled`;
+			await tx`UPDATE platform_stripe_app_events SET processed_at=now() WHERE event_id=${input.eventId}`;
+			return true;
+		});
 	}
 	async processed(id: string) {
 		await this.sql`UPDATE platform_stripe_app_events SET processed_at=now() WHERE event_id=${id}`;
