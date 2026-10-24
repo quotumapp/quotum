@@ -4,6 +4,7 @@ import {
 	loadOptionalMerchantConfig,
 	merchantPlatformEnabled,
 } from "../../src/platform/config";
+import { MCP_PROPOSAL_LIMITS } from "../../src/platform/mcp/proposal-limits";
 
 const merchantEnv = {
 	MERCHANT_ORIGIN: "https://app.example.com",
@@ -49,7 +50,11 @@ describe("merchant deployment URLs", () => {
 				QUOTUM_MCP_ENABLED: "true",
 				QUOTUM_MCP_PUBLIC_ORIGIN: "https://api.example.com",
 			}).mcp,
-		).toEqual({ origin: "https://api.example.com", writesEnabled: false });
+		).toEqual({
+			origin: "https://api.example.com",
+			writesEnabled: false,
+			proposalLimits: MCP_PROPOSAL_LIMITS,
+		});
 		for (const origin of ["http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"]) {
 			expect(
 				loadMerchantConfig({
@@ -58,7 +63,7 @@ describe("merchant deployment URLs", () => {
 					QUOTUM_MCP_ENABLED: "true",
 					QUOTUM_MCP_PUBLIC_ORIGIN: origin,
 				}).mcp,
-			).toEqual({ origin, writesEnabled: false });
+			).toEqual({ origin, writesEnabled: false, proposalLimits: MCP_PROPOSAL_LIMITS });
 		}
 		expect(() =>
 			loadMerchantConfig({
@@ -186,4 +191,25 @@ describe("organization project limit", () => {
 				"QUOTUM_PROJECT_LIMIT must be a positive integer",
 			);
 	});
+});
+
+it("validates all MCP proposal quota overrides", () => {
+	const env = {
+		...merchantEnv,
+		QUOTUM_MCP_ENABLED: "true",
+		QUOTUM_MCP_PUBLIC_ORIGIN: "https://api.example.com",
+	};
+	for (const name of [
+		"QUOTUM_MCP_MAX_PENDING_PROPOSALS",
+		"QUOTUM_MCP_MAX_DAILY_PROPOSALS",
+		"QUOTUM_MCP_MAX_PROPOSAL_BYTES",
+		"QUOTUM_MCP_MAX_RETAINED_PROPOSAL_BYTES",
+	]) {
+		for (const value of ["0", "-1", "1.5", "Infinity", "9007199254740992"])
+			expect(() => loadMerchantConfig({ ...env, [name]: value })).toThrow();
+	}
+	expect(
+		loadMerchantConfig({ ...env, QUOTUM_MCP_MAX_PENDING_PROPOSALS: "7" }).mcp?.proposalLimits
+			?.maxPending,
+	).toBe(7);
 });

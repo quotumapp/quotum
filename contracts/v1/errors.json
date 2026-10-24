@@ -804,6 +804,19 @@
       ]
     },
     {
+      "code": "MCP_PROPOSAL_TOO_LARGE",
+      "sources": [
+        "src/platform/mcp/changes.ts"
+      ]
+    },
+    {
+      "code": "MCP_QUOTA_EXCEEDED",
+      "sources": [
+        "src/platform/mcp/changes.ts",
+        "src/platform/mcp/proposal-quota.ts"
+      ]
+    },
+    {
       "code": "MCP_WRITES_DISABLED",
       "sources": [
         "src/platform/mcp/changes.ts"
@@ -901,6 +914,7 @@
       "sources": [
         "src/db/repository/usage-operations.ts",
         "src/db/repository/usage-reservations.ts",
+        "src/platform/mcp/changes.ts",
         "src/platform/store.ts"
       ]
     },

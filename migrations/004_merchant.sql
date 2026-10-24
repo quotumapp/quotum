@@ -538,6 +538,8 @@ FOR EACH ROW EXECUTE FUNCTION platform_revoke_mcp_authorizations();
 -- An immutable proposal never carries browser credentials or an operator key.
 CREATE TABLE platform_mcp_changes (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ organization_id uuid NOT NULL REFERENCES platform_organizations(id),
+ storage_bytes bigint NOT NULL DEFAULT 0 CHECK (storage_bytes >= 0),
  authorization_id uuid NOT NULL REFERENCES platform_mcp_authorizations(id),
  principal_id uuid NOT NULL REFERENCES platform_principals(id),
  project_instance_id uuid NOT NULL,
@@ -563,3 +565,36 @@ CREATE INDEX platform_mcp_changes_owner_idx ON platform_mcp_changes(principal_id
 CREATE INDEX platform_mcp_changes_created_idx ON platform_mcp_changes(created_at);
 
 CREATE INDEX platform_connection_oauth_consumed_idx ON platform_connection_oauth_states(consumed_at) WHERE consumed_at IS NOT NULL;
+
+-- Derive organization and the complete JSON envelope size for every writer.
+-- Data-only restores disable triggers: follow the backfill in docs/upgrade-transitions.md.
+CREATE FUNCTION platform_mcp_change_storage() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ SELECT organization_id INTO NEW.organization_id FROM platform_mcp_authorizations WHERE id=NEW.authorization_id;
+ NEW.storage_bytes := octet_length(convert_to((to_jsonb(NEW)-'storage_bytes'-'result'-'status'-'applied_at')::text,'UTF8'))
+  + 1024 + GREATEST(65536,COALESCE(octet_length(convert_to(NEW.result::text,'UTF8')),0));
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER platform_mcp_change_storage_trigger BEFORE INSERT OR UPDATE OF parameters,body,preview,result,status,scope,reason,authorization_id ON platform_mcp_changes
+ FOR EACH ROW EXECUTE FUNCTION platform_mcp_change_storage();
+CREATE INDEX platform_mcp_changes_org_idx ON platform_mcp_changes(organization_id,status,expires_at) INCLUDE(storage_bytes);
+CREATE TABLE platform_mcp_proposal_admissions (
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ organization_id uuid NOT NULL REFERENCES platform_organizations(id),
+ authorization_id uuid NOT NULL REFERENCES platform_mcp_authorizations(id),
+ request_key text NOT NULL,
+ request_hash text NOT NULL,
+ reserved_bytes bigint NOT NULL CHECK(reserved_bytes > 0),
+ expires_at timestamptz NOT NULL DEFAULT clock_timestamp()+interval '5 minutes',
+ UNIQUE(authorization_id,request_key)
+);
+CREATE INDEX platform_mcp_proposal_admissions_org_idx ON platform_mcp_proposal_admissions(organization_id);
+CREATE INDEX platform_mcp_proposal_admissions_expiry_idx ON platform_mcp_proposal_admissions(expires_at);
+CREATE TABLE platform_mcp_proposal_days (
+ organization_id uuid NOT NULL REFERENCES platform_organizations(id),
+ day date NOT NULL,
+ attempts integer NOT NULL CHECK(attempts > 0),
+ PRIMARY KEY(organization_id,day)
+);
+CREATE INDEX platform_mcp_proposal_days_retention_idx ON platform_mcp_proposal_days(day);

@@ -149,7 +149,7 @@ export function remoteMcpOpenApi(): PathsObject {
 				tags: ["mcp"],
 				security: [{ mcpBearer: [] }],
 				description:
-					"Stateless Streamable HTTP MCP. Authorization is organization-scoped. Billing tools require explicit projectKey and environment arguments; list_projects discovers available targets. 256 KiB body limit. No persistent session or server event stream.",
+					"Stateless Streamable HTTP MCP. Authorization is organization-scoped. Billing tools require explicit projectKey and environment arguments; list_projects discovers available targets. 256 KiB body limit. Proposal tools enforce organization quotas (MCP_QUOTA_EXCEEDED / 429) and complete-envelope limits (MCP_PROPOSAL_TOO_LARGE / 413) in tool error results. No persistent session or server event stream.",
 				requestBody: { required: true, content: json(object) },
 				parameters: [
 					{ in: "header", name: "MCP-Protocol-Version", schema: string },

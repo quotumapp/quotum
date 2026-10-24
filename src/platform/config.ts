@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MCP_PROPOSAL_LIMITS, type McpProposalLimits, proposalLimits } from "./mcp/proposal-limits";
 
 const enabled = (value: string | undefined) => value === "true";
 export type QuotumEmailConfig =
@@ -44,7 +45,11 @@ function loadEmailConfig(
 }
 
 export interface MerchantConfig {
-	mcp?: { origin: string; writesEnabled?: boolean } | null;
+	mcp?: {
+		origin: string;
+		writesEnabled?: boolean;
+		proposalLimits?: Partial<McpProposalLimits>;
+	} | null;
 	/** Maximum logical projects per organization; environments share one project slot. */
 	projectLimit: number;
 	signupEnabled: boolean;
@@ -155,7 +160,28 @@ export function loadMerchantConfig(
 				))
 		)
 			throw new Error("QUOTUM_MCP_PUBLIC_ORIGIN must be an HTTPS origin");
-		mcp = { origin: value, writesEnabled };
+		mcp = {
+			origin: value,
+			writesEnabled,
+			proposalLimits: proposalLimits(
+				Object.fromEntries(
+					Object.entries({
+						maxPending: "QUOTUM_MCP_MAX_PENDING_PROPOSALS",
+						maxDaily: "QUOTUM_MCP_MAX_DAILY_PROPOSALS",
+						maxProposalBytes: "QUOTUM_MCP_MAX_PROPOSAL_BYTES",
+						maxRetainedBytes: "QUOTUM_MCP_MAX_RETAINED_PROPOSAL_BYTES",
+					}).map(([key, name]) => {
+						const raw = env[name]?.trim();
+						if (raw !== undefined && !/^\d+$/.test(raw))
+							throw new Error(`${name} must be a positive integer`);
+						return [
+							key,
+							raw === undefined ? MCP_PROPOSAL_LIMITS[key as keyof McpProposalLimits] : Number(raw),
+						];
+					}),
+				),
+			),
+		};
 	}
 	const origin = z.url().parse(env.MERCHANT_ORIGIN ?? "https://app.quotum.dev");
 	const originUrl = new URL(origin);

@@ -839,3 +839,13 @@ Google Play product; see [catalog adoption](catalog.md#adopt-existing-stripe-pro
 `quotum projections check-receiver <url> --project-key <key> --secret-file <path|->` tests receiver
 verification and authentication without committing a connection; see [projections](providers.md#projections).
 Connection validation errors retain structured check details in CLI output.
+
+Remote MCP proposal admission has per-organization limits. Configure
+`QUOTUM_MCP_MAX_PENDING_PROPOSALS` (100 unexpired pending/applying proposals and in-flight preparations),
+`QUOTUM_MCP_MAX_DAILY_PROPOSALS` (1000 admitted preparation attempts per UTC day),
+`QUOTUM_MCP_MAX_PROPOSAL_BYTES` (2097152 bytes for the complete stored envelope), and
+`QUOTUM_MCP_MAX_RETAINED_PROPOSAL_BYTES` (67108864 retained JSON bytes). Values are positive
+integers; byte limits must cover a complete proposal including a reserved 64 KiB result receipt.
+Retained bytes must cover at least one maximum-size proposal. Limits apply before expensive
+preview generation through five-minute admission reservations. Lowering a limit preserves existing
+proposals but refuses new preparations while usage is over quota.

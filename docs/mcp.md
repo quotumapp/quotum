@@ -211,8 +211,11 @@ catalog, which would push a result toward the size cap. A console built against 
 Proposals expire after at most 15 minutes, capped by domain preview expiry. They are immutable:
 use a new request key and `replacesChangeId` to replace a pending proposal. Reusing a key with changed
 input or another target conflicts. Replacement is allowed only within the original instance. The
-resolved instance is included in the proposal hash; approval and recovery always use that saved target. Approval compares the recorded state and domain preview preconditions; stale
-proposals require a new preview. Database-only execution stores its receipt in the mutation's
+resolved instance is included in the proposal hash; approval and recovery always use that saved target.
+Replacement previews run before the replacement is committed. Approval of the original can win
+during that preview; the replacement then fails with `409 ACTION_REJECTED`, stores no new proposal
+and leaves the approved operation intact. Approval compares the recorded state and domain preview
+preconditions; stale proposals require a new preview. Database-only execution stores its receipt in the mutation's
 transaction; repeated approval does not dispatch twice. Commercial execution retains its domain
 idempotency key and can recover a saved result. An uncertain external outcome stays `needs_review`;
 it is not automatically rerun. `completed` means the operation returned successfully, which may
@@ -350,3 +353,22 @@ A denied consume records no usage event. Explain a denial with `check_usage`, or
 Stdio requests count against the project's normal [rate limits](deployment.md#rate-limits) (60 per
 minute per admin route by default, shared by every customer that route reads). Remote requests use
 the principal/IP limits above.
+
+Proposal admission is bounded per organization across connections and principals: 100 unexpired
+`pending` or `applying` proposals (including in-flight preparations), 1000 admitted preparation attempts per UTC day,
+2 MiB per complete stored envelope, and 64 MiB retained JSON by default. Quota refusals report
+`MCP_QUOTA_EXCEEDED` with status 429; oversized snapshots report `MCP_PROPOSAL_TOO_LARGE` with status
+413. MCP tool errors carry these codes in the protocol response. Replays of saved request keys
+do not spend another preparation attempt. A duplicate key still preparing reports
+`OPERATION_IN_PROGRESS`; failed previews spend their daily attempt and release capacity. An expired
+preparation admission stores no proposal; retry with the same request key. `needs_review` and
+expired `applying` proposals release the pending slot but keep their full retained-byte charge.
+While unresolved, they remain available for outcome recovery and are never automatically rerun
+or deleted.
+
+The immutable review snapshot is rejected if too large. Each envelope reserves 64 KiB for its
+execution result; a larger result becomes an explicit `responseOmitted` receipt with its status,
+change ID and operation key. The approved mutation still has a durable result and its affected
+resource can be inspected from the saved action/parameters. Expired admissions are reclaimed;
+retention removes terminal snapshots and thirty-day daily counters. Existing oversized/over-quota
+proposals remain reviewable. See [deployment settings](deployment.md) for quota overrides.

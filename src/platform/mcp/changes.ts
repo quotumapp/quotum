@@ -10,9 +10,18 @@ import { digest, IDLE_MS, MerchantError, requireCapability } from "../security";
 import { canonicalJson, consumeStepUpGrant, mutationTarget } from "../step-up";
 import type { MerchantIdentity, MerchantStore } from "../store";
 import { MCP_WRITE_SCOPE, McpAuthorizations, type McpGrant, type McpTarget } from "./authorization";
+import {
+	boundedChangeResult,
+	jsonBytes,
+	MCP_RESULT_BYTES,
+	proposalLimits,
+} from "./proposal-limits";
+import { reserveProposal } from "./proposal-quota";
 
 interface ChangeRow {
 	id: string;
+	organization_id: string;
+	storage_bytes: number | string;
 	authorization_id: string;
 	principal_id: string;
 	project_instance_id: string;
@@ -156,24 +165,16 @@ export class McpChanges {
 				);
 			return this.view(existing);
 		}
-		const preview = await this.port.prepare(access.context, input);
-		const expiry = new Date(
-			Math.min(
-				this.store.now().getTime() + 900_000,
-				preview.expiresAt ? new Date(preview.expiresAt).getTime() : Infinity,
-			),
-		);
-		return this.store.sql.begin(async (tx) => {
+		const limits = proposalLimits(this.store.config.mcp?.proposalLimits);
+		const admission = await this.store.sql.begin(async (tx) => {
 			await this.lockProposal(tx, {
 				principalId: access.grant.principal_id,
 				organizationSlug: access.scope.organizationSlug,
 				authorizationId,
-				changeId: input.replacesChangeId,
 			});
-			const grants =
-				await tx`SELECT id FROM platform_mcp_authorizations WHERE id=${authorizationId} AND revoked_at IS NULL AND expires_at>${this.store.now()} FOR UPDATE`;
-			if (!grants.length)
-				throw new MerchantError("MCP_AUTHORIZATION_REVOKED", "Reconnect Quotum.", 401);
+			const [grant] =
+				await tx`SELECT id FROM platform_mcp_authorizations WHERE id=${authorizationId} AND revoked_at IS NULL AND expires_at>clock_timestamp()`;
+			if (!grant) throw new MerchantError("MCP_AUTHORIZATION_REVOKED", "Reconnect Quotum.", 401);
 			const member = await this.store.membership(
 				tx,
 				access.grant.principal_id,
@@ -187,34 +188,113 @@ export class McpChanges {
 			if (replayed) {
 				if (replayed.request_hash !== hash)
 					throw new MerchantError("IDEMPOTENCY_CONFLICT", "Use a new request key.", 409);
-				return this.view(replayed);
+				return { row: replayed, ticket: null };
 			}
-			if (input.replacesChangeId) {
-				const changed =
-					await tx`UPDATE platform_mcp_changes SET status='cancelled' WHERE id=${input.replacesChangeId} AND authorization_id=${authorizationId} AND project_instance_id=${access.context.projectInstanceId} AND status='pending' RETURNING id`;
-				if (!changed.length)
+			return {
+				row: null,
+				ticket: await reserveProposal(tx, {
+					organizationId: access.grant.organization_id,
+					authorizationId,
+					requestKey: input.requestKey,
+					hash,
+					limits,
+				}),
+			};
+		});
+		if (admission.row) return this.view(admission.row);
+		const ticket = admission.ticket;
+		try {
+			const preview = await this.port.prepare(access.context, input);
+			if (
+				jsonBytes({ input, preview, scope: access.scope }) + MCP_RESULT_BYTES >
+				limits.maxProposalBytes
+			)
+				throw new MerchantError(
+					"MCP_PROPOSAL_TOO_LARGE",
+					"The complete proposal snapshot exceeds its size limit.",
+					413,
+				);
+			const expiry = new Date(
+				Math.min(
+					this.store.now().getTime() + 900_000,
+					preview.expiresAt ? new Date(preview.expiresAt).getTime() : Infinity,
+				),
+			);
+			return await this.store.sql.begin(async (tx) => {
+				await this.lockProposal(tx, {
+					principalId: access.grant.principal_id,
+					organizationSlug: access.scope.organizationSlug,
+					authorizationId,
+					changeId: input.replacesChangeId,
+				});
+				const grants =
+					await tx`SELECT id FROM platform_mcp_authorizations WHERE id=${authorizationId} AND revoked_at IS NULL AND expires_at>${this.store.now()} FOR UPDATE`;
+				if (!grants.length)
+					throw new MerchantError("MCP_AUTHORIZATION_REVOKED", "Reconnect Quotum.", 401);
+				const member = await this.store.membership(
+					tx,
+					access.grant.principal_id,
+					access.scope.organizationSlug,
+					true,
+				);
+				requireCapability(member.role, capability);
+				const [replayed] = await tx<
+					ChangeRow[]
+				>`SELECT * FROM platform_mcp_changes WHERE authorization_id=${authorizationId} AND request_key=${input.requestKey}`;
+				if (replayed) {
+					if (replayed.request_hash !== hash)
+						throw new MerchantError("IDEMPOTENCY_CONFLICT", "Use a new request key.", 409);
+					return this.view(replayed);
+				}
+				const [held] =
+					await tx`SELECT id FROM platform_mcp_proposal_admissions WHERE id=${ticket} AND organization_id=${access.grant.organization_id} AND expires_at>clock_timestamp() FOR UPDATE`;
+				if (!held)
 					throw new MerchantError(
-						"ACTION_REJECTED",
-						"Only your pending proposal can be replaced.",
+						"OPERATION_IN_PROGRESS",
+						"Preparation admission expired; retry with the same request key.",
 						409,
 					);
-			}
-			await tx`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,expires_at) VALUES(${authorizationId},${access.grant.principal_id},${access.context.projectInstanceId},${input.requestKey},${hash},${input.action},${JSON.stringify(preview.input.parameters)}::text::jsonb,${JSON.stringify(preview.input.body)}::text::jsonb,${input.reason},${JSON.stringify(preview)}::text::jsonb,${capability},${action.stepUpAction},${access.scope.environment === "production" || action.alwaysSensitive},${JSON.stringify(access.scope)}::text::jsonb,${expiry}) ON CONFLICT(authorization_id,request_key) DO NOTHING`;
-			const [row] = await tx<
-				ChangeRow[]
-			>`SELECT * FROM platform_mcp_changes WHERE authorization_id=${authorizationId} AND request_key=${input.requestKey}`;
-			if (!row || row.request_hash !== hash)
-				throw new MerchantError("IDEMPOTENCY_CONFLICT", "Use a new request key.", 409);
-			await this.store.audit(
-				tx,
-				access.grant.principal_id,
-				access.grant.organization_id,
-				"mcp.change_prepared",
-				row.id,
-				{ action: input.action },
-			);
-			return this.view(row);
-		});
+				if (input.replacesChangeId) {
+					const changed =
+						await tx`UPDATE platform_mcp_changes SET status='cancelled' WHERE id=${input.replacesChangeId} AND authorization_id=${authorizationId} AND project_instance_id=${access.context.projectInstanceId} AND status='pending' RETURNING id`;
+					if (!changed.length)
+						throw new MerchantError(
+							"ACTION_REJECTED",
+							"Only your pending proposal can be replaced.",
+							409,
+						);
+				}
+				await tx`INSERT INTO platform_mcp_changes(authorization_id,principal_id,project_instance_id,request_key,request_hash,action,parameters,body,reason,preview,capability,step_up_action,sensitive,scope,expires_at) VALUES(${authorizationId},${access.grant.principal_id},${access.context.projectInstanceId},${input.requestKey},${hash},${input.action},${JSON.stringify(preview.input.parameters)}::text::jsonb,${JSON.stringify(preview.input.body)}::text::jsonb,${input.reason},${JSON.stringify(preview)}::text::jsonb,${capability},${action.stepUpAction},${access.scope.environment === "production" || action.alwaysSensitive},${JSON.stringify(access.scope)}::text::jsonb,${expiry}) ON CONFLICT(authorization_id,request_key) DO NOTHING`;
+				const [row] = await tx<
+					ChangeRow[]
+				>`SELECT * FROM platform_mcp_changes WHERE authorization_id=${authorizationId} AND request_key=${input.requestKey}`;
+				if (!row || row.request_hash !== hash)
+					throw new MerchantError("IDEMPOTENCY_CONFLICT", "Use a new request key.", 409);
+				if (Number(row.storage_bytes) > limits.maxProposalBytes)
+					throw new MerchantError(
+						"MCP_PROPOSAL_TOO_LARGE",
+						"The complete stored proposal exceeds its size limit.",
+						413,
+					);
+				await tx`DELETE FROM platform_mcp_proposal_admissions WHERE id=${ticket}`;
+				const [total] = await tx<
+					{ bytes: string }[]
+				>`SELECT (COALESCE((SELECT sum(storage_bytes) FROM platform_mcp_changes WHERE organization_id=${access.grant.organization_id}),0)+COALESCE((SELECT sum(reserved_bytes) FROM platform_mcp_proposal_admissions WHERE organization_id=${access.grant.organization_id}),0))::text AS bytes`;
+				if (Number(total?.bytes ?? 0) > limits.maxRetainedBytes)
+					throw new MerchantError("MCP_QUOTA_EXCEEDED", "Retained proposal quota exceeded.", 429);
+				await this.store.audit(
+					tx,
+					access.grant.principal_id,
+					access.grant.organization_id,
+					"mcp.change_prepared",
+					row.id,
+					{ action: input.action },
+				);
+				return this.view(row);
+			});
+		} finally {
+			await this.store.sql`DELETE FROM platform_mcp_proposal_admissions WHERE id=${ticket}`;
+		}
 	}
 	/**
 	 * The change as a client sees it. `body`, the validated request the app proposed, is for the
@@ -303,11 +383,12 @@ export class McpChanges {
 	}
 	private async recover(row: ChangeRow): Promise<ChangeRow> {
 		if (row.status !== "applying" && row.status !== "needs_review") return row;
-		const result = await this.port.recover(
+		const recovered = await this.port.recover(
 			{ projectInstanceId: row.project_instance_id, actor: `merchant:${row.principal_id}` },
 			`mcp:${row.id}`,
 		);
-		if (result) {
+		if (recovered) {
+			const result = boundedChangeResult(recovered, row.id);
 			await this.store
 				.sql`UPDATE platform_mcp_changes SET status=${result.status < 400 ? "completed" : "failed"},result=${JSON.stringify(result)}::text::jsonb WHERE id=${row.id} AND status IN ('applying','needs_review')`;
 			return this.row(row.id);
@@ -385,7 +466,10 @@ export class McpChanges {
 		});
 		if (!claimed) return this.browserGet(identity, id);
 		try {
-			const result = await this.port.apply(access.context, saved.preview, `mcp:${id}`);
+			const result = boundedChangeResult(
+				await this.port.apply(access.context, saved.preview, `mcp:${id}`),
+				id,
+			);
 			const status =
 				result.status < 400
 					? "completed"

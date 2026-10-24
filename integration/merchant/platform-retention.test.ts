@@ -204,6 +204,9 @@ describe("platform retention sweep", () => {
 			platform_connection_operations: 0,
 			platform_connection_oauth_states: 0,
 			platform_stripe_app_events: 0,
+
+			platform_mcp_proposal_admissions: 0,
+			platform_mcp_proposal_days: 0,
 			platform_auth_links: 2,
 			platform_idempotency: 2,
 			platform_step_up_grants: 2,
@@ -449,6 +452,9 @@ describe("platform retention plans", () => {
 				"platform_connection_oauth_consumed_idx",
 			],
 			platform_stripe_app_events: ["platform_stripe_app_events_processed_idx"],
+
+			platform_mcp_proposal_admissions: ["platform_mcp_proposal_admissions_expiry_idx"],
+			platform_mcp_proposal_days: ["platform_mcp_proposal_days_retention_idx"],
 			platform_auth_links: ["platform_auth_links_expiry_idx", "platform_auth_links_consumed_idx"],
 			platform_idempotency: ["platform_idempotency_created_idx"],
 			platform_step_up_grants: ["platform_step_up_expiry_idx", "platform_step_up_consumed_idx"],
