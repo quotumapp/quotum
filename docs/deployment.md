@@ -834,7 +834,7 @@ verification and authentication without committing a connection; see [projection
 Connection validation errors retain structured check details in CLI output.
 
 Remote MCP proposal admission has per-organization limits. Configure
-`QUOTUM_MCP_MAX_PENDING_PROPOSALS` (100 unresolved/live proposals and in-flight preparations),
+`QUOTUM_MCP_MAX_PENDING_PROPOSALS` (100 unexpired pending/applying proposals and in-flight preparations),
 `QUOTUM_MCP_MAX_DAILY_PROPOSALS` (1000 admitted preparation attempts per UTC day),
 `QUOTUM_MCP_MAX_PROPOSAL_BYTES` (2097152 bytes for the complete stored envelope), and
 `QUOTUM_MCP_MAX_RETAINED_PROPOSAL_BYTES` (67108864 retained JSON bytes). Values are positive

@@ -566,7 +566,8 @@ CREATE INDEX platform_mcp_changes_created_idx ON platform_mcp_changes(created_at
 
 CREATE INDEX platform_connection_oauth_consumed_idx ON platform_connection_oauth_states(consumed_at) WHERE consumed_at IS NOT NULL;
 
--- Derive organization and the complete JSON envelope size for every writer, including restores.
+-- Derive organization and the complete JSON envelope size for every writer.
+-- Data-only restores disable triggers: follow the backfill in docs/upgrade-transitions.md.
 CREATE FUNCTION platform_mcp_change_storage() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  SELECT organization_id INTO NEW.organization_id FROM platform_mcp_authorizations WHERE id=NEW.authorization_id;

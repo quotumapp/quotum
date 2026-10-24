@@ -25,7 +25,7 @@ export async function reserveProposal(
 		);
 	const [usage] = await tx<
 		{ pending: number; bytes: string }[]
-	>`SELECT count(*) FILTER (WHERE status IN ('applying','needs_review') OR (status='pending' AND expires_at>clock_timestamp()))::int AS pending,COALESCE(sum(storage_bytes),0)::text AS bytes FROM platform_mcp_changes WHERE organization_id=${organizationId}`;
+	>`SELECT count(*) FILTER (WHERE status IN ('pending','applying') AND expires_at>clock_timestamp())::int AS pending,COALESCE(sum(storage_bytes),0)::text AS bytes FROM platform_mcp_changes WHERE organization_id=${organizationId}`;
 	const [held] = await tx<
 		{ count: number; bytes: string }[]
 	>`SELECT count(*)::int AS count,COALESCE(sum(reserved_bytes),0)::text AS bytes FROM platform_mcp_proposal_admissions WHERE organization_id=${organizationId}`;

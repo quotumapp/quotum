@@ -251,7 +251,7 @@ export class McpChanges {
 				if (!held)
 					throw new MerchantError(
 						"OPERATION_IN_PROGRESS",
-						"Preparation admission expired; prepare again with a new request key.",
+						"Preparation admission expired; retry with the same request key.",
 						409,
 					);
 				if (input.replacesChangeId) {

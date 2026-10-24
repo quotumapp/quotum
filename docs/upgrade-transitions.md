@@ -1232,10 +1232,35 @@ unprocessed-event retention index.
 
 `004_merchant.sql` adds organization/storage-byte fields and their sizing trigger/index, plus
 `platform_mcp_proposal_admissions` and `platform_mcp_proposal_days`. Drain old MCP writers and
-back up populated databases before the baseline backup/restore transition; disposable databases
-are recreated and migration checksums must remain enforced. When restoring existing proposal
-rows, derive `organization_id` from their authorization and recompute `storage_bytes` through
-`platform_mcp_change_storage_trigger` (an update of `preview` to itself invokes it). Do this
-before enabling new preparations. Never drop old proposals simply because they exceed new limits.
-Deploy the quota-aware runtime and the four optional `QUOTUM_MCP_MAX_*` settings together; old
-writers do not enforce admission quotas.
+follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity), with
+these additions. Disposable databases are recreated; migration checksums remain enforced.
+
+Before step 4, let the data-only restore load proposals that lack the new organization column:
+
+```sql
+ALTER TABLE platform_mcp_changes ALTER COLUMN organization_id DROP NOT NULL;
+```
+
+After the restore has re-enabled triggers, derive each proposal's organization from its
+authorization and recalculate its complete storage charge through the sizing trigger:
+
+```sql
+UPDATE platform_mcp_changes SET preview = preview;
+SELECT count(*) AS invalid_proposals
+FROM platform_mcp_changes c
+LEFT JOIN platform_mcp_authorizations a ON a.id = c.authorization_id
+WHERE c.organization_id IS DISTINCT FROM a.organization_id
+   OR c.organization_id IS NULL OR c.storage_bytes <= 0;
+```
+
+The verification query must return `0`. Then restore the constraint before starting writers:
+
+```sql
+ALTER TABLE platform_mcp_changes ALTER COLUMN organization_id SET NOT NULL;
+```
+
+Never drop old proposals simply because they exceed new limits. Unrecoverable `needs_review` and
+expired `applying` rows retain their byte charge and recovery receipt but release their pending
+slot. Deploy the quota-aware runtime and the four optional `QUOTUM_MCP_MAX_*` settings together;
+old writers do not enforce admission quotas. Rollback restores the pre-upgrade backup with the
+old binary and loses writes made since.
