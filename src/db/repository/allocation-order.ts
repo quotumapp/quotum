@@ -15,7 +15,8 @@ export function allocationSpendOrderSql(allocation: DrizzleSQL): DrizzleSQL {
 /**
  * A version switch can touch outgoing, returning and linked carry allocations. Lock the account's
  * existing rows once in spend order before any of those updates; a later semantic iteration by id
- * then takes no new locks. Newly inserted rows are private to the switching transaction.
+ * then takes no new locks. Expired, unprocessed allowances belong to rollover maintenance;
+ * reversed rows cannot participate. Newly inserted rows are private to the switching transaction.
  */
 export async function lockCustomerAllocationRows(
 	executor: QueryExecutor,
@@ -27,6 +28,9 @@ export async function lockCustomerAllocationRows(
 		drizzleSql`
   SELECT allocation.id FROM balance_allocations allocation
   WHERE allocation.project_id = ${projectId} AND allocation.customer_id = ${customerId}
+   AND allocation.reversed_at IS NULL
+   AND (allocation.expires_at IS NULL OR allocation.expires_at > now()
+    OR allocation.rollover_processed_at IS NOT NULL)
   ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)}
   FOR UPDATE OF allocation
  `,

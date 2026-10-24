@@ -151,6 +151,11 @@ decimal digits only, defaults to 1, and must be between 1 and 1,000,000 inclusiv
 exponent and decimal-point notation, signs, whitespace, empty values, and out-of-range quantities
 return `400 INVALID_REQUEST`.
 
+Plan switches lock participating allocations in spend order, excluding reversed allocations and
+expired allowances awaiting rollover. Rollover maintenance locks each customer and subscription
+before its allocations and skips busy owners until the next poll, so it does not hold allocations
+while waiting behind a concurrent switch.
+
 ## Automatic top-ups
 
 An automatic top-up policy belongs to the account or to one entity. The account's policy keeps the

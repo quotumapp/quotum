@@ -46,6 +46,7 @@ import type {
 import type { ProjectInstanceContext } from "../../projects/context";
 import { addCadence, type CadenceUnit } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
+import { allocationSpendOrderSql } from "./allocation-order";
 import { RepositoryModule } from "./base";
 import { requireBillingAccount } from "./billing-accounts";
 import { followCarriedUsage, restoreCarriedBalance } from "./carry-over";
@@ -1021,6 +1022,31 @@ async function materializeExpiredRollovers(
 	}>(
 		executor,
 		drizzleSql`
+		WITH candidates AS MATERIALIZED (
+			SELECT allocation.id, allocation.project_id, allocation.customer_id, allocation.subscription_id
+			FROM balance_allocations allocation
+			JOIN plan_items item
+				ON item.project_id = allocation.project_id AND item.id = allocation.plan_item_id
+			WHERE allocation.source_kind = 'subscription' AND allocation.subscription_id IS NOT NULL
+				AND allocation.reversed_at IS NULL AND allocation.expires_at <= now()
+				AND allocation.held_quantity = 0 AND allocation.rollover_processed_at IS NULL
+				AND item.rollover_enabled = true AND item.reset_interval IS NOT NULL
+			ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)} LIMIT ${limit}
+		), locked_customers AS MATERIALIZED (
+			SELECT customer.id, customer.project_id FROM customers customer
+			WHERE EXISTS (SELECT 1 FROM candidates c
+				WHERE c.project_id = customer.project_id AND c.customer_id = customer.id)
+			ORDER BY customer.project_id, customer.id
+			FOR NO KEY UPDATE OF customer SKIP LOCKED
+		), locked_subscriptions AS MATERIALIZED (
+			SELECT subscription.id, subscription.project_id FROM subscriptions subscription
+			JOIN locked_customers customer
+				ON customer.project_id = subscription.project_id AND customer.id = subscription.customer_id
+			WHERE EXISTS (SELECT 1 FROM candidates c
+				WHERE c.project_id = subscription.project_id AND c.subscription_id = subscription.id)
+			ORDER BY subscription.project_id, subscription.id
+			FOR UPDATE OF subscription SKIP LOCKED
+		)
 		SELECT allocation.id, allocation.project_id, allocation.customer_id, allocation.entity_id,
 			allocation.feature_id, allocation.plan_item_id, allocation.subscription_id,
 			allocation.quantity::text AS quantity,
@@ -1032,6 +1058,10 @@ async function materializeExpiredRollovers(
 			allocation.period_end_at, allocation.expires_at, revision.revision AS policy_revision,
 			feature.credit_scale
 		FROM balance_allocations allocation
+		JOIN candidates candidate
+			ON candidate.project_id = allocation.project_id AND candidate.id = allocation.id
+		JOIN locked_subscriptions subscription
+			ON subscription.project_id = allocation.project_id AND subscription.id = allocation.subscription_id
 		JOIN plan_items item
 			ON item.project_id = allocation.project_id AND item.id = allocation.plan_item_id
 		JOIN plan_versions plan_version
@@ -1050,21 +1080,13 @@ async function materializeExpiredRollovers(
 			AND allocation.rollover_processed_at IS NULL
 			AND item.rollover_enabled = true
 			AND item.reset_interval IS NOT NULL
-		ORDER BY allocation.expires_at, allocation.id
+		ORDER BY ${allocationSpendOrderSql(drizzleSql`allocation`)}
 		LIMIT ${limit}
 		FOR UPDATE OF allocation SKIP LOCKED
 	`,
 	);
 	const created: Array<{ projectId: string; customerId: string; allocationId: string }> = [];
 	for (const origin of origins) {
-		await executeOne(
-			executor,
-			drizzleSql`
-			SELECT id FROM subscriptions
-			WHERE project_id = ${origin.project_id} AND id = ${origin.subscription_id}
-			FOR UPDATE
-		`,
-		);
 		const scale = origin.credit_scale;
 		const availableUnits =
 			decimalToUnits(databaseDecimal(origin.quantity, "rollover origin quantity", scale), scale) -
