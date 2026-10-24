@@ -2169,7 +2169,8 @@ export async function incrementRollup(
 		recordedAt: Date | string;
 	},
 ): Promise<void> {
-	await executeOne(
+	// Maintenance closure does not seal accounting: an already recorded event can arrive later.
+	const row = await executeOne(
 		executor,
 		drizzleSql`
 			INSERT INTO usage_event_rollups (
@@ -2206,10 +2207,10 @@ export async function incrementRollup(
 				wallet_quantity = usage_event_rollups.wallet_quantity + EXCLUDED.wallet_quantity,
 				event_count = usage_event_rollups.event_count + 1,
 				updated_at = now()
-			WHERE usage_event_rollups.status = 'open'
 			RETURNING id
 		`,
 	);
+	if (row === null) throw new Error("Usage rollup increment was not persisted");
 }
 
 export async function lockReservation(
