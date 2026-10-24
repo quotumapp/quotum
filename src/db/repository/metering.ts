@@ -131,7 +131,7 @@ import {
 } from "./metering-persistence";
 import { openPlanGrantWindows } from "./plan-grant-windows";
 import { catchUpPlanGrants, planGrantsNeedCatchUp } from "./plan-grants";
-import { executeOne, executeRows, jsonb } from "./query";
+import { executeOne, executeRows, jsonb, readAccountingClock } from "./query";
 import { deleteExpiredRawUsageSql } from "./raw-usage-retention";
 import { materializeDueSubscriptionAllocations } from "./subscription-allocation-periods";
 import type { QueryExecutor } from "./types";
@@ -1579,7 +1579,7 @@ async function insertCorrectionEvent(
 		metadata: Record<string, unknown>;
 	},
 ): Promise<{ id: string; recorded_at: Date | string; recorded_at_exact: string }> {
-	const recordedAt = new Date();
+	const recordedAt = await readAccountingClock(executor);
 	const row = await executeOne<{
 		id: string;
 		recorded_at: Date | string;
@@ -1826,7 +1826,7 @@ async function consumeWithinTransaction(
 	}
 	const scale = rate.wallet.credit_scale;
 	const deductions = planDeductions(rows, scale, walletQuantity);
-	const recordedAt = new Date();
+	const recordedAt = await readAccountingClock(tx);
 	// Deductions are issued first; the reads behind them observe the deduction.
 	const [, event, , topupPolicies] = await Promise.all([
 		applyDeductions(tx, deductions, "consumed_quantity"),
@@ -2311,7 +2311,7 @@ export async function confirmWithinTransaction(
 	if (controls.denial !== null) {
 		return await denied("control_limit_exceeded", controls.denial);
 	}
-	const recordedAt = new Date();
+	const recordedAt = await readAccountingClock(tx);
 	// Allocation and reservation writes are issued first; the reads behind them observe them.
 	const [, , event] = await Promise.all([
 		applyConfirmation(tx, projectId, reservation.id, plan, scale),

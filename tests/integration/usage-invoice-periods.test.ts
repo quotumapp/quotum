@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { BillingRepository } from "../../src/db/repository";
+import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
 import {
 	createLocalPostgresContext,
@@ -230,6 +233,60 @@ localDescribe("Usage invoice period materialization", () => {
 		expect(
 			(await context.repository.materializeAndClaimUsageInvoicePeriods("worker", 10)).materialized,
 		).toBe(0);
+	});
+
+	it("bills a confirmation delayed across expiry after its reservation clock was read", async () => {
+		const windowEnd = await closePeriodSoon();
+		const original = await consumeRegion("us");
+		await consumeRegion("us", "again");
+		const reservationId = await reserveRegion("us", 300);
+		const sampled = Promise.withResolvers<Date>();
+		const release = Promise.withResolvers<void>();
+		const database = context.db as unknown as TransactionalQueryExecutor;
+		const dialect = new PgDialect();
+		const delayed = new BillingRepository({
+			execute: (query) => database.execute(query),
+			transaction: (callback) =>
+				database.transaction((tx) =>
+					callback({
+						async execute<T>(query: Parameters<typeof tx.execute>[0]): Promise<T[]> {
+							const rows = await tx.execute<T>(query);
+							if (/clock_timestamp\(\) AS db_now/.test(dialect.sqlToQuery(query).sql)) {
+								const row = rows[0] as { db_now: Date | string } | undefined;
+								if (!row) throw new Error("Missing reservation clock");
+								sampled.resolve(new Date(row.db_now));
+								await release.promise;
+							}
+							return rows;
+						},
+					}),
+				),
+		});
+		const input = {
+			billingAccountId: account,
+			reservationId,
+			quantity: "50",
+			idempotencyKey: `${account}:wait-confirm`,
+		};
+		const confirming = delayed.confirmUsageReservation(project, input);
+		try {
+			expect((await sampled.promise).getTime()).toBeLessThan(windowEnd.getTime());
+			await sleepPast(windowEnd);
+			await correctTen(original);
+			expect(await periodRows()).toHaveLength(1);
+		} finally {
+			release.resolve();
+		}
+		const confirmed = await confirming;
+		expect(confirmed).toMatchObject({ allowed: true, status: "confirmed" });
+		expect(await context.repository.confirmUsageReservation(project, input)).toEqual(confirmed);
+		const adjustments = await adjustmentRows();
+		expect(
+			adjustments.sort((left, right) => Number(left.quantity) - Number(right.quantity)),
+		).toEqual([
+			{ quantity: "-10.000000000", amount_minor: "-5", status: "pending" },
+			{ quantity: "50.000000000", amount_minor: "25", status: "pending" },
+		]);
 	});
 });
 

@@ -136,6 +136,8 @@ interface MeteredOveragePrice {
 }
 
 interface UsageWindowRow {
+	subscription_id: string | null;
+	anchor_plan_item_id: string | number | bigint | null;
 	id: string | number | bigint;
 	window_start_at: Date | string;
 	window_end_at: Date | string;
@@ -290,7 +292,7 @@ export async function meterLimitDecision(
 	const unlimited = unlimitedLiftsCap(candidates, combined?.anchor ?? null);
 	if (combined !== null) {
 		const { anchor } = combined;
-		const bounds = meterLimitBounds(anchor, new Date());
+		const bounds = meterLimitBounds(anchor, await readAccountingClock(executor));
 		const overagePrice =
 			anchor.overage_policy === "allowed"
 				? await resolveMeteredOveragePrice(executor, projectId, String(anchor.plan_item_id))
@@ -324,7 +326,7 @@ export async function meterLimitDecision(
 	const isConfigured =
 		unlimited || (typeof configured === "function" ? await configured() : configured);
 	if (!isConfigured) return null;
-	const start = startOfUtcMonth(new Date());
+	const start = startOfUtcMonth(await readAccountingClock(executor));
 	return {
 		feature,
 		subscriptionId: null,
@@ -704,6 +706,14 @@ export async function applyMeterLimitConsumption(
 			usageWindowEndAt: toIso(window.window_end_at),
 		},
 	});
+	await recordLateUsageAdjustment(executor, {
+		projectId: input.projectId,
+		window,
+		usageEventId: event.id,
+		usageEventRecordedAtExact: event.recorded_at_exact,
+		quantity: input.quantity,
+		now: await readAccountingClock(executor),
+	});
 	await incrementRollup(executor, {
 		projectId: input.projectId,
 		customerId: input.customerId,
@@ -1008,7 +1018,7 @@ async function upsertUsageWindow(
 				window_end_at
 			)
 			DO UPDATE SET updated_at = now()
-			RETURNING id, window_start_at, window_end_at, usage
+			RETURNING id, window_start_at, window_end_at, usage, subscription_id, anchor_plan_item_id
 		`,
 	);
 	if (row === null) throw new Error("Usage window could not be persisted");
@@ -2118,7 +2128,7 @@ export async function insertUsageEvent(
 		recordedAt?: Date;
 	},
 ): Promise<{ id: string; recorded_at: Date | string; recorded_at_exact: string }> {
-	const recordedAt = input.recordedAt ?? new Date();
+	const recordedAt = input.recordedAt ?? (await readAccountingClock(executor));
 	const row = await executeOne<{
 		id: string;
 		recorded_at: Date | string;
@@ -2741,13 +2751,13 @@ export async function confirmMeterLimitReservation(
 		entries: controls.entries,
 	});
 	if (sameWindow) {
-		await recordLateConfirmationAdjustment(executor, {
+		await recordLateUsageAdjustment(executor, {
 			projectId: reservation.project_id,
 			window,
 			usageEventId: event.id,
 			usageEventRecordedAtExact: event.recorded_at_exact,
 			quantity,
-			now: new Date(reservation.db_now),
+			now: await readAccountingClock(executor),
 		});
 	}
 	await executeOne(
@@ -2793,12 +2803,12 @@ export async function confirmMeterLimitReservation(
 }
 
 /**
- * A reservation can outlive its usage window. The recurring worker waits for outstanding
+ * A pinned usage decision or reservation can outlive its usage window. The recurring worker waits for outstanding
  * reservations before it invoices a period, so a confirmation normally lands in the window before
  * the period exists. When a closed-period correction has already materialized the period, the
- * confirmed usage is billed as a positive adjustment against it instead of being lost.
+ * late usage is billed as a positive adjustment against it instead of being lost.
  */
-async function recordLateConfirmationAdjustment(
+async function recordLateUsageAdjustment(
 	executor: QueryExecutor,
 	input: {
 		projectId: string;

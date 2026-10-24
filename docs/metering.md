@@ -295,7 +295,10 @@ week and hour windows are exact multiples of 24 hours, 7 days and 1 hour. Usage 
 exact end of a window counts in the next.
 
 An add-on that caps a feature raises the account's cap: the limits of the account's base plan and
-its add-ons on one feature add up within one window. The base plan's limit anchors it: the window,
+its add-ons on one feature add up within one window.
+Meter-limit bounds, persisted event timestamps and projected windows use the database clock.
+A decision that crosses invoice materialization before it commits records a late adjustment;
+process clock skew cannot select another billing period. The base plan's limit anchors it: the window,
 the overage policy and any overage price are the base plan's (the newest base plan's, should an
 account hold several), or the newest add-on's when no base plan caps the feature. An add-on's
 limit adds its quantity when both are hard caps (`overagePolicy: "blocked"`) with the same reset,

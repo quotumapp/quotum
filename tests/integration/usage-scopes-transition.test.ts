@@ -1,4 +1,13 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	setSystemTime,
+} from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +41,25 @@ localDescribe("declared meter-limit scope transition", () => {
 	afterAll(async () => {
 		await rm(directory, { recursive: true, force: true });
 		await context.sql.close();
+	});
+	afterEach(() => setSystemTime());
+
+	it("keeps current scope verification on database time under host month skew", async () => {
+		const before = await run(["verify", "--baseline", baseline(), "--json"]);
+		const expected = JSON.parse(before.stdout) as UsageScopesVerification;
+		const [clock] = await context.sql<{ previous: Date; next: Date }[]>`
+			SELECT date_trunc('month',now())-interval '1 minute' AS previous,
+				date_trunc('month',now())+interval '1 month 1 minute' AS next
+		`;
+		if (!clock) throw new Error("Missing database clock");
+		for (const instant of [clock.previous, clock.next]) {
+			setSystemTime(instant);
+			const result = await run(["verify", "--baseline", baseline(), "--json"]);
+			const actual = JSON.parse(result.stdout) as UsageScopesVerification;
+			expect(result.code).toBe(before.code);
+			expect(actual.checks).toEqual(expected.checks);
+			expect(actual.overCap).toEqual(expected.overCap);
+		}
 	});
 
 	it("verifies an unchanged database and lists what is over the cap", async () => {
