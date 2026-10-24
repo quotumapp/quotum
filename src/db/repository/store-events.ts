@@ -313,7 +313,8 @@ export const paymentSetupReconcileEventType = "quotum.payment_setup.reconcile";
  * work itself happens under a worker lease, outside the request.
  *
  * A second delivery of the same event is a no-op: the row is inserted once and never moved back to
- * `pending` after it has been processed.
+ * `pending` after it has been processed. An explicit retryDelayMs, including zero, takes precedence
+ * over the legacy absolute nextAttemptAt; callers that omit it retain absolute scheduling.
  */
 export async function enqueueStoreEventForReplay(
 	executor: QueryExecutor,

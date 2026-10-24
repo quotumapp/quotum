@@ -1272,3 +1272,15 @@ UNION ALL
 SELECT 'extra_or_stale' AS mismatch, difference.*
 FROM (SELECT * FROM stored EXCEPT SELECT * FROM desired) difference;
 ```
+
+## Database-time worker retries
+
+Workers now persist retry durations against the database clock. Drain old workers before replacing
+processes so claim, lease and retry decisions use the same clock. There are no SQL baseline or
+environment-variable changes.
+
+Existing hosted payment-method setups resume polling after startup; their provider deadlines and
+failure-attempt budgets are preserved. Store events already parked with `next_attempt_at =
+'infinity'` are not made due automatically. Inspect them, then replay each applicable event with
+`POST /v1/admin/store-events/:eventId/replay` using the project credential, operator key and
+`X-Billing-Actor`. Do not bulk-reset rows or replay events whose external effect needs reconciliation.

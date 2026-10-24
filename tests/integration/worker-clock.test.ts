@@ -8,6 +8,8 @@ import {
 	it,
 	setSystemTime,
 } from "bun:test";
+import { enqueueStoreEventForReplay } from "../../src/db/repository/store-events";
+import type { QueryExecutor } from "../../src/db/repository/types";
 import { StoreEventReplayJobRepository } from "../../src/db/repository-domains";
 import { calculateRetryDelayMs } from "../../src/workers/backoff";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -31,6 +33,37 @@ localDescribe("database worker scheduling under host clock skew", () => {
 	});
 	afterEach(() => setSystemTime());
 	afterAll(() => context.sql.close());
+	it.each([0, 60_000, undefined])(
+		"prefers an explicit retry duration (%s) over the legacy absolute timestamp",
+		async (retryDelayMs) => {
+			const [clock] = await context.sql`SELECT clock_timestamp() AS now`;
+			const absolute = new Date(clock.now.getTime() + 3_600_000);
+			const event = await enqueueStoreEventForReplay(
+				context.db as unknown as QueryExecutor,
+				integrationProjectContext().projectInstanceId,
+				{
+					provider: "stripe",
+					channel: "web",
+					externalEventId: `evt_precedence_${retryDelayMs}`,
+					eventType: "invoice.paid",
+					transactionId: null,
+					rawPayload: {},
+					nextAttemptAt: absolute,
+					retryDelayMs,
+				},
+			);
+			const [row] = await context.sql`
+				SELECT next_attempt_at, extract(epoch FROM next_attempt_at - clock_timestamp()) AS delay
+				FROM store_events WHERE id = ${event.storeEventId}::uuid
+			`;
+			if (retryDelayMs === undefined) {
+				expect(row.next_attempt_at.toISOString()).toBe(absolute.toISOString());
+			} else {
+				expect(Number(row.delay)).toBeGreaterThan(retryDelayMs / 1000 - 5);
+				expect(Number(row.delay)).toBeLessThanOrEqual(retryDelayMs / 1000);
+			}
+		},
+	);
 	it.each([-2, 2])("keeps a %i-day skew out of retries and lease eligibility", async (skewDays) => {
 		await seedAutoTopupJobs(context.sql, context.repository, 1);
 		const [clock] = await context.sql`SELECT clock_timestamp() AS now`;
