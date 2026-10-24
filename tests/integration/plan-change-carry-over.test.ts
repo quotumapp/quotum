@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { BillingRepository } from "../../src/db/repository";
+import type { TransactionalQueryExecutor } from "../../src/db/repository/types";
 import { testRequest } from "../helpers/openapi";
 import { createIntegrationApp } from "./helpers/app-fixture";
 import { resetAndSeedIntegrationData } from "./helpers/catalog-fixtures";
@@ -38,6 +41,85 @@ describeLocalPostgres(describe, describe.skip)("carry-over on an immediate plan 
 	afterAll(async () => {
 		await context.sql.close();
 	});
+
+	it("defers rollover behind the real version switch during metering", async () => {
+		await prepareExpiredAllowance();
+		await addAllowance(2, "300");
+		const reached = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		const database = context.db as unknown as TransactionalQueryExecutor;
+		const dialect = new PgDialect();
+		const delayed = new BillingRepository({
+			execute: (query) => database.execute(query),
+			transaction: (callback) =>
+				database.transaction((tx) =>
+					callback({
+						async execute<T>(query: Parameters<typeof tx.execute>[0]): Promise<T[]> {
+							if (
+								/SELECT allocation.id FROM balance_allocations allocation/.test(
+									dialect.sqlToQuery(query).sql,
+								)
+							) {
+								reached.resolve();
+								await release.promise;
+							}
+							return tx.execute<T>(query);
+						},
+					}),
+				),
+		});
+		const switching = sync(2, delayed);
+		await reached.promise;
+		const metering = context.repository.consumeUsage(project, {
+			billingAccountId: "migration-stripe",
+			featureKey: "model_tokens",
+			quantity: "10",
+			idempotencyKey: "concurrent-switch-spend",
+		});
+		try {
+			const result = await promptly(context.repository.runMeteringMaintenance(100));
+			expect(result.rolledOverAllocations).toBe(0);
+		} finally {
+			release.resolve();
+		}
+		const [, metered] = await Promise.all([switching, metering]);
+		expect(metered.allowed).toBe(false);
+		await spend(10, "after-switch-spend");
+		const results = await Promise.all([
+			context.repository.runMeteringMaintenance(100),
+			context.repository.runMeteringMaintenance(100),
+		]);
+		expect(results.reduce((sum, result) => sum + result.rolledOverAllocations, 0)).toBe(1);
+		expect(await available()).toBe("390");
+	});
+
+	for (const owner of ["customer", "subscription"] as const) {
+		it(`defers rollover when its ${owner} is locked and processes it on the next poll`, async () => {
+			await prepareExpiredAllowance();
+			const held = Promise.withResolvers<void>();
+			const release = Promise.withResolvers<void>();
+			const holding = context.sql.begin(async (tx) => {
+				if (owner === "customer") {
+					await tx`SELECT id FROM customers WHERE billing_account_id = 'migration-stripe' FOR UPDATE`;
+				} else {
+					await tx`SELECT id FROM subscriptions WHERE external_subscription_id = 'sub_migrate_stripe' FOR UPDATE`;
+				}
+				held.resolve();
+				await release.promise;
+			});
+			await held.promise;
+			try {
+				expect(
+					(await promptly(context.repository.runMeteringMaintenance(100))).rolledOverAllocations,
+				).toBe(0);
+			} finally {
+				release.resolve();
+			}
+			await holding;
+			expect((await context.repository.runMeteringMaintenance(100)).rolledOverAllocations).toBe(1);
+			expect((await context.repository.runMeteringMaintenance(100)).rolledOverAllocations).toBe(0);
+		});
+	}
 
 	it("carries the unused balance and the period's usage into the new version once", async () => {
 		await addAllowance(1, "100");
@@ -1316,14 +1398,14 @@ async function applyClaimedChange(): Promise<void> {
 }
 
 /** Stripe's `customer.subscription.updated` for the version the subscription now bills. */
-async function sync(version: number) {
+async function sync(version: number, repository = context.repository) {
 	const [subscription] = await context.sql`
 		SELECT current_period_start, current_period_end FROM subscriptions
 		WHERE external_subscription_id = 'sub_migrate_stripe'
 	`;
 	if (subscription === undefined) throw new Error("Expected the seeded subscription");
 	const id = `evt_carry_${++eventOrder}`;
-	return await context.repository.recordStripeSubscriptionAndEnqueueProjection(project, {
+	return await repository.recordStripeSubscriptionAndEnqueueProjection(project, {
 		billingAccountId: "migration-stripe",
 		stripeCustomerId: "cus_migration",
 		stripeSubscriptionId: "sub_migrate_stripe",
@@ -1563,4 +1645,34 @@ function seeded(seed: number): () => number {
 		value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
 		return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
 	};
+}
+
+async function prepareExpiredAllowance(): Promise<void> {
+	await addAllowance(1, "100");
+	await context.sql`
+		UPDATE plan_items SET rollover_enabled = true, rollover_expiry_mode = 'forever'
+		WHERE feature_id IN (SELECT id FROM features WHERE key = 'ai_credits')
+			AND plan_version_id IN (SELECT version.id FROM plan_versions version
+				JOIN plans plan ON plan.id = version.plan_id WHERE plan.key = 'migration-plan')
+	`;
+	await sync(1);
+	await context.sql`
+		UPDATE balance_allocations SET expires_at = now() - interval '1 second'
+		WHERE customer_id IN (SELECT id FROM customers WHERE billing_account_id = 'migration-stripe')
+			AND source_kind = 'subscription'
+	`;
+}
+
+async function promptly<T>(work: Promise<T>): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			work,
+			new Promise<never>((_, reject) => {
+				timer = setTimeout(() => reject(new Error("Rollover waited on a busy owner")), 1500);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+	}
 }
