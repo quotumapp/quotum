@@ -246,7 +246,7 @@ localDescribe("paid automatic top-up completion recovery", () => {
 		await seedAutoTopupJobs(context.sql, context.repository, 1);
 		await context.sql`UPDATE auto_topup_policies SET limit_interval_seconds=60`;
 		await context.sql`UPDATE auto_topup_states SET interval_started_at=clock_timestamp()-interval '59 seconds'`;
-		const [job] = await context.repository.claimAutoTopupJobs("before-roll", 1, new Date(0));
+		const [job] = await context.repository.claimAutoTopupJobs("before-roll", 1, 300_000);
 		if (!job) throw new Error("Missing job");
 		const receipt = {
 			status: "succeeded" as const,
@@ -268,7 +268,7 @@ localDescribe("paid automatic top-up completion recovery", () => {
 		);
 		const [before] = await context.sql`SELECT budget_interval_started_at FROM auto_topup_jobs`;
 		await context.sql`SELECT pg_sleep(1.05)`;
-		const [recovered] = await context.repository.claimAutoTopupJobs("after-roll", 1, new Date(0));
+		const [recovered] = await context.repository.claimAutoTopupJobs("after-roll", 1, 300_000);
 		expect(recovered?.phase).toBe("complete");
 		const [after] = await context.sql`SELECT budget_interval_started_at FROM auto_topup_jobs`;
 		expect(after.budget_interval_started_at).toEqual(before.budget_interval_started_at);
