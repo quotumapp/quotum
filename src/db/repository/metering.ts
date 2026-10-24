@@ -205,6 +205,7 @@ export class MeteringBillingRepository extends RepositoryModule {
 			idempotencyKey: input.operationId,
 		};
 		return this.transaction(async (tx) => {
+			// Erasure tombstones take precedence over feature validation and operation replay.
 			await resolveUsageCustomer(tx, projectId, input.billingAccountId);
 			return runUsageOperation<UsageConsumeResult, { feature: FeatureRow }>(
 				tx,
