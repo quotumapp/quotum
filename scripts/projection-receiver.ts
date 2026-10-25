@@ -18,14 +18,20 @@
  *   bun scripts/projection-receiver.ts [--host=127.0.0.1] [--port=4101]
  *     [--secret=<projection secret>] [--fail=<n>] [--log=<file>]
  * Use `--host=0.0.0.0` to receive requests from other containers on a private network.
+ * Non-loopback binds require a custom `--secret`; the development default is loopback-only.
  */
 
 import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { BlockList, isIP } from "node:net";
 import { dirname } from "node:path";
 import { createCliBillingLogger } from "../src/observability/logger";
 
 const logger = createCliBillingLogger();
+const defaultProjectionSecret = "local-projection-secret";
+const loopbackAddresses = new BlockList();
+loopbackAddresses.addSubnet("127.0.0.0", 8, "ipv4");
+loopbackAddresses.addAddress("::1", "ipv6");
 
 interface Args {
 	host: string;
@@ -38,7 +44,7 @@ interface Args {
 function parseArgs(argv: readonly string[]): Args {
 	let host = "127.0.0.1";
 	let port = 4101;
-	let secret = "local-projection-secret";
+	let secret = defaultProjectionSecret;
 	let fail = 0;
 	let log = "";
 	for (const arg of argv) {
@@ -50,7 +56,13 @@ function parseArgs(argv: readonly string[]): Args {
 	}
 	if (host.length === 0) throw new Error("invalid --host");
 	if (!Number.isFinite(port) || port <= 0) throw new Error("invalid --port");
-	if (secret.length < 1) throw new Error("invalid --secret");
+	if (secret.trim().length < 1) throw new Error("invalid --secret");
+	const family = isIP(host);
+	if (
+		secret.trim() === defaultProjectionSecret &&
+		(family === 0 || !loopbackAddresses.check(host, family === 4 ? "ipv4" : "ipv6"))
+	)
+		throw new Error("Non-loopback --host requires a non-default --secret");
 	if (!Number.isFinite(fail) || fail < 0) throw new Error("invalid --fail");
 	return { host, port, secret, fail, log };
 }

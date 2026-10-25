@@ -808,6 +808,9 @@ bun scripts/projection-receiver.ts --host=0.0.0.0 --port=4101 --secret='<generat
 The default listen address is `127.0.0.1`. Use `--host=0.0.0.0` inside a receiver container to accept
 requests from other containers on its private network; use the receiver's service name, such as
 `http://receiver:4101`, in `projectionUrl`. `0.0.0.0` is a bind address, not the receiver's destination.
+Only literal loopback addresses may use the local development secret. Every other bind host,
+including hostnames, requires an explicit, non-default `--secret`; an omitted, blank or default
+secret fails startup before the receiver listens. Use the generated projection secret as above.
 The [private container setup](self-hosting.md#6-keep-backends-on-a-private-network-optional) shows
 the network and HTTP settings required by a normal headless runtime. Loopback cannot be allowlisted.
 

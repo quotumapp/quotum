@@ -6,9 +6,9 @@ const secret = "receiver-process-test-secret";
 const authorization = { authorization: `Bearer ${secret}` };
 const repositoryRoot = new URL("../../", import.meta.url).pathname;
 
-async function startReceiver(host?: string) {
+async function startReceiver(host?: string, options: { secret?: string } = { secret }) {
 	const reservation = Bun.serve({
-		hostname: "127.0.0.1",
+		hostname: host === "::1" ? "::1" : "127.0.0.1",
 		port: 0,
 		fetch: () => new Response("reserved"),
 	});
@@ -20,7 +20,7 @@ async function startReceiver(host?: string) {
 			"--no-env-file",
 			"scripts/projection-receiver.ts",
 			`--port=${port}`,
-			`--secret=${secret}`,
+			...(options.secret === undefined ? [] : [`--secret=${options.secret}`]),
 			...(host === undefined ? [] : [`--host=${host}`]),
 		],
 		cwd: repositoryRoot,
@@ -30,7 +30,8 @@ async function startReceiver(host?: string) {
 	});
 	const stdout = new Response(child.stdout).text();
 	const stderr = new Response(child.stderr).text();
-	const url = `http://127.0.0.1:${port}`;
+	const url = `http://${host === "::1" ? "[::1]" : "127.0.0.1"}:${port}`;
+	const headers = { authorization: `Bearer ${options.secret ?? "local-projection-secret"}` };
 	const stop = async () => {
 		child.kill();
 		await child.exited;
@@ -40,7 +41,7 @@ async function startReceiver(host?: string) {
 		for (let attempt = 0; attempt < 50; attempt++) {
 			try {
 				const response = await fetch(`${url}/__stats`, {
-					headers: authorization,
+					headers,
 					signal: AbortSignal.timeout(100),
 				});
 				if (response.ok && (await response.json()).accepted === 0) return { url, port, stop };
@@ -68,7 +69,71 @@ async function signedPost(url: string, payload: unknown) {
 	});
 }
 
+async function rejectedStartup(args: string[]) {
+	const child = Bun.spawn({
+		cmd: [process.execPath, "--no-env-file", "scripts/projection-receiver.ts", ...args],
+		cwd: repositoryRoot,
+		env: createSanitizedProcessEnv(),
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	// A regression that starts listening must not leave a receiver process behind.
+	const timeout = setTimeout(() => child.kill(), 1_000);
+	try {
+		const [stdout, stderr, exitCode] = await Promise.all([
+			new Response(child.stdout).text(),
+			new Response(child.stderr).text(),
+			child.exited,
+		]);
+		return { stdout, stderr, exitCode };
+	} finally {
+		clearTimeout(timeout);
+	}
+}
+
 describe("reference projection receiver", () => {
+	it.each([undefined, "127.0.0.1", "::1"])(
+		"retains the development secret for a loopback bind: %s",
+		async (host) => {
+			const receiver = await startReceiver(host, {});
+			try {
+				const response = await fetch(`${receiver.url}/__stats`, {
+					headers: { authorization: "Bearer local-projection-secret" },
+					signal: AbortSignal.timeout(1_000),
+				});
+				expect(response.status).toBe(200);
+				expect(await response.json()).toMatchObject({ accepted: 0, rejected: 0 });
+			} finally {
+				await receiver.stop();
+			}
+		},
+	);
+
+	it.each([
+		"0.0.0.0",
+		"::",
+		"192.168.1.10",
+		"fd00::10",
+		"receiver.internal",
+		"localhost",
+		"127.example.com",
+	])("requires a custom secret for a non-loopback bind: %s", async (host) => {
+		for (const supplied of [undefined, "local-projection-secret", " local-projection-secret "]) {
+			const args = [`--host=${host}`];
+			if (supplied !== undefined) args.push(`--secret=${supplied}`);
+			const result = await rejectedStartup(args);
+			expect(result.exitCode).toBe(1);
+			expect(result.stdout).toBe("");
+			expect(result.stderr).toContain("Non-loopback --host requires a non-default --secret");
+		}
+	});
+
+	it.each(["", " \t "])("rejects a blank secret for a network bind: %j", async (supplied) => {
+		const result = await rejectedStartup(["--host=0.0.0.0", `--secret=${supplied}`]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("invalid --secret");
+	});
+
 	it("accepts signed verification and delivery with an explicit container bind address", async () => {
 		const receiver = await startReceiver("0.0.0.0");
 		try {
@@ -162,20 +227,9 @@ describe("reference projection receiver", () => {
 	});
 
 	it.each(["", " \t "])("rejects an empty host before listening: %j", async (host) => {
-		const child = Bun.spawn({
-			cmd: [process.execPath, "--no-env-file", "scripts/projection-receiver.ts", `--host=${host}`],
-			cwd: repositoryRoot,
-			env: createSanitizedProcessEnv(),
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [stdout, stderr, exitCode] = await Promise.all([
-			new Response(child.stdout).text(),
-			new Response(child.stderr).text(),
-			child.exited,
-		]);
-		expect(exitCode).toBe(1);
-		expect(stdout).toBe("");
-		expect(stderr).toContain("invalid --host");
+		const result = await rejectedStartup([`--host=${host}`]);
+		expect(result.exitCode).toBe(1);
+		expect(result.stdout).toBe("");
+		expect(result.stderr).toContain("invalid --host");
 	});
 });
