@@ -237,6 +237,14 @@ remain separate from throughput configuration.
 
 ### MCP
 
+`quotum mcp operator --allow-writes --actor <name> --directory <private-directory>` is the separate
+local setup MCP in `src/composition/operator-mcp/`. It invokes fixed operator CLI commands for
+migrations, bootstrap, connections, credentials and catalogs with host-supplied database authority.
+Never mount it in the HTTP runtime or widen the shared read allowlist for it. Secret file arguments
+are filenames in the host's private directory; generated secrets stay in exclusive owner-only files.
+JSON catalogs never execute agent-authored modules. Preserve CLI revision checks, actor attribution,
+request-key replay and member override rules. See [docs/mcp.md](docs/mcp.md#local-operator-mcp-for-self-hosted-setup).
+
 `src/mcp/` holds the read-only tools, remote proposal tools, contract tools and the read-only stdio
 entrypoint (`bun run mcp`). Read tools send API requests through `createGuardedFetch`
 (`src/mcp/guarded-fetch.ts`), whose `allowedRequests` list remains read-only. The optional
@@ -295,6 +303,9 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
   `quotum`): migrations, usage partitions, bootstrap, catalog, connections, credentials and
   environment suspension/resumption, webhook endpoints, key rotation, `healthcheck` and `init`; see
   [docs/deployment.md](docs/deployment.md#operator-cli).
+  Automatic `.env` discovery is disabled; `bun run quotum --env-file <path> <command>` loads an
+  explicitly selected readable file. Exported variables take precedence, and missing files fail
+  before dispatch instead of silently falling back to inherited settings.
 - `bun run platform:bootstrap`, `catalog:provision` and `catalog` for operator workflows (see
   [docs/quickstart.md](docs/quickstart.md)); `bun run connections:rotate-secrets` re-encrypts
   stored connection secrets with the active key.

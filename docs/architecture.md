@@ -41,6 +41,9 @@ The policy is deny-by-default:
 
 - `src/app/`, `src/platform/app.ts`: trusted backend and merchant HTTP surfaces.
 - `src/composition/`: module wiring, auth and persistence ports, OpenAPI and connection adapters.
+  `src/composition/operator-mcp/` is the explicitly launched local operator MCP: typed setup tools
+  run the operator CLI with host-supplied database authority. It is separate from the read-only
+  SDK-based MCP module and remote browser proposals, and is never mounted in the HTTP runtime.
 - `src/billing/`, `src/catalog/`, `src/db/`: billing domain, catalog, and persistence.
 - `src/platform/`: organizations, identity, onboarding, connections, and audit.
 - `src/providers/`, `src/workers/`, `src/projections/`: external providers and durable delivery.

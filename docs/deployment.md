@@ -33,8 +33,14 @@ docker run --rm --env-file .env quotum-api:local quotum migrate
 Operator commands ship in the image as `quotum` on its `PATH`. Run them in a one-off container
 (`docker run --rm --env-file .env <image> quotum <command>`) or in a running one (`docker exec`). In
 a source checkout, `bun run quotum <command>` is equivalent, and the existing package scripts keep
-working. Each command runs as its own process, reads its settings from the environment only (never a
-`.env` file), and exits with that command's status. `quotum <command> --help` prints a command's
+working. Each command runs as its own process, reads its settings from the environment, and exits
+with that command's status. Automatic `.env` discovery is disabled. To load a particular file,
+use `quotum --env-file /absolute/path/operator.env <command>` (or
+`bun run quotum --env-file /absolute/path/operator.env <command>`). The file must exist and be
+readable; an invalid path exits `64` before the command starts. Bun's environment-file syntax and
+precedence apply: already exported variables take precedence over file values. Children inherit
+the selected settings and keep automatic discovery disabled.
+`quotum <command> --help` prints a command's
 usage and the settings it reads without running it; an unknown command or unexpected arguments exit
 `64` before anything runs.
 
@@ -73,6 +79,7 @@ records beside `--actor`. A headless deployment has no members to defer to and n
 | `quotum connections rotate-secrets` | [Encryption-key rotation](#encryption-key-rotation). |
 | `quotum merchant service-principal <name>` | The [merchant proxy service principal](#merchant-proxy-service-principal). Refused in headless mode. |
 | `quotum mcp` | The read-only [stdio MCP server](mcp.md#run-over-stdio). |
+| `quotum mcp operator --allow-writes --actor <name> --directory <private-directory>` | The separate [local operator MCP](mcp.md#local-operator-mcp-for-self-hosted-setup) for agent-driven setup. Uses database/operator authority and writes secrets only to local files. |
 | `quotum healthcheck` | Exit `0` only when this instance's `/ready` answers `200`, for container health checks. |
 | `quotum init` | Print a newly generated `QUOTUM_SECRETS_KEY_*`, `QUOTUM_AUTH_SECRET` and `BILLING_OPERATOR_API_KEY`. |
 | `quotum version`, `quotum help` | Build version and command list. |

@@ -74,7 +74,7 @@ const organizationSchema = z
 		projects: z.array(projectSchema).min(1).max(100),
 	})
 	.strict();
-const bootstrapManifestSchema = z
+export const bootstrapManifestSchema = z
 	.object({
 		version: z.literal(1),
 		organizations: z.array(organizationSchema).min(1).max(100),

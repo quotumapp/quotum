@@ -12,6 +12,11 @@ The shared tools use the bundled SDK and a fixed read-only request allowlist. Th
 calls `/v1` with a project key. The optional remote transport runs at `/mcp` in the API process and
 dispatches through the merchant billing port with browser-authorized identity, without project keys.
 
+For first-time self-hosted configuration, the separate
+[local operator MCP](#local-operator-mcp-for-self-hosted-setup) runs the operator commands through
+typed tools. It has database authority and must be launched explicitly; it is not part of the
+shared read tools or the remote HTTP transport.
+
 ## Connect in a browser
 
 Browser authorization uses merchant sign-in, so the remote transport needs the merchant console:
@@ -233,12 +238,92 @@ can inspect results and cancel pending proposals while their authorization remai
 A [headless](deployment.md#headless-mode) deployment has no proposals at all. Applying a change
 needs a merchant sign-in, a browser decision and, for production, step-up confirmation, and none of
 those exist without the console. A headless process refuses `QUOTUM_MCP_WRITES_ENABLED=true`, like
-`QUOTUM_MCP_ENABLED=true`, at startup, and the stdio server stays read-only. Make changes with the [operator CLI](deployment.md#operator-cli) or the
-`/v1` API, and use the agent to read state and explain it.
+`QUOTUM_MCP_ENABLED=true`, at startup. `quotum mcp` stays read-only. Headless operators can make
+changes with the [operator CLI](deployment.md#operator-cli), the separate local operator MCP below,
+or the `/v1` API.
 
 Finished and abandoned proposals are deleted 30 days after they were created, and a connection's
 record 30 days after it expired or was revoked. A deleted connection answers like a revoked one.
 See [merchant platform retention](operations.md#merchant-platform-retention).
+
+## Local operator MCP for self-hosted setup
+
+`quotum mcp operator` lets an agent migrate the database, bootstrap organizations and environments,
+configure connections, issue credentials, adopt provider bindings and publish catalogs without
+shell tools, a merchant account or a browser approval. It runs as a local stdio process under
+`src/composition/operator-mcp/`, using the existing operator CLI. It is never served at `/mcp`.
+
+The host still supplies Bun or the container image, a reachable PostgreSQL 18 database, and the
+deployment's stable `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` and `QUOTUM_AUTH_SECRET`.
+Generate those once for a new deployment with [`quotum init`](deployment.md#operator-cli); use
+the service's existing values when configuring an existing deployment. The tools configure
+Quotum; they do not provision host infrastructure, deploy a projection receiver or administer a
+provider's dashboard. Production connections retain the signed setup-event requirement.
+
+Create a private directory (mode `700`) for provider secret inputs and generated secret outputs.
+Put provider secrets in JSON files there, following
+[headless connection setup](providers.md#headless-connection-setup). The process must be able to
+read the inputs and create new files. Register this launcher with the agent host:
+
+```json
+{
+  "mcpServers": {
+    "quotum-operator": {
+      "command": "/path/to/quotum-api/bin/quotum",
+      "args": [
+        "--env-file", "/srv/quotum/operator.env",
+        "mcp", "operator", "--allow-writes",
+        "--actor", "agent-setup",
+        "--directory", "/srv/quotum/setup"
+      ]
+    }
+  }
+}
+```
+
+The explicit environment file contains `POSTGRES_URI` and the stable settings above, plus any
+operator settings the deployment uses. Exported variables take precedence. Automatic `.env`
+discovery remains disabled. The equivalent container launcher is:
+
+```sh
+docker run -i --rm --env-file /srv/quotum/operator.env \
+  --mount type=bind,src=/srv/quotum/setup,dst=/setup \
+  ghcr.io/quotumapp/quotum:<version> \
+  quotum mcp operator --allow-writes --actor agent-setup --directory /setup
+```
+
+Join the database's Docker network when needed and make the mounted private directory accessible
+to the image's `bun` user. Configure the database address as seen from that container.
+
+The launch requires `--allow-writes`, a fixed audit `--actor` and the private `--directory`.
+This grants operator authority across the configured database. Tool calls apply changes directly;
+the remote proposal/browser flow is a separate authority. Do not expose this process as a network
+service. Disconnect it after setup and use `quotum mcp` with a read-only key for routine inspection.
+
+| Tools | Behavior |
+| --- | --- |
+| `get_setup_status` | Reports missing setting names, the actor and directory, never values. |
+| `migrate_database` | Verifies checksums and lists migration status by default; `apply: true` applies pending migrations with the existing advisory lock. Status may create the migration bookkeeping table. Never resets data. |
+| `inspect_bootstrap`, `apply_bootstrap` | Accept the [bootstrap manifest](../examples/quickstart/platform.json). Inspect first, then apply with `credentialsOut`; credential values go to that new file. |
+| `list_connections`, `draft_connection`, `validate_connection`, `commit_connection` | Preserve the CLI's revision checks, validation, signed-event checks, actor attribution and member override requirements. Draft takes JSON settings plus a provider `secretsFile`, or a projection `secretOut`. Install the projection secret at the receiver before validation. |
+| `get_credentials`, `rotate_credentials` | Inspect credential presence, then explicitly select `full` or `read_only`. Rotation immediately revokes the replaced key and writes the new key to `credentialsOut`. |
+| `get_catalog`, `preview_catalog`, `publish_catalog` | Use JSON catalog data and an explicit `expectedRevision` (`null` for no published catalog). Preview persists a preview; publish revalidates and refuses stale revisions. Identical intent is a no-op. |
+| `list_catalog_bindings`, `adopt_catalog_bindings` | Inspect/adopt existing provider products through the CLI's validated, actor-attributed receipts. |
+| `get_environment_readiness` | Reports informational setup findings. These do not gate environment access or credential issuance. |
+
+Secret input/output arguments are filenames within the host-selected directory, never arbitrary
+paths. Secret inputs must be regular JSON files of at most 64 KB; symlinks are refused. Generated
+keys/secrets use exclusive creation and mode `600`, so an existing file is not overwritten.
+Catalogs are passed as JSON, never executable TypeScript/JavaScript modules. No tool accepts shell
+commands or arbitrary CLI arguments. Setup calls accept at most 256 KB of JSON and run one command
+at a time. Mutation tools that support `requestKey` require one; reuse it on retry.
+
+Results carry the CLI `exitCode` and parsed `data`. Exit `2` means outstanding bootstrap/readiness
+findings, not a tool failure. Raw provider/database diagnostics are withheld; failures expose the
+domain error code when available. Inspect the target's state before retrying a failed or interrupted
+write, which may have committed. Large successful results return a completion receipt instead of
+the data. Commands have a ten-minute deadline; closing stdin drains outstanding requests for up to
+30 seconds, and disconnect/signal shutdown terminates outstanding child commands.
 
 ## Run over stdio
 

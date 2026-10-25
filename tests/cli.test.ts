@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createSanitizedProcessEnv } from "../scripts/lib/sanitized-env";
 
 const repositoryRoot = new URL("../", import.meta.url).pathname;
@@ -20,6 +23,37 @@ async function run(cmd: string[], env: Record<string, string> = {}) {
 }
 
 describe("quotum CLI process", () => {
+	it("refuses a missing explicit file instead of using inherited configuration", async () => {
+		const result = await run(
+			["bin/quotum", "--env-file", "/missing-quotum-operator-env-12345", "version"],
+			{ BUILD_VERSION: "inherited" },
+		);
+		expect(result.exitCode).toBe(64);
+		expect(result.stdout).toBe("");
+		expect(result.stderr).toContain("readable regular file");
+	});
+	it("loads an explicit file without picking up the working directory's .env", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "quotum-cli-env-"));
+		try {
+			await writeFile(
+				join(directory, ".env"),
+				"BUILD_VERSION=ambient\nBUILD_COMMIT=ambient-secret\n",
+			);
+			await writeFile(join(directory, "operator.env"), "BUILD_VERSION=explicit\n");
+			const child = Bun.spawn({
+				cmd: [join(repositoryRoot, "bin/quotum"), "--env-file", "operator.env", "version"],
+				cwd: directory,
+				env: createSanitizedProcessEnv(),
+				stdout: "pipe",
+				stderr: "pipe",
+			});
+			expect(await new Response(child.stdout).text()).toBe("explicit\n");
+			expect(await new Response(child.stderr).text()).toBe("");
+			expect(await child.exited).toBe(0);
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	});
 	it("prints help from the bin wrapper the image puts on PATH", async () => {
 		const result = await run(["bin/quotum", "help"]);
 		expect(result).toMatchObject({ exitCode: 0, stderr: "" });
