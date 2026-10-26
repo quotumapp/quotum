@@ -703,6 +703,10 @@ checkout starts a new one.
 
 ## Headless connection setup
 
+For a runnable Stripe example, start with the [real Stripe sandbox quickstart](stripe-quickstart.md).
+It takes a fresh database through product creation, restricted-key validation, catalog adoption,
+Checkout and signed webhook delivery, then explains the production setup-event handoff.
+
 Without the merchant application, operators configure connections with `quotum connections` (see
 the [operator CLI](deployment.md#operator-cli)). A change goes through the same draft, validation
 and commit steps as the **Integrations** screens, and audit events name the operator given by
