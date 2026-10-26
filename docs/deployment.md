@@ -135,6 +135,7 @@ required value is missing or unsafe for the selected environment.
 | `BILLING_OPERATOR_API_KEY` | Operator credential for catalog publication, replay, reconciliation, and admin metrics. At least 16 characters, separate from project credentials. Required in production. |
 | `QUOTUM_SECRETS_KEY_ID`, `QUOTUM_SECRETS_KEY_BASE64` | Identifier and base64 32-byte AES key that encrypts stored provider and projection connections. Keep the key outside Postgres and its backups. Rotate with `quotum connections rotate-secrets`. |
 | `QUOTUM_PROJECT_LIMIT` | Positive integer, default `5`: maximum logical projects per organization for self-service creation. Each project includes both active environments and counts once, including suspended projects. Lowering it preserves existing projects and only blocks additional creation. Operator bootstrap is not subject to this cap. |
+| `QUOTUM_ORGANIZATION_LIMIT` | Positive integer, default `5`: maximum organizations one person may own. Only active organizations where they hold the Owner role count, so one they merely belong to, or that is suspended, does not. It bounds self-service creation, both the first organization during onboarding and `POST /api/platform/organizations`. Lowering it preserves existing organizations and only blocks additional creation. Operator bootstrap and `quotum organizations add-owner` are not subject to this cap. |
 | `QUOTUM_CONSOLE_ENABLED` | `false` (default) runs [headless](#headless-mode): `/v1` and workers only. `true` also serves the merchant console (`/api` sign-in, onboarding, teams and remote MCP) and makes every setting below required. Organizations and projects exist in both modes; the flag only removes the management surface. |
 | `MERCHANT_ORIGIN`, `MERCHANT_PUBLIC_URL` | Merchant origin and public/legal-page URL. Both must be explicitly set to nonblank values in production, including when `BILLING_ENV` is unset. Development and test defaults are `https://app.quotum.dev` and `https://quotum.dev`. The merchant origin must be exact HTTPS outside tests. |
 | `QUOTUM_AUTH_SECRET` | Operator-owned secret for Quotum sessions and token HMACs, at least 32 characters. Never reuse another secret. |
@@ -745,6 +746,7 @@ limit counts the address in the `x-quotum-client-ip` header that the console's B
   an invitation because it sends mail; an invitation preview that carries a token is limited to 20
   per client IP per hour, and requests for a replacement link to three per invitation per 24
   hours.
+- Organization creation: ten per person per hour, on top of the owned-organization cap.
 - Connection drafts: 30 per member per hour.
 - Step-up challenges: 30 per member per 15 minutes.
 

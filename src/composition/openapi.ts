@@ -88,6 +88,7 @@ function documentStore(): MerchantStore {
 	});
 	return new MerchantStore(sql, {
 		projectLimit: 5,
+		organizationLimit: 5,
 		signupEnabled: true,
 		origin: "https://app.quotum.invalid",
 		publicUrl: "https://quotum.invalid",

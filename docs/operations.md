@@ -118,6 +118,22 @@ issues only the declared credential kinds an instance has never held, whether th
 or already exists, so it does not rotate. To add an environment or a project later, extend the
 manifest, review `--check`, and run `--apply` with a new `--credentials-out` path.
 
+### Add an organization
+
+A person who already belongs to an organization adds another with `POST /api/platform/organizations`,
+which takes `{ name, slug }` and an `Idempotency-Key` header and answers with the new membership
+(the caller is its Owner). Onboarding's organization step is for the first organization and its
+saved draft; this route leaves the draft alone, and projects are added to the new organization
+as described below. Two refusals are `409`: `SLUG_UNAVAILABLE` when the address is taken, and
+`ORGANIZATION_LIMIT_REACHED` when the caller already owns `QUOTUM_ORGANIZATION_LIMIT` active
+organizations (default 5, a positive integer configured on the API process). Organizations they
+only belong to, and suspended ones, do not count. A per-person lock makes concurrent requests from
+several sessions respect the cap, and the onboarding route shares the check. Creation is also
+limited to ten a person per hour (`429 RATE_LIMITED`); a refused request spends none of it.
+Lowering the setting preserves existing organizations. Operator `platform:bootstrap` and
+`quotum organizations add-owner` remain exempt. The `organization.created` audit event records
+each creation.
+
 ### Add a project
 
 An organization that finished onboarding adds a project with `POST /api/platform/projects`, which

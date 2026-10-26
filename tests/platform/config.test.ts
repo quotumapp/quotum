@@ -193,6 +193,24 @@ describe("organization project limit", () => {
 	});
 });
 
+describe("owned organization limit", () => {
+	it("defaults to five and accepts a configured positive integer", () => {
+		expect(loadMerchantConfig(merchantEnv).organizationLimit).toBe(5);
+		expect(
+			loadMerchantConfig({ ...merchantEnv, QUOTUM_ORGANIZATION_LIMIT: " 12 " }).organizationLimit,
+		).toBe(12);
+		expect(
+			loadMerchantConfig({ ...merchantEnv, QUOTUM_ORGANIZATION_LIMIT: " " }).organizationLimit,
+		).toBe(5);
+	});
+	it("rejects invalid, fractional and unsafe limits at startup", () => {
+		for (const value of ["0", "-1", "1.5", "1e2", "NaN", "Infinity", "9007199254740992"])
+			expect(() =>
+				loadMerchantConfig({ ...merchantEnv, QUOTUM_ORGANIZATION_LIMIT: value }),
+			).toThrow("QUOTUM_ORGANIZATION_LIMIT must be a positive integer");
+	});
+});
+
 it("validates all MCP proposal quota overrides", () => {
 	const env = {
 		...merchantEnv,

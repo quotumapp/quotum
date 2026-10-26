@@ -66,6 +66,9 @@ describe("merchant security boundaries", () => {
 		expect(safeReturnTo("/orgs/acme/projects/example/sandbox/customers?q=test")).toBe(
 			"/orgs/acme/projects/example/sandbox/customers?q=test",
 		);
+		// The organizations list and one organization's overview, which names its organization.
+		expect(safeReturnTo("/organizations")).toBe("/organizations");
+		expect(safeReturnTo("/organization?organization=acme")).toBe("/organization?organization=acme");
 		for (const value of [
 			"https://evil.test",
 			"//evil.test",

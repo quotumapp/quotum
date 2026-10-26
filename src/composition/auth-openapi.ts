@@ -27,6 +27,7 @@ export async function generateAuthOpenApi(): Promise<OpenAPIObject> {
 	const store = new MerchantStore(sql, {
 		mcp: { origin: "https://api.quotum.invalid" },
 		projectLimit: 5,
+		organizationLimit: 5,
 		signupEnabled: true,
 		origin: "https://app.quotum.invalid",
 		publicUrl: "https://quotum.invalid",

@@ -956,6 +956,12 @@
       ]
     },
     {
+      "code": "ORGANIZATION_LIMIT_REACHED",
+      "sources": [
+        "src/platform/onboarding.ts"
+      ]
+    },
+    {
       "code": "ORGANIZATION_REQUIRED",
       "sources": [
         "src/platform/onboarding.ts"
