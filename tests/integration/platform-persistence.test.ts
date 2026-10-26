@@ -141,6 +141,8 @@ localDescribe("platform project identity persistence", () => {
 			"platform_service_principals",
 			"platform_step_up_grants",
 			"platform_stripe_app_events",
+			"platform_stripe_setup_steps",
+			"platform_stripe_setups",
 		]);
 
 		const constraints = await context.sql<Array<{ table_name: string; constraint_name: string }>>`

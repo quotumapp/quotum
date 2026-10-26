@@ -10,12 +10,14 @@ import {
 	operatorFile,
 	operatorResult,
 } from "../../src/composition/operator-mcp/command";
+import { stripeSetupManifestSchema } from "../../src/composition/stripe-setup/schema";
 import { toolJson, toolText } from "../helpers/mcp";
 import {
 	connectOperatorMcp,
 	operatorTestCatalog,
 	operatorTestManifest,
 } from "../helpers/operator-mcp";
+import { setupManifest } from "../helpers/stripe-setup";
 
 const env = {
 	POSTGRES_URI: "postgres://local/quotum",
@@ -74,6 +76,10 @@ describe("local operator MCP", () => {
 				"publish_catalog",
 				"list_catalog_bindings",
 				"adopt_catalog_bindings",
+				"prepare_stripe_setup",
+				"apply_stripe_setup",
+				"get_stripe_setup",
+				"verify_stripe_setup",
 			].sort(),
 		);
 		const ajv = new Ajv({ strict: false });
@@ -83,6 +89,86 @@ describe("local operator MCP", () => {
 			false,
 		);
 		expect(tools.find((tool) => tool.name === "get_catalog")?.annotations?.readOnlyHint).toBe(true);
+	});
+
+	it("runs Stripe setup through fixed commands, manifest data and private credential files", async () => {
+		const directory = await scratch();
+		const credentials = join(directory, "stripe-credentials.json");
+		await writeFile(
+			credentials,
+			JSON.stringify({ setupKey: "rk_test_private_setup", runtimeKey: "rk_test_private_runtime" }),
+			{ mode: 0o600 },
+		);
+		const { client, commands } = await connect({ directory });
+		const setupId = "00000000-0000-4000-8000-000000000001";
+		const manifest = setupManifest();
+		const cases: Array<[string, Record<string, unknown>, string[]]> = [
+			[
+				"prepare_stripe_setup",
+				{ manifest, credentialsFile: "stripe-credentials.json" },
+				["setup", "stripe", "prepare", "<input>", "--credentials-file", credentials],
+			],
+			[
+				"apply_stripe_setup",
+				{ setupId, credentialsFile: "stripe-credentials.json" },
+				["setup", "stripe", "apply", setupId, "--credentials-file", credentials],
+			],
+			[
+				"verify_stripe_setup",
+				{ setupId, credentialsFile: "stripe-credentials.json" },
+				["setup", "stripe", "verify", setupId, "--credentials-file", credentials],
+			],
+			["get_stripe_setup", { setupId }, ["setup", "stripe", "status", setupId]],
+		];
+		for (const [name, args, expected] of cases) {
+			expect(await client.callTool({ name, arguments: args })).not.toMatchObject({ isError: true });
+			const command = commands.at(-1);
+			expect(command?.args).toEqual(
+				name === "get_stripe_setup" ? expected : [...expected, "--actor", "host-operator"],
+			);
+		}
+		expect(commands[0]?.input).toEqual(stripeSetupManifestSchema.parse(manifest));
+		expect(JSON.stringify(commands)).not.toContain("rk_test_private");
+		const { tools } = await client.listTools();
+		const annotation = (name: string) => tools.find((tool) => tool.name === name)?.annotations;
+		expect(annotation("get_stripe_setup")?.readOnlyHint).toBe(true);
+		for (const name of ["prepare_stripe_setup", "apply_stripe_setup", "verify_stripe_setup"])
+			expect(annotation(name)?.readOnlyHint).toBe(false);
+	});
+
+	it("refuses unsafe Stripe setup inputs before dispatch", async () => {
+		const directory = await scratch();
+		await writeFile(
+			join(directory, "good.json"),
+			'{"setupKey":"rk_test_a","runtimeKey":"rk_test_b"}',
+		);
+		await writeFile(join(directory, "bad.json"), '{"setupKey":1}');
+		await symlink(join(directory, "good.json"), join(directory, "link.json"));
+		const { client, commands } = await connect({ directory });
+		const setupId = "00000000-0000-4000-8000-000000000001";
+		const manifest = setupManifest();
+		for (const [name, args] of [
+			["prepare_stripe_setup", { manifest, credentialsFile: "../good.json" }],
+			["prepare_stripe_setup", { manifest, credentialsFile: "/tmp/good.json" }],
+			["prepare_stripe_setup", { manifest, credentialsFile: "link.json" }],
+			["prepare_stripe_setup", { manifest, credentialsFile: "bad.json" }],
+			["prepare_stripe_setup", { manifest, credentialsFile: "missing.json" }],
+			["prepare_stripe_setup", { manifestFile: "good.json", credentialsFile: "good.json" }],
+			["prepare_stripe_setup", { manifest, credentialsFile: "good.json", setupKey: "rk_test_x" }],
+			["prepare_stripe_setup", { manifest, credentialsFile: "good.json", actor: "spoofed" }],
+			["apply_stripe_setup", { setupId: "not-a-uuid", credentialsFile: "good.json" }],
+			[
+				"apply_stripe_setup",
+				{ setupId, credentialsFile: "good.json", memberOverrideReason: "--x" },
+			],
+			["verify_stripe_setup", { setupId }],
+			["get_stripe_setup", { setupId, credentialsFile: "good.json" }],
+		] as const)
+			expect([name, await client.callTool({ name, arguments: args })]).toMatchObject([
+				name,
+				{ isError: true },
+			]);
+		expect(commands).toEqual([]);
 	});
 
 	it("reports missing settings without returning values or starting a command", async () => {
@@ -447,6 +533,76 @@ describe("operator command transport", () => {
 					{ status: "pending", file: "002_billing.sql" },
 				],
 			},
+		});
+	});
+
+	it("exposes only the bounded reason and permission tokens of a refused Stripe setup", () => {
+		const refused = operatorResult({
+			exitCode: 1,
+			stdout: "",
+			stderr: "STRIPE_SETUP_FAILED: stripe_account_mismatch\n",
+		});
+		expect(refused.isError).toBe(true);
+		expect(toolJson(refused)).toMatchObject({
+			error: "STRIPE_SETUP_FAILED",
+			reason: "stripe_account_mismatch",
+		});
+		const leaked = operatorResult({
+			exitCode: 1,
+			stdout: "",
+			stderr: "STRIPE_SETUP_FAILED: Bearer rk_live_private_value",
+		});
+		expect(toolJson(leaked)).toEqual(expect.not.objectContaining({ reason: expect.anything() }));
+		expect(toolText(leaked)).not.toContain("rk_live_private_value");
+		const diagnostics = {
+			checks: [
+				{
+					check: "charge_write",
+					reason: "missing_permission",
+					missingPermission: "charge_write",
+					httpStatus: 403,
+				},
+			],
+			missingPermissions: ["charge_write"],
+			unverifiedPermissions: [],
+		};
+		const invalid = operatorResult({
+			exitCode: 64,
+			stdout: "",
+			stderr: `STRIPE_CONNECTION_INVALID: ${JSON.stringify(diagnostics)} Run \`quotum setup stripe --help\` for usage.`,
+		});
+		expect(toolJson(invalid)).toMatchObject({ error: "STRIPE_CONNECTION_INVALID", diagnostics });
+		// Unknown fields are dropped by validation, so planted text never reaches the model.
+		const extra = operatorResult({
+			exitCode: 64,
+			stdout: "",
+			stderr: `STRIPE_CONNECTION_INVALID: ${JSON.stringify({ ...diagnostics, message: "sk_live_private" })}`,
+		});
+		expect(toolText(extra)).not.toContain("sk_live_private");
+		expect(toolJson(extra)).toMatchObject({ diagnostics });
+		const forged = operatorResult({
+			exitCode: 64,
+			stdout: "",
+			stderr: `STRIPE_CONNECTION_INVALID: ${JSON.stringify({ ...diagnostics, missingPermissions: ["sk_live_private"] })}`,
+		});
+		expect(toolText(forged)).not.toContain("sk_live_private");
+		expect(toolJson(forged)).toEqual(
+			expect.not.objectContaining({ diagnostics: expect.anything() }),
+		);
+		expect(
+			toolJson(
+				operatorResult({
+					exitCode: 2,
+					stdout: JSON.stringify({
+						status: "awaiting_delivery_event",
+						paymentTest: "not_performed",
+					}),
+					stderr: "",
+				}),
+			),
+		).toEqual({
+			exitCode: 2,
+			data: { status: "awaiting_delivery_event", paymentTest: "not_performed" },
 		});
 	});
 

@@ -6,6 +6,9 @@ Connect a Stripe sandbox to the normal Quotum runtime, buy ten credits through h
 and consume three. This exercises real Stripe API calls and signed sandbox events, encrypted
 database-owned connections, product adoption and catalog publication. Stripe test payments move
 no real money. The [five-minute quickstart](quickstart.md) remains the account-free billing demo.
+To have Quotum create or reuse the product, price and webhook endpoint and verify signed delivery
+for you, use [automated Stripe setup](stripe-setup.md); this walkthrough does each step by hand and
+ends with a test payment.
 
 Prerequisites: Bun 1.4.x, Docker, Bash, `curl`, `jq`, `openssl`, the
 [Stripe CLI](https://docs.stripe.com/stripe-cli), and access to a Stripe sandbox where you can

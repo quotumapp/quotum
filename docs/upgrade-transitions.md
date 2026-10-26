@@ -26,6 +26,28 @@ older image cannot read the new baseline, so a rollback restores the pre-upgrade
 loses the invitations declined since. Deploy the matching console, which answers from the inbox and
 knows the `declined` status.
 
+## Resumable Stripe setup
+
+`migrations/001_platform.sql` adds `platform_stripe_setups` and `platform_stripe_setup_steps` for
+immutable setup manifests, leases, step receipts and the encrypted one-time webhook secret.
+There are no changes to existing connection, billing or catalog rows, and no new required
+environment variables. This is a baseline change: existing checksums will differ.
+
+For a populated deployment, stop API processes, workers and operator commands, take a restorable
+backup with its matching binary and encryption keys, and follow the stopped-service backup and
+data-only restore procedure under [stored job provider identity](#stored-job-provider-identity)
+into a database freshly migrated with the target release. Preserve all existing tables and rows;
+the two new tables start empty. Do not edit the migration ledger or reset populated production
+data. Verify restored counts, `quotum migrate status` and `/ready` before routing traffic.
+Disposable development/test databases can be recreated.
+
+Deploy the matching runtime before using `quotum setup stripe` or the Stripe setup tools of
+`quotum mcp operator`: the normal webhook handler records the second signed delivery probe. Existing connections continue
+unchanged; the new workflow refuses to replace them. Pending setup secrets use the connection
+encryption key ring and are included in `quotum connections rotate-secrets`. Stop old processes
+before retiring old encryption keys, as with connection secrets. Preserve setup rows and step
+receipts during subsequent backups/restores so uncertain Stripe writes remain resumable.
+
 ## Canonical-only catalogs
 
 Catalog requests, files and stored revisions now require the canonical syntax in

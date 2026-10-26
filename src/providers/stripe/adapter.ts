@@ -148,9 +148,12 @@ export const stripeRegistryEntry: ProviderRegistryEntry<"stripe"> = {
 	label: "Stripe",
 	notConfiguredStatus: 503,
 	accountIdentity: (config) => config.accountIdentity ?? config.connectedAccountId ?? null,
-	build({ project, config, repository, clientFactories, logger }) {
+	build({ project, config, repository, clientFactories, logger, onVerifiedStripeWebhook }) {
 		const clientConfig = buildStripeConfig(config);
 		return new StripeBillingService({
+			onVerifiedWebhook: onVerifiedStripeWebhook
+				? (event) => onVerifiedStripeWebhook(project, event)
+				: undefined,
 			config: {
 				...clientConfig,
 				projectKey: project.projectInstanceKey,
