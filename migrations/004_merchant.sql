@@ -159,7 +159,7 @@ CREATE TABLE platform_invitations (
 	email text NOT NULL,
 	role text NOT NULL CHECK(role IN ('Admin','Developer','Operator','Viewer')),
 	token_hash text NOT NULL UNIQUE,
-	status text NOT NULL DEFAULT 'valid' CHECK(status IN ('valid','used','revoked','replaced')),
+	status text NOT NULL DEFAULT 'valid' CHECK(status IN ('valid','used','revoked','replaced','declined')),
 	expires_at timestamptz NOT NULL,
 	created_at timestamptz NOT NULL DEFAULT now(),
 	accepted_by uuid REFERENCES platform_principals(id) ON DELETE RESTRICT,
@@ -174,6 +174,9 @@ CREATE INDEX platform_invitations_inviter_idx ON platform_invitations(inviter_me
 CREATE INDEX platform_invitations_accepted_idx ON platform_invitations(accepted_by) WHERE accepted_by IS NOT NULL;
 
 CREATE INDEX platform_invitations_expiry_idx ON platform_invitations(expires_at) WHERE status='valid';
+
+-- A person's invitation inbox: their address, newest first. The live index above leads with the organization.
+CREATE INDEX platform_invitations_email_idx ON platform_invitations(email,created_at DESC) WHERE status='valid';
 
 CREATE TABLE platform_onboarding_drafts (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

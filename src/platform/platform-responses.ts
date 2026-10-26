@@ -107,6 +107,21 @@ export const postApiPlatformInvitationsAcceptResponse200Schema = z.object({
 	data: z.object({ organizationSlug: z.string() }),
 });
 
+export const listInvitationsResponse200Schema = z.object({
+	success: z.literal(true),
+	data: z.array(InvitationViewSchema),
+});
+
+export const acceptInvitationResponse200Schema = z.object({
+	success: z.literal(true),
+	data: z.object({ organizationSlug: z.string() }),
+});
+
+export const declineInvitationResponse200Schema = z.object({
+	success: z.literal(true),
+	data: z.object({ status: z.literal("declined") }),
+});
+
 export const postApiPlatformInvitationsRequestResponse200Schema = z.object({
 	success: z.literal(true),
 	data: z.object({ status: z.literal("requested") }),

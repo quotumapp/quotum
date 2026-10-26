@@ -14,6 +14,18 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Invitation inbox
+
+The merchant baseline widens the `platform_invitations.status` check with `declined`, which an
+invitee's [decline from the console](operations.md#answer-an-invitation-from-the-console) writes,
+and adds `platform_invitations_email_idx` on `(email, created_at DESC) WHERE status = 'valid'`,
+which serves the inbox lookup by address; the existing live index leads with the organization. No
+table changes and nothing is backfilled, so a dump from the previous release restores as it is:
+follow steps 1, 2, 4 and 6 of [stored job provider identity](#stored-job-provider-identity). An
+older image cannot read the new baseline, so a rollback restores the pre-upgrade backup, which
+loses the invitations declined since. Deploy the matching console, which answers from the inbox and
+knows the `declined` status.
+
 ## Canonical-only catalogs
 
 Catalog requests, files and stored revisions now require the canonical syntax in

@@ -21,12 +21,14 @@ interface InviteRow {
 	slug: string;
 	email: string;
 	role: Exclude<MerchantRole, "Owner">;
-	status: "valid" | "used" | "revoked" | "replaced";
+	status: "valid" | "used" | "revoked" | "replaced" | "declined";
 	expires_at: Date;
 	inviter_membership_id: string;
 	inviter_revision: number;
 	accepted_by: string | null;
 }
+/** Invitations the inbox lists at once, newest first; each costs a few reads to judge. */
+const INBOX_LIMIT = 10;
 interface MembershipAccess {
 	role: MerchantRole;
 	status: string;
@@ -57,6 +59,22 @@ export class MerchantTeam {
 				"This invitation is not available. Ask the organization administrator for a new link.",
 				404,
 			);
+		return row;
+	}
+	/**
+	 * The invitation a signed-in person answers from their inbox. The address in their session is
+	 * the filter, so another person's invitation answers like an id that does not exist.
+	 */
+	private async byIdFor(
+		identity: MerchantIdentity,
+		id: string,
+		tx: MerchantSql = this.store.sql,
+	): Promise<InviteRow> {
+		const [row] = await tx<
+			InviteRow[]
+		>`SELECT i.*,o.name,o.slug FROM platform_invitations i JOIN platform_organizations o ON o.id=i.organization_id WHERE i.id=${id} AND i.email=${normalizeEmail(identity.email)}`;
+		if (!row)
+			throw new MerchantError("INVITATION_NOT_FOUND", "This invitation is not available.", 404);
 		return row;
 	}
 	private async state(
@@ -127,38 +145,107 @@ export class MerchantTeam {
 			identity,
 			key,
 			["invitation.accept", this.store.hash(token)],
-			async (tx) => {
-				const initial = await this.byToken(token, tx, hashed);
-				await tx`SELECT id FROM platform_organizations WHERE id=${initial.organization_id} FOR UPDATE`;
-				await tx`SELECT id FROM platform_invitations WHERE id=${initial.id} FOR UPDATE`;
-				const row = await this.byToken(token, tx, hashed);
-				if (row.status === "used" && row.accepted_by === identity.principalId)
-					return { organizationSlug: row.slug };
-				const state = await this.state(row, identity, tx);
-				if (state === "already_member") return { organizationSlug: row.slug };
-				if (state !== "valid")
-					throw new MerchantError(
-						`INVITATION_${state.toUpperCase()}`,
-						state === "wrong_email"
-							? "Sign in with the invited email address."
-							: "This invitation can no longer be accepted. Ask an administrator for a new invitation.",
-						409,
-					);
-				// The removed membership, if any, comes back with the invited role; its revision bump
-				// keeps invitations it issued before the removal retired.
-				await tx`INSERT INTO platform_memberships(organization_id,principal_id,role) VALUES(${row.organization_id},${identity.principalId},${row.role}) ON CONFLICT(organization_id,principal_id) DO UPDATE SET role=EXCLUDED.role,status='active',revision=platform_memberships.revision+1 WHERE platform_memberships.status='removed'`;
-				await tx`UPDATE platform_invitations SET status='used',accepted_by=${identity.principalId},accepted_at=${this.store.now()} WHERE id=${row.id}`;
-				await this.store.audit(
-					tx,
-					identity.principalId,
-					row.organization_id,
-					"invitation.accepted",
-					row.id,
-					{ role: row.role },
-				);
-				return { organizationSlug: row.slug };
-			},
+			(tx) => this.accepting(tx, identity, () => this.byToken(token, tx, hashed)),
 		);
+	}
+	/** Accepts an invitation listed in the person's inbox, by its id instead of its emailed link. */
+	async acceptById(
+		identity: MerchantIdentity,
+		key: string,
+		id: string,
+	): Promise<{ organizationSlug: string }> {
+		return this.store.idempotent(identity, key, ["invitation.accept", id], (tx) =>
+			this.accepting(tx, identity, () => this.byIdFor(identity, id, tx)),
+		);
+	}
+	/**
+	 * Both ways of accepting come through here. The organization is locked before the invitation,
+	 * the order every other writer uses, and the invitation is read again once both are held.
+	 */
+	private async accepting(
+		tx: MerchantSql,
+		identity: MerchantIdentity,
+		find: () => Promise<InviteRow>,
+	): Promise<{ organizationSlug: string }> {
+		const initial = await find();
+		await tx`SELECT id FROM platform_organizations WHERE id=${initial.organization_id} FOR UPDATE`;
+		await tx`SELECT id FROM platform_invitations WHERE id=${initial.id} FOR UPDATE`;
+		const row = await find();
+		if (row.status === "used" && row.accepted_by === identity.principalId)
+			return { organizationSlug: row.slug };
+		const state = await this.state(row, identity, tx);
+		if (state === "already_member") return { organizationSlug: row.slug };
+		if (state !== "valid")
+			throw new MerchantError(
+				`INVITATION_${state.toUpperCase()}`,
+				state === "wrong_email"
+					? "Sign in with the invited email address."
+					: "This invitation can no longer be accepted. Ask an administrator for a new invitation.",
+				409,
+			);
+		// The removed membership, if any, comes back with the invited role; its revision bump
+		// keeps invitations it issued before the removal retired.
+		await tx`INSERT INTO platform_memberships(organization_id,principal_id,role) VALUES(${row.organization_id},${identity.principalId},${row.role}) ON CONFLICT(organization_id,principal_id) DO UPDATE SET role=EXCLUDED.role,status='active',revision=platform_memberships.revision+1 WHERE platform_memberships.status='removed'`;
+		await tx`UPDATE platform_invitations SET status='used',accepted_by=${identity.principalId},accepted_at=${this.store.now()} WHERE id=${row.id}`;
+		await this.store.audit(
+			tx,
+			identity.principalId,
+			row.organization_id,
+			"invitation.accepted",
+			row.id,
+			{ role: row.role },
+		);
+		return { organizationSlug: row.slug };
+	}
+	/**
+	 * The invitations waiting for the signed-in person: addressed to the verified email of their
+	 * session, still open and not expired, newest first. Nothing else selects them, so the list
+	 * never discloses another address or organization. One connection is used for the reads in turn,
+	 * because the pool is shared with the `/v1` API.
+	 */
+	async inbox(identity: MerchantIdentity): Promise<InvitationView[]> {
+		const rows = await this.store.sql<
+			InviteRow[]
+		>`SELECT i.*,o.name,o.slug FROM platform_invitations i JOIN platform_organizations o ON o.id=i.organization_id WHERE i.email=${normalizeEmail(identity.email)} AND i.status='valid' AND i.expires_at>${this.store.now()} AND o.status='active' ORDER BY i.created_at DESC,i.id LIMIT ${INBOX_LIMIT}`;
+		const views: InvitationView[] = [];
+		for (const row of rows) views.push(await this.view(row, identity));
+		// A person who joined another way has nothing left to answer.
+		return views.filter((view) => view.status !== "already_member");
+	}
+	/**
+	 * Declines an invitation from the inbox. The inviter's organization can invite the address
+	 * again, which `resend` already does for any invitation that is not used.
+	 */
+	async decline(
+		identity: MerchantIdentity,
+		key: string,
+		id: string,
+	): Promise<{ status: "declined" }> {
+		return this.store.idempotent(identity, key, ["invitation.decline", id], async (tx) => {
+			const initial = await this.byIdFor(identity, id, tx);
+			await tx`SELECT id FROM platform_organizations WHERE id=${initial.organization_id} FOR UPDATE`;
+			await tx`SELECT id FROM platform_invitations WHERE id=${initial.id} FOR UPDATE`;
+			const row = await this.byIdFor(identity, id, tx);
+			// Declining what is already declined, revoked or replaced changes nothing, so it records
+			// nothing; an invitation that was accepted cannot be taken back this way.
+			if (row.status === "used")
+				throw new MerchantError(
+					"INVITATION_USED",
+					"This invitation was already accepted. Ask an administrator to remove you instead.",
+					409,
+				);
+			if (row.status !== "valid") return { status: "declined" };
+			await tx`UPDATE platform_invitations SET status='declined' WHERE id=${row.id}`;
+			await this.store.audit(
+				tx,
+				identity.principalId,
+				row.organization_id,
+				"invitation.declined",
+				row.id,
+				{ role: row.role },
+			);
+			return { status: "declined" };
+		});
 	}
 	async list(identity: MerchantIdentity, slug: string): Promise<TeamView> {
 		const member = await this.store.membership(this.store.sql, identity.principalId, slug);
@@ -324,8 +411,10 @@ export class MerchantTeam {
 			>`SELECT status FROM platform_invitations WHERE id=${id} AND organization_id=${member.organization_id} FOR UPDATE`;
 			if (!invitation || invitation.status === "used")
 				throw new MerchantError("INVITATION_NOT_FOUND", "Invitation not found.", 404);
-			// Revoking again changes nothing, so it records nothing.
-			if (invitation.status === "revoked") return { status: "revoked" };
+			// Revoking again changes nothing, so it records nothing; nor does revoking what the invitee
+			// already declined, which is no longer open and keeps its own status.
+			if (invitation.status === "revoked" || invitation.status === "declined")
+				return { status: "revoked" };
 			await tx`UPDATE platform_invitations SET status='revoked' WHERE id=${id}`;
 			await this.store.audit(
 				tx,
