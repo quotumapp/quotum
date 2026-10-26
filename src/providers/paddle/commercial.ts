@@ -9,6 +9,7 @@ import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError } from "../../billing/errors";
 import type { ProjectScopedBillingRepository } from "../../db/repository";
 import type { RuntimeConnectionConfigs } from "../../projects/connections";
+import type { PreviewOptions } from "../../shared/preview-lifetime";
 import type { PaddlePriceBinding } from "./catalog";
 import { paddleResumableKeys } from "./customer-operation";
 import type { PaddleGateway } from "./gateway";
@@ -35,11 +36,16 @@ export class PaddleCommercial {
 		private readonly write: Writer,
 	) {}
 
-	async preview(input: { billingAccountId: string; intent: CommercialActionIntent }) {
+	async preview(input: {
+		billingAccountId: string;
+		intent: CommercialActionIntent;
+		previewOptions?: PreviewOptions;
+	}) {
 		// A preview resumes nothing: what a dead request left before dispatching is released.
 		await this.releaseNeverSent(input.billingAccountId, []);
 		return this.repository.createCommercialActionPreview(
 			await this.draft(input.billingAccountId, input.intent),
+			input.previewOptions,
 		);
 	}
 

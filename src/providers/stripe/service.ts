@@ -78,6 +78,7 @@ import {
 import { paymentSetupReconcileEventType } from "../../db/repository/store-events";
 import { type BillingLogger, safelyLogWarn } from "../../observability/logger";
 import type { BillingCadenceUnit } from "../../shared/cadence";
+import type { PreviewOptions } from "../../shared/preview-lifetime";
 import type { AutoTopupWorkerProvider } from "../../workers/auto-topup";
 import type { PromotionStripeProvider } from "../../workers/promotion-maintenance";
 import type { RecurringBillingWorkerProvider } from "../../workers/recurring-billing";
@@ -267,7 +268,10 @@ interface StripeBillingRepositoryDependency
 		toPlanVersionId: string;
 		carryOver: Required<CommercialCarryOver>;
 	}): Promise<CommercialPreviewCarryOver>;
-	createCommercialActionPreview?(draft: CommercialPreviewDraft): Promise<CommercialActionPreview>;
+	createCommercialActionPreview?(
+		draft: CommercialPreviewDraft,
+		options?: PreviewOptions,
+	): Promise<CommercialActionPreview>;
 	resolveCommercialPromotion?(input: {
 		billingAccountId: string;
 		code: string;
@@ -809,11 +813,12 @@ export class StripeBillingService
 	async previewCommercialAction(input: {
 		billingAccountId: string;
 		intent: CommercialActionIntent;
+		previewOptions?: PreviewOptions;
 	}): Promise<CommercialActionPreview> {
 		const repository = requireCommercialRepository(this.dependencies.repository);
 		const billingAccountId = requireNonBlank(input.billingAccountId, "billingAccountId");
 		const draft = await this.commercialPreviewDraft(billingAccountId, input.intent);
-		return await repository.createCommercialActionPreview(draft);
+		return await repository.createCommercialActionPreview(draft, input.previewOptions);
 	}
 
 	async executeCommercialAction(input: {

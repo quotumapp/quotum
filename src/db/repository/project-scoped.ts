@@ -23,6 +23,7 @@ import type {
 import type { BillingChannel, BillingProvider, EntitlementSnapshot } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import type { StripeCatalog } from "../../providers/stripe/types";
+import type { PreviewOptions } from "../../shared/preview-lifetime";
 import type { BillingRepository } from "../repository";
 import type { PaddleBillingRepository } from "./paddle";
 import type { PaddleCheckoutRepository } from "./paddle-checkouts";
@@ -274,8 +275,9 @@ export class ProjectScopedBillingRepository {
 
 	async createCommercialActionPreview(
 		draft: CommercialPreviewDraft,
+		options?: PreviewOptions,
 	): Promise<CommercialActionPreview> {
-		return await this.repository.createCommercialActionPreview(this.project, draft);
+		return await this.repository.createCommercialActionPreview(this.project, draft, options);
 	}
 
 	async resolveCommercialPromotion(input: {

@@ -850,6 +850,17 @@ Google Play product; see [catalog adoption](catalog.md#adopt-existing-stripe-pro
 verification and authentication without committing a connection; see [projections](providers.md#projections).
 Connection validation errors retain structured check details in CLI output.
 
+Remote MCP proposal review defaults to one hour. `QUOTUM_MCP_PROPOSAL_TTL_SECONDS` accepts a
+positive integer duration in seconds; unset or blank selects `3600`. Invalid values, unsafe
+millisecond arithmetic and deadlines outside JavaScript's supported date range fail startup.
+Programmatic runtimes can set `MerchantConfig.mcp.proposalTtlSeconds` with the same default and
+validation. The duration applies to new proposals and fresh MCP domain previews, including catalog,
+enterprise contracts, catalog migrations and Stripe/Paddle commercial actions. Direct API and
+ordinary console previews retain their existing lifetimes. Saved proposals and reused previews
+keep their original expiry, even after a configuration change and restart; an earlier domain
+preview deadline still caps its proposal. Authentication and approval-time state checks remain
+independent of this review window.
+
 Remote MCP proposal admission has per-organization limits. Configure
 `QUOTUM_MCP_MAX_PENDING_PROPOSALS` (100 unexpired pending/applying proposals and in-flight preparations),
 `QUOTUM_MCP_MAX_DAILY_PROPOSALS` (1000 admitted preparation attempts per UTC day),

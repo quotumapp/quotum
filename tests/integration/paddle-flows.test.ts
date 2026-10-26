@@ -11,6 +11,7 @@ import type {
 import { PaddleClient } from "../../src/providers/paddle/client";
 import type { PaddleSubscription } from "../../src/providers/paddle/schemas";
 import { PaddleBillingService } from "../../src/providers/paddle/service";
+import type { PreviewOptions } from "../../src/shared/preview-lifetime";
 import { testRequest, withOpenApiAssertions } from "../helpers/openapi";
 import { config, id, price, subscription, transaction } from "../providers/paddle/fixtures";
 import {
@@ -349,11 +350,42 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			},
 		};
 		return {
-			preview: () => previewCommercial({ ...routing, provider: "paddle", intent }),
+			preview: (previewOptions?: PreviewOptions) =>
+				previewCommercial({ ...routing, provider: "paddle", intent, previewOptions }),
 			execute: (previewToken: string, idempotencyKey = "purchase") =>
 				executeCommercial({ ...routing, reader: context.repository, previewToken, idempotencyKey }),
 		};
 	}
+
+	it("honors the server preview lifetime while preserving the direct preview default", async () => {
+		const plan = await fixedPlan();
+		const h = harness(plan.price);
+		const flow = commercial(h, {
+			kind: "checkout_plan",
+			planKey: plan.planKey,
+			quantities: { base: 1 },
+			email: "payer@example.com",
+		});
+		const direct = await flow.preview();
+		expect(Date.parse(direct.expiresAt) - Date.now()).toBeGreaterThan(14 * 60_000);
+		expect(Date.parse(direct.expiresAt) - Date.now()).toBeLessThanOrEqual(15 * 60_000);
+		const extended = await flow.preview({ ttlSeconds: 7200 });
+		const [stored] =
+			await context.sql`SELECT expires_at, preview FROM commercial_action_previews WHERE project_id=${project.projectInstanceId} AND preview_token=${extended.previewToken}::uuid`;
+		expect(new Date(stored.expires_at).toISOString()).toBe(extended.expiresAt);
+		expect(stored.preview.expiresAt).toBe(extended.expiresAt);
+		expect(Date.parse(extended.expiresAt) - Date.now()).toBeGreaterThan(119 * 60_000);
+		const clock = spyOn(Date, "now").mockReturnValue(Date.now() + 31 * 60_000);
+		try {
+			await expect(flow.execute(direct.previewToken)).rejects.toMatchObject({
+				code: "COMMERCIAL_PREVIEW_EXPIRED",
+			});
+			expect(await flow.execute(extended.previewToken)).toMatchObject({ kind: "checkout" });
+			expect(h.writes).toBe(1);
+		} finally {
+			clock.mockRestore();
+		}
+	});
 
 	// capability: checkout.plan
 	it("previews a fixed plan without provider writes and pins paid fulfillment across publication", async () => {

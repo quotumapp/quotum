@@ -1289,7 +1289,7 @@ describe("MCP browser-approved writes", () => {
 			...input,
 			requestKey: "expiry",
 		});
-		f.advance(900001);
+		f.advance(3_600_001);
 		expect((await f.mcpChanges.get(grant.id, expired.id)).status).toBe("expired");
 		const receipts = await f.sql`SELECT * FROM billing_administration_receipts`;
 		expect(receipts).toHaveLength(0);

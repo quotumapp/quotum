@@ -174,10 +174,12 @@ current provider capabilities or reset-fit rules. A successful publish retry ret
 result with `duplicate: true`, even if provider declarations have since narrowed. A successful preview also reports `providerCompatibility`;
 see [Catalog preview compatibility](provider-capabilities.md#catalog-preview-compatibility).
 
-A preview lasts 30 minutes. Metering maintenance marks it expired after that and deletes it a week
+A direct API or ordinary console preview lasts 30 minutes. Fresh previews prepared for an MCP
+proposal use `QUOTUM_MCP_PROPOSAL_TTL_SECONDS` (one hour by default; see [MCP proposals](mcp.md)).
+Metering maintenance marks a preview expired at its stored deadline and deletes it a week
 later; the previews that were published are kept, since they hold each revision's intent.
 
-Publish answers `409 CATALOG_PREVIEW_EXPIRED` for a preview older than its 30 minutes,
+Publish answers `409 CATALOG_PREVIEW_EXPIRED` for a preview past its stored deadline,
 `409 CATALOG_PREVIEW_NOT_FOUND` for a token the project never issued or one already deleted, and
 `409 CATALOG_PREVIEW_STALE` when another revision was published since the preview; preview again
 in each case.

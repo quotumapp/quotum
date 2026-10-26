@@ -71,6 +71,7 @@ import type {
 } from "../catalog/types";
 import type { ProjectInstanceContext } from "../projects/context";
 import type { StripeCatalog } from "../providers/stripe/types";
+import type { PreviewOptions } from "../shared/preview-lifetime";
 import { db as defaultDb } from "./client";
 import { administrationTarget } from "./repository/administration-target";
 import { AppleBillingRepository } from "./repository/apple";
@@ -725,8 +726,9 @@ export class BillingRepository {
 	async createCommercialActionPreview(
 		project: ProjectInstanceContext,
 		draft: CommercialPreviewDraft,
+		options?: PreviewOptions,
 	): Promise<CommercialActionPreview> {
-		return await this.commercialActions.createCommercialActionPreview(project, draft);
+		return await this.commercialActions.createCommercialActionPreview(project, draft, options);
 	}
 
 	async listUsageEvents(
@@ -1178,8 +1180,9 @@ export class BillingRepository {
 	async previewCatalog(
 		project: ProjectInstanceContext,
 		input: CatalogPreviewInput,
+		options?: PreviewOptions,
 	): Promise<CatalogPreview> {
-		return await this.catalog.preview(project, input);
+		return await this.catalog.preview(project, input, options);
 	}
 
 	async getPublishedCatalog(project: ProjectInstanceContext): Promise<PublishedCatalog> {

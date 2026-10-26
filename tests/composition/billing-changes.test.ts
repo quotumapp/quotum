@@ -14,9 +14,23 @@ const context = { projectInstanceId: "00000000-0000-4000-8000-000000000001", act
  */
 function changes(state: { available: string }) {
 	const applied: MerchantBillingCommand[] = [];
+	const previews: MerchantBillingCommand[] = [];
 	let reads = 0;
 	const port = {
 		dispatch: async (command: MerchantBillingCommand) => {
+			if (command.operation === "commercial.preview") {
+				previews.push(command);
+				return {
+					status: 200,
+					body: {
+						success: true,
+						data: {
+							previewToken: "preview-token",
+							expiresAt: "2026-10-26T13:00:00.000Z",
+						},
+					},
+				};
+			}
 			if (command.operation === "account.summary") {
 				reads += 1;
 				return {
@@ -46,12 +60,29 @@ function changes(state: { available: string }) {
 			work: (repository: BillingRepository) => Promise<unknown>,
 		) => work(repository),
 	} as unknown as BillingRepository;
-	return { port: createBillingChangesPort(repository, () => port), applied };
+	return { port: createBillingChangesPort(repository, () => port), applied, previews };
 }
 
 const reset = { action: "topups.reset", parameters: ["customer-a", "7"], body: {} };
 
 describe("billing change fingerprint", () => {
+	it("carries the server lifetime only on preview commands, outside the reviewed input", async () => {
+		const { port, previews, applied } = changes({ available: "100" });
+		const input = {
+			action: "commercial.execute",
+			parameters: ["customer-a"],
+			body: { intent: { kind: "checkout_product", productKey: "credits" } },
+		};
+		const preview = await port.prepare(context, input, { ttlSeconds: 7200 });
+		expect(previews).toHaveLength(1);
+		expect(previews[0]?.previewOptions).toEqual({ ttlSeconds: 7200 });
+		expect(previews[0]?.body).toEqual(input.body);
+		expect(preview.input).toEqual(input);
+		expect(preview.expiresAt).toBe("2026-10-26T13:00:00.000Z");
+		await port.apply(context, preview, "mcp:commercial");
+		expect(applied).toHaveLength(1);
+		expect(applied[0]).not.toHaveProperty("previewOptions");
+	});
 	it("applies a change whose reviewed read only differs in when it was generated", async () => {
 		const { port, applied } = changes({ available: "100" });
 		const preview = await port.prepare(context, reset);

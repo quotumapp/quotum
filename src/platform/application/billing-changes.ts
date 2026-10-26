@@ -1,3 +1,4 @@
+import type { PreviewOptions } from "../../shared/preview-lifetime";
 import type { MerchantCapability } from "../contracts";
 
 export interface BillingChangeInput {
@@ -29,7 +30,11 @@ export interface BillingChangesPort {
 		context: BillingChangeContext,
 		input: { resource: string; parameters: string[]; query: Record<string, string> },
 	): Promise<unknown>;
-	prepare(context: BillingChangeContext, input: BillingChangeInput): Promise<BillingChangePreview>;
+	prepare(
+		context: BillingChangeContext,
+		input: BillingChangeInput,
+		options?: PreviewOptions,
+	): Promise<BillingChangePreview>;
 	apply(
 		context: BillingChangeContext,
 		preview: BillingChangePreview,

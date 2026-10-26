@@ -37,6 +37,7 @@ import {
 import type { ProjectInstanceContext } from "../../projects/context";
 import { type Cadence, cadenceKey, calendarWindow } from "../../shared/cadence";
 import { toIso } from "../../shared/date";
+import { type PreviewOptions, previewExpiry } from "../../shared/preview-lifetime";
 import { RepositoryModule } from "./base";
 import { sameStoredCadenceSql } from "./cadence-sql";
 import { readDefaultPlanTarget } from "./default-plan-grants";
@@ -654,12 +655,13 @@ export class ControlsEnterpriseRepository
 	async previewEnterpriseContract(
 		project: ProjectInstanceContext,
 		input: EnterpriseContractInput,
+		options?: PreviewOptions,
 	): Promise<EnterpriseContractPreview> {
 		return await this.transaction(async (tx) => {
 			const context = await contractContext(tx, project, input);
 			const intentHash = sha256Hex(stableJson(context.intent));
 			const previewToken = sha256Hex(stableJson({ intentHash, nonce: crypto.randomUUID() }));
-			const previewExpiresAt = new Date(Date.now() + 30 * 60_000);
+			const previewExpiresAt = previewExpiry(options?.ttlSeconds ?? 1800);
 			const existing = await executeOne<{
 				id: string | number | bigint;
 				status: string;
@@ -895,12 +897,13 @@ export class ControlsEnterpriseRepository
 	async previewCatalogMigration(
 		project: ProjectInstanceContext,
 		input: CatalogMigrationInput,
+		options?: PreviewOptions,
 	): Promise<CatalogMigrationPreview> {
 		return await this.transaction(async (tx) => {
 			const context = await migrationContext(tx, project, input);
 			const previewToken = sha256Hex(stableJson({ ...context.intent, nonce: crypto.randomUUID() }));
 			const intentHash = sha256Hex(stableJson(context.intent));
-			const expiresAt = new Date(Date.now() + 30 * 60_000);
+			const expiresAt = previewExpiry(options?.ttlSeconds ?? 1800);
 			await executeOne(
 				tx,
 				drizzleSql`
