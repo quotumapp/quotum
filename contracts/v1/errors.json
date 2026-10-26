@@ -760,6 +760,12 @@
       ]
     },
     {
+      "code": "INVITATION_USED",
+      "sources": [
+        "src/platform/team.ts"
+      ]
+    },
+    {
       "code": "INVOICE_NOT_FOUND",
       "sources": [
         "src/db/repository/insights.ts"

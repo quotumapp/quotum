@@ -128,6 +128,7 @@ export const InvitationViewSchema = z.object({
 		"used",
 		"revoked",
 		"replaced",
+		"declined",
 		"wrong_email",
 		"already_member",
 		"inviter_authority_lost",

@@ -5238,6 +5238,32 @@
       }
     },
     "schemas": {
+      "acceptInvitationResponse200": {
+        "properties": {
+          "data": {
+            "properties": {
+              "organizationSlug": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "organizationSlug"
+            ],
+            "type": "object"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
       "AppleWebhookResult": {
         "properties": {
           "entitlements": {
@@ -6136,6 +6162,35 @@
         "properties": {
           "data": {
             "$ref": "#/components/schemas/ProvisioningOperationView"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
+      "declineInvitationResponse200": {
+        "properties": {
+          "data": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "declined"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "type": "object"
           },
           "success": {
             "enum": [
@@ -17956,6 +18011,7 @@
               "used",
               "revoked",
               "replaced",
+              "declined",
               "wrong_email",
               "already_member",
               "inviter_authority_lost",
@@ -17972,6 +18028,27 @@
           "role",
           "expiresAt",
           "status"
+        ],
+        "type": "object"
+      },
+      "listInvitationsResponse200": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/InvitationView"
+            },
+            "type": "array"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
         ],
         "type": "object"
       },
@@ -46202,6 +46279,282 @@
         "summary": "POST /api/platform/environments/readiness",
         "tags": [
           "connections"
+        ]
+      }
+    },
+    "/api/platform/invitations": {
+      "get": {
+        "operationId": "listInvitations",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HeaderXCSRFToken2"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderIdempotencyKey3"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumStepUpGrant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/listInvitationsResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "GET /api/platform/invitations",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/platform/invitations/{id}/accept": {
+      "post": {
+        "operationId": "acceptInvitation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathId"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXCSRFToken"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumStepUpGrant"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderOrigin"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/acceptInvitationResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/platform/invitations/{id}/accept",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/platform/invitations/{id}/decline": {
+      "post": {
+        "operationId": "declineInvitation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathId"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXCSRFToken"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumStepUpGrant"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderOrigin"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": {},
+                "properties": {},
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/declineInvitationResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/platform/invitations/{id}/decline",
+        "tags": [
+          "platform"
         ]
       }
     },

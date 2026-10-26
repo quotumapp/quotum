@@ -134,6 +134,29 @@ Lowering the setting preserves existing organizations. Operator `platform:bootst
 `quotum organizations add-owner` remain exempt. The `organization.created` audit event records
 each creation.
 
+### Answer an invitation from the console
+
+A signed-in person lists what is waiting for them with `GET /api/platform/invitations`: the open,
+unexpired invitations addressed to the verified email of their session, newest ten first, each an
+`InvitationView`. The route takes no address or token, so it cannot show anyone else's
+invitations. `status` is `valid` when the invitation can be accepted now, and `seat_limit` or
+`inviter_authority_lost` when it cannot yet; an invitation to an organization they already belong
+to is left out. They answer one by its id, with an `Idempotency-Key` header and no body:
+
+- `POST /api/platform/invitations/{id}/accept` joins with the invited role, exactly as the emailed
+  link does, and answers `{ organizationSlug }`. An invitation that cannot be accepted answers
+  `409` with `INVITATION_` and its status in capitals, such as `INVITATION_SEAT_LIMIT`,
+  `INVITATION_EXPIRED` or `INVITATION_DECLINED`.
+- `POST /api/platform/invitations/{id}/decline` sets the invitation to `declined` and answers
+  `{ status: "declined" }`. Declining one that is already declined, revoked or replaced changes
+  nothing and records nothing; declining one that was accepted answers `409 INVITATION_USED`.
+
+An id that is not addressed to the caller answers `404 INVITATION_NOT_FOUND`, the same as an id that
+does not exist. A declined invitation's emailed link shows `declined` and no longer joins. The
+organization sees `declined` on its team list, revoking it leaves it declined, and it may invite
+the address again; the invitation limits under [Rate limits](deployment.md#rate-limits) are the only
+bound on that. The `invitation.declined` audit event records each decline.
+
 ### Add a project
 
 An organization that finished onboarding adds a project with `POST /api/platform/projects`, which

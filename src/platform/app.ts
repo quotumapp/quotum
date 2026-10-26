@@ -727,6 +727,61 @@ export function createMerchantApp({
 	);
 
 	app.get(
+		"/api/platform/invitations",
+		async ({ request }) => ({
+			success: true as const,
+			data: await team.inbox(await current(request)),
+		}),
+		route("listInvitations", "/api/platform/invitations", {
+			200: responses.listInvitationsResponse200Schema,
+		}),
+	);
+
+	app.post(
+		"/api/platform/invitations/:id/accept",
+		async ({ params, request }) => ({
+			success: true as const,
+			data: await team.acceptById(
+				await current(request),
+				idempotencyKey(request),
+				z.uuid().parse(params.id),
+			),
+		}),
+		{
+			// This operation never reads a request body.
+			parse: "none",
+			...route(
+				"acceptInvitation",
+				"/api/platform/invitations/:id/accept",
+				{ 200: responses.acceptInvitationResponse200Schema },
+				{ params: z.object({ id: z.uuid() }), body: unreadBodySchema },
+			),
+		},
+	);
+
+	app.post(
+		"/api/platform/invitations/:id/decline",
+		async ({ params, request }) => ({
+			success: true as const,
+			data: await team.decline(
+				await current(request),
+				idempotencyKey(request),
+				z.uuid().parse(params.id),
+			),
+		}),
+		{
+			// This operation never reads a request body.
+			parse: "none",
+			...route(
+				"declineInvitation",
+				"/api/platform/invitations/:id/decline",
+				{ 200: responses.declineInvitationResponse200Schema },
+				{ params: z.object({ id: z.uuid() }), body: unreadBodySchema },
+			),
+		},
+	);
+
+	app.get(
 		"/api/platform/team",
 		async ({ request }) => ({
 			success: true as const,
