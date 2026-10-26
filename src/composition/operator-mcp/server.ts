@@ -78,6 +78,8 @@ export function createOperatorMcpServer(options: OperatorMcpOptions) {
 							true,
 						);
 					const stdout: string[] = [];
+					let stderr = "";
+					const stderrLimit = 16 * 1024;
 					const args = [
 						action,
 						target,
@@ -91,7 +93,15 @@ export function createOperatorMcpServer(options: OperatorMcpOptions) {
 							: []),
 					];
 					const code = await (options.run ?? runStripeSetupCommand)(args, options.env, {
-						output: { stdout: (value) => stdout.push(value), stderr: () => {} },
+						output: {
+							stdout: (value) => stdout.push(value),
+							stderr: (value) => {
+								stderr = `${stderr}${value.slice(0, stderrLimit - stderr.length)}\n`.slice(
+									0,
+									stderrLimit,
+								);
+							},
+						},
 					});
 					const text = stdout.join("\n");
 					if (Buffer.byteLength(text) > 256 * 1024)
@@ -101,6 +111,7 @@ export function createOperatorMcpServer(options: OperatorMcpOptions) {
 						);
 					return result(
 						text ||
+							stderr.trim() ||
 							"Setup command failed; check private files, configuration and permissions. Inspect status before retrying.",
 						code !== 0 && code !== 2,
 					);

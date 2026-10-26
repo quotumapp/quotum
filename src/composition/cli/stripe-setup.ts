@@ -62,11 +62,12 @@ export async function runStripeSetupCommand(
 			if (command !== "status" && !credentialsPath)
 				throw new CliUsageError("--credentials-file is required.");
 			const credentials = credentialsPath ? await readSetupCredentials(credentialsPath) : null;
+			const cipher = loadConnectionCipher(env);
 			const context = await openOperatorContext(env);
 			try {
 				const service = new StripeSetupService({
 					context,
-					cipher: loadConnectionCipher(env),
+					cipher,
 					actor,
 					memberOverrideReason: memberOverrideReason(options),
 					client: dependencies.client,
@@ -82,12 +83,12 @@ export async function runStripeSetupCommand(
 					result.status === "complete" || result.status === "prepared" ? 0 : 2,
 				);
 			} catch (error) {
-				if (error instanceof SetupFailure) throw new CliUsageError(error.reason);
+				if (error instanceof CliUsageError || error instanceof SetupFailure) throw error;
 				if (error instanceof MerchantError) {
 					const checks = setupDiagnostics(error);
 					throw new CliUsageError(checks ? `${error.code}: ${JSON.stringify(checks)}` : error.code);
 				}
-				throw new CliUsageError(
+				throw new Error(
 					"Stripe setup failed. Check the manifest, account access and permission recipe; inspect status before retrying.",
 				);
 			} finally {

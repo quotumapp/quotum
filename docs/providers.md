@@ -1014,9 +1014,12 @@ For ordinary connection validation, Events: Read is probed (a list of one event 
 environment's restricted key, the one connection that must verify a signed setup event before it is
 activated (see [headless connection setup](#headless-connection-setup)). A sandbox connection never
 waits for one, and a Stripe App install has its events delivered through the app, so neither needs
-the permission. The automated `quotum setup stripe` workflow additionally requires Events: Read
-and verifies signed delivery in sandbox. Without it the setup event cannot be retrieved and activation stalls on
-`STRIPE_EVENT_REQUIRED`. Payment Disputes: Read is not needed.
+the permission. Production validation stalls on `STRIPE_EVENT_REQUIRED` when the setup event cannot
+be retrieved.
+
+The automated `quotum setup stripe` workflow additionally requires Events: Read and verifies signed
+delivery in sandbox. `StripeSetupService.prepare` rejects runtime keys missing `event_read` with
+`STRIPE_CONNECTION_INVALID` and `missingPermissions`. Payment Disputes: Read is not needed.
 
 A successful read does not prove write access, so each of the seven write permissions
 (`customer_write`, `checkout_session_write`, `customer_portal_write`, `subscription_write`,

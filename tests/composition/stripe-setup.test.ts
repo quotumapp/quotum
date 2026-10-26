@@ -1,16 +1,19 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import { chmod, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
+import { CliUsageError } from "../../src/composition/cli/operator-context";
 import {
 	readSetupCredentials,
 	runStripeSetupCommand,
 } from "../../src/composition/cli/stripe-setup";
 import { createOperatorMcpServer } from "../../src/composition/operator-mcp/server";
 import { inspectBinding } from "../../src/composition/stripe-setup/provider";
-import { stripeSetupManifestSchema } from "../../src/composition/stripe-setup/schema";
+import { SetupFailure, stripeSetupManifestSchema } from "../../src/composition/stripe-setup/schema";
+import { StripeSetupService } from "../../src/composition/stripe-setup/service";
+import { MerchantError } from "../../src/platform/security";
 import { SetupStripeTransport, setupManifest } from "../helpers/stripe-setup";
 
 async function scratch(work: (directory: string) => Promise<void>) {
@@ -164,5 +167,114 @@ describe("Stripe setup inputs and local tools", () => {
 		const output = { stdout: () => {}, stderr: (value: string) => errors.push(value) };
 		expect(await runStripeSetupCommand(["apply", "not-a-uuid"], {}, { output })).toBe(64);
 		expect(errors.join(" ")).toContain("setup UUID");
+	});
+	it("reports missing encryption configuration as an operational failure", async () => {
+		const errors: string[] = [];
+		const code = await runStripeSetupCommand(
+			["status", "00000000-0000-4000-8000-000000000001"],
+			{},
+			{ output: { stdout: () => {}, stderr: (value) => errors.push(value) } },
+		);
+		expect(code).toBe(1);
+		expect(errors.join(" ")).toContain("QUOTUM_SECRETS_KEY_ID");
+		expect(errors.join(" ")).not.toContain("for usage");
+	});
+	it.each([
+		{ error: new CliUsageError("Invalid input."), code: 64, message: "Invalid input." },
+		{ error: new SetupFailure("setup_busy"), code: 1, message: "setup_busy" },
+		{
+			error: new MerchantError("CONNECTION_CHANGED", "Private provider message", 409),
+			code: 64,
+			message: "CONNECTION_CHANGED",
+		},
+		{
+			error: new Error("Private provider message"),
+			code: 1,
+			message: "Stripe setup failed. Check the manifest",
+		},
+	])("returns $code with safe diagnostics: $message", async ({ error, code, message }) => {
+		const status = spyOn(StripeSetupService.prototype, "status").mockRejectedValue(error);
+		const out: string[] = [],
+			err: string[] = [];
+		try {
+			expect(
+				await runStripeSetupCommand(
+					["status", "00000000-0000-4000-8000-000000000001"],
+					{
+						POSTGRES_URI: "postgres://unused:unused@127.0.0.1:1/unused",
+						QUOTUM_AUTH_SECRET: "test-auth-secret-for-stripe-setup-cli",
+						QUOTUM_SECRETS_KEY_ID: "test",
+						QUOTUM_SECRETS_KEY_BASE64: Buffer.alloc(32, 1).toString("base64"),
+					},
+					{ output: { stdout: (value) => out.push(value), stderr: (value) => err.push(value) } },
+				),
+			).toBe(code);
+			expect(status).toHaveBeenCalledTimes(1);
+			expect(out).toEqual([]);
+			expect(err.join(" ")).toContain(message);
+			expect(err.join(" ")).not.toContain("Private provider message");
+			expect(err.join(" ").includes("for usage")).toBe(code === 64);
+		} finally {
+			status.mockRestore();
+		}
+	});
+	it.each([
+		{
+			code: 1,
+			out: [],
+			err: ["setup_busy", "Inspect status."],
+			text: "setup_busy\nInspect status.",
+		},
+		{ code: 64, out: [], err: ["Invalid input."], text: "Invalid input." },
+		{ code: 0, out: ["prepared"], err: ["notice"], text: "prepared" },
+		{ code: 2, out: ["pending", "receipt"], err: ["notice"], text: "pending\nreceipt" },
+		{ code: 1, out: ["receipt"], err: ["failure"], text: "receipt" },
+		{
+			code: 1,
+			out: [],
+			err: [" ", "\n"],
+			text: "Setup command failed; check private files, configuration and permissions. Inspect status before retrying.",
+		},
+		{
+			code: 1,
+			out: [],
+			err: [],
+			text: "Setup command failed; check private files, configuration and permissions. Inspect status before retrying.",
+		},
+		{
+			code: 1,
+			out: [],
+			err: ["界".repeat(20 * 1024), "must not fit"],
+			text: "界".repeat(16 * 1024),
+		},
+	])("preserves MCP output and bounds diagnostics (case %#)", async ({ code, out, err, text }) => {
+		await scratch(async (directory) => {
+			const server = createOperatorMcpServer({
+				directory,
+				actor: "host-operator",
+				env: {},
+				run: async (_args, _env, dependencies) => {
+					for (const value of out) dependencies?.output?.stdout(value);
+					for (const value of err) dependencies?.output?.stderr(value);
+					return code;
+				},
+			});
+			const client = new Client({ name: "setup-tests", version: "1" });
+			const [a, b] = InMemoryTransport.createLinkedPair();
+			await server.connect(a);
+			await client.connect(b);
+			try {
+				const result = await client.callTool({
+					name: "get_stripe_setup",
+					arguments: { setupId: "00000000-0000-4000-8000-000000000001" },
+				});
+				expect(result.isError).toBe(code !== 0 && code !== 2);
+				expect(result.content).toEqual([{ type: "text", text }]);
+				expect(Buffer.byteLength(text)).toBeLessThanOrEqual(256 * 1024);
+			} finally {
+				await client.close();
+				await server.close();
+			}
+		});
 	});
 });
