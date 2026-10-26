@@ -1,3 +1,5 @@
+import { constants } from "node:fs";
+import { access, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import { renderInitEnv } from "./init";
@@ -380,6 +382,22 @@ export const quotumCommands: readonly QuotumCommand[] = [
 		accepts: (args) => args.length === 1,
 	},
 	{
+		path: ["mcp", "operator"],
+		file: "composition/operator-mcp/index.ts",
+		usage: "mcp operator --allow-writes --actor <name> --directory <private-directory>",
+		summary: "Run the local operator MCP for self-hosted setup over stdio",
+		environment:
+			"POSTGRES_URI, QUOTUM_SECRETS_KEY_ID, QUOTUM_SECRETS_KEY_BASE64, QUOTUM_AUTH_SECRET; same optional settings as the operator commands",
+		details: [
+			"Requires explicit --allow-writes and --actor. The setup directory must exist with mode 700.",
+			"Tools apply migrations, bootstrap topology, configure connections, issue credentials and",
+			"publish catalogs directly through the operator CLI. Secrets remain in local files.",
+			"This is operator authority over the configured database, separate from the read-only MCP",
+			"and remote browser-approved proposals. Disconnect after setup. See docs/mcp.md.",
+		],
+		accepts: (args) => args.length > 0,
+	},
+	{
 		path: ["mcp"],
 		file: "mcp/index.ts",
 		usage: "mcp",
@@ -451,11 +469,13 @@ export function quotumHelp(): string {
 	const width = Math.max(...rows.map(([usage]) => usage.length));
 	return [
 		"Usage: quotum <command> [arguments]",
+		"       quotum --env-file <path> <command> [arguments]",
 		"",
 		"Commands:",
 		...rows.map(([usage, summary]) => `  ${usage.padEnd(width)}  ${summary}`),
 		"",
-		"Commands read their settings from the environment; see docs/deployment.md.",
+		"Commands read the environment or an explicitly named --env-file; automatic .env discovery is disabled.",
+		"See docs/deployment.md.",
 	].join("\n");
 }
 
@@ -472,6 +492,7 @@ export interface QuotumSignalSource {
 
 export interface QuotumCliDependencies {
 	readonly env: Readonly<Record<string, string | undefined>>;
+	readonly envFileReadable: (path: string) => Promise<boolean>;
 	readonly spawn: (cmd: string[]) => QuotumChildProcess;
 	readonly signals: QuotumSignalSource;
 	readonly fetch: (url: string, init: { signal: AbortSignal }) => Promise<Response>;
@@ -491,6 +512,14 @@ export async function runQuotumCli(
 ): Promise<number> {
 	const dependencies: QuotumCliDependencies = {
 		env: process.env,
+		envFileReadable: async (path) => {
+			try {
+				await access(path, constants.R_OK);
+				return (await stat(path)).isFile();
+			} catch {
+				return false;
+			}
+		},
 		spawn: (cmd) => Bun.spawn({ cmd, stdio: ["inherit", "inherit", "inherit"] }),
 		signals: process,
 		fetch: (url, init) => fetch(url, init),
@@ -499,6 +528,32 @@ export async function runQuotumCli(
 		now: () => new Date(),
 		...overrides,
 	};
+	// The operator must name the file explicitly. Keep ambient .env discovery disabled in both
+	// this process and its children; Bun loads only this file before dispatching the command.
+	if (argv[0] === "--env-file") {
+		const file = argv[1];
+		if (!file?.trim() || file.startsWith("--") || argv.length < 3) {
+			dependencies.stderr("Usage: quotum --env-file <path> <command> [arguments]");
+			return 64;
+		}
+		// Bun silently ignores a missing explicit file. Refuse that here so an operator cannot
+		// accidentally fall back to another database's inherited settings after a typo.
+		if (!(await dependencies.envFileReadable(file))) {
+			dependencies.stderr("The selected --env-file must be a readable regular file.");
+			return 64;
+		}
+		return runChild(
+			[
+				process.execPath,
+				"--no-env-file",
+				"--env-file",
+				file,
+				join(sourceRoot, "cli.ts"),
+				...argv.slice(2),
+			],
+			dependencies,
+		);
+	}
 	const resolution = resolveQuotumCommand(argv);
 	switch (resolution.kind) {
 		case "help": {

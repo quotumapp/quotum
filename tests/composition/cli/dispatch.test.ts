@@ -23,6 +23,7 @@ function recorder(overrides: Partial<QuotumCliDependencies> = {}) {
 		spawned,
 		dependencies: {
 			env: {},
+			envFileReadable: async () => true,
 			stdout: (line: string) => stdout.push(line),
 			stderr: (line: string) => stderr.push(line),
 			spawn: (cmd: string[]) => {
@@ -177,6 +178,11 @@ describe("quotum command resolution", () => {
 			["deliveries", "replay", "acme", "endpoint", "--from", "2026-10-01T00:00:00Z"],
 		],
 		[["mcp"], "mcp/index.ts", []],
+		[
+			["mcp", "operator", "--allow-writes", "--actor", "ops", "--directory", "/setup"],
+			"composition/operator-mcp/index.ts",
+			["--allow-writes", "--actor", "ops", "--directory", "/setup"],
+		],
 	] as const)("resolves %j to %s", (argv, file, args) => {
 		const resolution = resolveQuotumCommand(argv);
 		expect(resolution).toMatchObject({ kind: "command", command: { file }, args });
@@ -258,6 +264,31 @@ describe("quotum command resolution", () => {
 });
 
 describe("quotum dispatch", () => {
+	it("loads only an explicitly selected environment file before dispatch", async () => {
+		const run = recorder();
+		expect(
+			await runQuotumCli(
+				["--env-file", "/setup/operator.env", "migrate", "status"],
+				run.dependencies,
+			),
+		).toBe(0);
+		expect(run.spawned).toEqual([
+			[
+				process.execPath,
+				"--no-env-file",
+				"--env-file",
+				"/setup/operator.env",
+				join(sourceRoot, "cli.ts"),
+				"migrate",
+				"status",
+			],
+		]);
+		for (const args of [["--env-file"], ["--env-file", "--help"], ["--env-file", "file.env"]]) {
+			const invalid = recorder();
+			expect(await runQuotumCli(args, invalid.dependencies)).toBe(64);
+			expect(invalid.spawned).toEqual([]);
+		}
+	});
 	it("prints help on stdout for help and on stderr with exit 64 for unknown commands", async () => {
 		const help = recorder();
 		expect(await runQuotumCli(["help"], help.dependencies)).toBe(0);
