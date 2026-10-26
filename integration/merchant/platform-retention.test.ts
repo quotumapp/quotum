@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import type { QuotumScheduledJob } from "../../src/composition/runtime-lifecycle";
+import { closePool } from "../../src/db/client";
 import type { BillingEnv } from "../../src/env";
 import type {
 	PlatformQuery,
@@ -487,6 +488,8 @@ describe("runtime wiring", () => {
 		merchant: "merchant" | "headless",
 		overrides: Partial<BillingEnv> = {},
 	): Promise<QuotumScheduledJob[]> {
+		// These cases pick their own pool size, so start from no process-wide default connection.
+		await closePool();
 		const previous = Object.fromEntries(Object.keys(secrets).map((key) => [key, process.env[key]]));
 		Object.assign(process.env, secrets);
 		const jobs: QuotumScheduledJob[] = [];
