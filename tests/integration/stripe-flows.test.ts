@@ -203,6 +203,8 @@ localDescribe("Stripe route flows integration", () => {
 		);
 		expect(previewResponse.status).toBe(200);
 		const preview = (await previewResponse.json()).data;
+		expect(Date.parse(preview.expiresAt) - Date.now()).toBeGreaterThan(14 * 60_000);
+		expect(Date.parse(preview.expiresAt) - Date.now()).toBeLessThanOrEqual(15 * 60_000);
 		expect(preview).toMatchObject({
 			action: "checkout_product",
 			billingAccountId: "integration_user",

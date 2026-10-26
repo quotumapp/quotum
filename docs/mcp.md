@@ -213,7 +213,15 @@ the agent that wrote the request has it, and a catalog's `before` already holds 
 catalog, which would push a result toward the size cap. A console built against a contract before
 `body` ignores the field and shows `before` and `after` only.
 
-Proposals expire after at most 15 minutes, capped by domain preview expiry. They are immutable:
+Proposals expire after at most one hour by default. Set `QUOTUM_MCP_PROPOSAL_TTL_SECONDS` to a
+positive whole number of seconds to change the review window. The configured duration also applies
+to fresh catalog, enterprise-contract, catalog-migration and commercial previews prepared for MCP
+proposals; direct API and ordinary console previews keep their existing defaults. A reused preview
+keeps its original deadline, and the proposal is always capped by its preview's expiry. The review
+page shows the effective `expiresAt`. Restart the API to apply a configuration change to new
+preparations; saved proposals, idempotent retries and reused previews keep their stored deadlines.
+Merchant sessions and step-up grants retain their own expiry; sign in again if needed to approve.
+Proposals are immutable:
 use a new request key and `replacesChangeId` to replace a pending proposal. Reusing a key with changed
 input or another target conflicts. Replacement is allowed only within the original instance. The
 resolved instance is included in the proposal hash; approval and recovery always use that saved target.

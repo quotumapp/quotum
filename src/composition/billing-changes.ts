@@ -12,6 +12,7 @@ import type {
 	MerchantBillingPort,
 } from "../platform/application/billing-port";
 import { canonicalJson } from "../platform/step-up";
+import type { PreviewOptions } from "../shared/preview-lifetime";
 import { billingChangeActions } from "./billing-change-actions";
 
 const hash = (value: unknown) => createHash("sha256").update(canonicalJson(value)).digest("hex");
@@ -87,6 +88,7 @@ export function createBillingChangesPort(
 	const prepare = async (
 		context: BillingChangeContext,
 		requested: BillingChangeInput,
+		previewOptions?: PreviewOptions,
 	): Promise<BillingChangePreview> => {
 		const a = descriptor(requested);
 		const params = a.parameters.safeParse(requested.parameters),
@@ -111,7 +113,11 @@ export function createBillingChangesPort(
 			}
 			return { input, before, after: input.body, fingerprint: hash(before) };
 		}
-		const result = await port.dispatch({ ...command(context, input, null), operation: a.preview });
+		const result = await port.dispatch({
+			...command(context, input, null),
+			operation: a.preview,
+			previewOptions,
+		});
 		if (result.status >= 400)
 			throw new BillingError(
 				"The billing preview was rejected",

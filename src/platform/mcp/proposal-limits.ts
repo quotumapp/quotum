@@ -1,3 +1,12 @@
+import { previewExpiry } from "../../shared/preview-lifetime";
+
+export const DEFAULT_MCP_PROPOSAL_TTL_SECONDS = 3600;
+
+export function proposalTtlSeconds(value = DEFAULT_MCP_PROPOSAL_TTL_SECONDS): number {
+	previewExpiry(value, Date.now(), "QUOTUM_MCP_PROPOSAL_TTL_SECONDS");
+	return value;
+}
+
 export const MCP_PROPOSAL_LIMITS = {
 	maxPending: 100,
 	maxDaily: 1000,

@@ -2,6 +2,7 @@ import { base32 } from "@better-auth/utils/base32";
 import { createOTP } from "@better-auth/utils/otp";
 import { SQL } from "bun";
 import { projectProviderServiceResolver } from "../../src/app/provider-services";
+import type { ProjectProviderServiceResolver } from "../../src/app/types";
 import { createMerchantBillingPort } from "../../src/composition/merchant-billing";
 import { merchantAuthDatabase, merchantSql } from "../../src/composition/merchant-persistence";
 import { PostgresProjectInstanceContextResolver } from "../../src/composition/project-instance-persistence";
@@ -86,7 +87,8 @@ export function merchantFixture(
 	options: {
 		now?: () => Date;
 		google?: { clientId: string; clientSecret: string };
-		mcp?: { origin: string; writesEnabled?: boolean };
+		mcp?: MerchantConfig["mcp"];
+		providers?: ProjectProviderServiceResolver;
 		connectionValidation?: ConnectionValidationPort;
 		environmentBilling?: EnvironmentBillingPort;
 	} = {},
@@ -128,7 +130,7 @@ export function merchantFixture(
 			providerReconciliationStaleAfterMs: env.providerReconciliationStaleAfterMs,
 		}),
 		resolver,
-		providers: projectProviderServiceResolver(registry),
+		providers: options.providers ?? projectProviderServiceResolver(registry),
 		capabilityReads: createProviderCapabilityReads({ registry, facts: repository }),
 		webhooks: new WebhookEndpointService({
 			store: repository.webhookEndpoints,

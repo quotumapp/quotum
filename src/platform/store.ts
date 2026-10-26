@@ -9,6 +9,7 @@ import type {
 	OnboardingDraftView,
 } from "./contracts";
 import type { MerchantSql } from "./database";
+import { proposalTtlSeconds } from "./mcp/proposal-limits";
 import type { PlatformQueryExecutor } from "./persistence/query-executor";
 import {
 	ABSOLUTE_MS,
@@ -76,6 +77,7 @@ export class MerchantStore {
 		readonly config: MerchantConfig,
 		readonly now: () => Date = () => new Date(),
 	) {
+		if (config.mcp) proposalTtlSeconds(config.mcp.proposalTtlSeconds);
 		this.sql = sql;
 	}
 	hash(value: string): string {

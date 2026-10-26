@@ -1,4 +1,5 @@
 import { hasUnstorableText } from "../../shared/input-bounds";
+import { previewExpiry } from "../../shared/preview-lifetime";
 import type {
 	BillingChangeInput,
 	BillingChangePreview,
@@ -15,6 +16,7 @@ import {
 	jsonBytes,
 	MCP_RESULT_BYTES,
 	proposalLimits,
+	proposalTtlSeconds,
 } from "./proposal-limits";
 import { reserveProposal } from "./proposal-quota";
 
@@ -165,6 +167,7 @@ export class McpChanges {
 				);
 			return this.view(existing);
 		}
+		const ttlSeconds = proposalTtlSeconds(this.store.config.mcp?.proposalTtlSeconds);
 		const limits = proposalLimits(this.store.config.mcp?.proposalLimits);
 		const admission = await this.store.sql.begin(async (tx) => {
 			await this.lockProposal(tx, {
@@ -204,7 +207,7 @@ export class McpChanges {
 		if (admission.row) return this.view(admission.row);
 		const ticket = admission.ticket;
 		try {
-			const preview = await this.port.prepare(access.context, input);
+			const preview = await this.port.prepare(access.context, input, { ttlSeconds });
 			if (
 				jsonBytes({ input, preview, scope: access.scope }) + MCP_RESULT_BYTES >
 				limits.maxProposalBytes
@@ -216,7 +219,7 @@ export class McpChanges {
 				);
 			const expiry = new Date(
 				Math.min(
-					this.store.now().getTime() + 900_000,
+					previewExpiry(ttlSeconds, this.store.now().getTime()).getTime(),
 					preview.expiresAt ? new Date(preview.expiresAt).getTime() : Infinity,
 				),
 			);
