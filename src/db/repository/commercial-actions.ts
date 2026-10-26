@@ -10,6 +10,7 @@ import type {
 import { InvalidRequestError, PersistenceConflictError } from "../../billing/errors";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { parsePaddleCommercialContext } from "../../providers/paddle/plan";
+import { type PreviewOptions, previewExpiry } from "../../shared/preview-lifetime";
 import { RepositoryModule } from "./base";
 import { reservePaddleCheckoutInTx } from "./paddle-checkouts";
 import { executeOne, jsonb } from "./query";
@@ -39,11 +40,12 @@ export class CommercialActionRepository extends RepositoryModule {
 	async createCommercialActionPreview(
 		project: ProjectInstanceContext,
 		draft: CommercialPreviewDraft,
+		options?: PreviewOptions,
 	): Promise<CommercialActionPreview> {
 		return await this.transaction(async (tx) => {
 			const projectId = project.projectInstanceId;
 			const previewToken = crypto.randomUUID();
-			const expiresAt = new Date(Date.now() + 15 * 60_000);
+			const expiresAt = previewExpiry(options?.ttlSeconds ?? 900);
 			const preview: CommercialActionPreview = {
 				...draft.preview,
 				previewToken,

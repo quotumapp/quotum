@@ -26,6 +26,7 @@ import {
 import { type CadenceUnit, describeCadence, isCadenceUnit, sameCadence } from "../shared/cadence";
 import { toIso } from "../shared/date";
 import { maxInt4, minInt4 } from "../shared/input-bounds";
+import { type PreviewOptions, previewExpiry } from "../shared/preview-lifetime";
 import {
 	assertPlanCadences,
 	assertTopupCadences,
@@ -192,6 +193,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 	async preview(
 		project: ProjectInstanceContext,
 		input: CatalogPreviewInput,
+		options?: PreviewOptions,
 	): Promise<CatalogPreview> {
 		const parsed = checkNewCatalogIntent(input.catalog, this.capabilities);
 		const providerCompatibility = catalogProviderCompatibility(parsed.working, {
@@ -218,7 +220,7 @@ export class CatalogControlPlane extends RepositoryModule implements CatalogCont
 					nonce: crypto.randomUUID(),
 				}),
 			);
-			const expiresAt = new Date(Date.now() + 30 * 60_000);
+			const expiresAt = previewExpiry(options?.ttlSeconds ?? 1800);
 			const impact = await calculateImpact(tx, projectState.id, parsed, this.capabilities);
 			const scopeImpact = await calculateScopeImpact(tx, projectState.id, parsed.canonical);
 			await executeOne(

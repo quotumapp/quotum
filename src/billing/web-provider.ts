@@ -1,3 +1,4 @@
+import type { PreviewOptions } from "../shared/preview-lifetime";
 import type {
 	CheckoutSessionHandle,
 	CheckoutUiMode,
@@ -64,6 +65,7 @@ export interface WebBillingService {
 	previewCommercialAction?(input: {
 		billingAccountId: string;
 		intent: CommercialActionIntent;
+		previewOptions?: PreviewOptions;
 	}): Promise<CommercialActionPreview>;
 	executeCommercialAction?(input: {
 		billingAccountId: string;

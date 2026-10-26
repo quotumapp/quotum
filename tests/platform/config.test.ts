@@ -5,6 +5,7 @@ import {
 	merchantPlatformEnabled,
 } from "../../src/platform/config";
 import { MCP_PROPOSAL_LIMITS } from "../../src/platform/mcp/proposal-limits";
+import { MerchantStore } from "../../src/platform/store";
 
 const merchantEnv = {
 	MERCHANT_ORIGIN: "https://app.example.com",
@@ -53,6 +54,7 @@ describe("merchant deployment URLs", () => {
 		).toEqual({
 			origin: "https://api.example.com",
 			writesEnabled: false,
+			proposalTtlSeconds: 3600,
 			proposalLimits: MCP_PROPOSAL_LIMITS,
 		});
 		for (const origin of ["http://localhost:3000", "http://127.0.0.1:3000", "http://[::1]:3000"]) {
@@ -63,7 +65,12 @@ describe("merchant deployment URLs", () => {
 					QUOTUM_MCP_ENABLED: "true",
 					QUOTUM_MCP_PUBLIC_ORIGIN: origin,
 				}).mcp,
-			).toEqual({ origin, writesEnabled: false, proposalLimits: MCP_PROPOSAL_LIMITS });
+			).toEqual({
+				origin,
+				writesEnabled: false,
+				proposalTtlSeconds: 3600,
+				proposalLimits: MCP_PROPOSAL_LIMITS,
+			});
 		}
 		expect(() =>
 			loadMerchantConfig({
@@ -208,6 +215,52 @@ describe("owned organization limit", () => {
 			expect(() =>
 				loadMerchantConfig({ ...merchantEnv, QUOTUM_ORGANIZATION_LIMIT: value }),
 			).toThrow("QUOTUM_ORGANIZATION_LIMIT must be a positive integer");
+	});
+});
+
+describe("MCP proposal lifetime", () => {
+	const env = {
+		...merchantEnv,
+		QUOTUM_MCP_ENABLED: "true",
+		QUOTUM_MCP_PUBLIC_ORIGIN: "https://api.example.com",
+	};
+	it("defaults to one hour and accepts a custom duration in seconds", () => {
+		for (const value of [undefined, "", " \t "])
+			expect(
+				loadMerchantConfig({ ...env, QUOTUM_MCP_PROPOSAL_TTL_SECONDS: value }).mcp
+					?.proposalTtlSeconds,
+			).toBe(3600);
+		expect(
+			loadMerchantConfig({ ...env, QUOTUM_MCP_PROPOSAL_TTL_SECONDS: " 7200 " }).mcp
+				?.proposalTtlSeconds,
+		).toBe(7200);
+	});
+	it("rejects malformed durations and values that cannot produce a valid deadline", () => {
+		for (const value of [
+			"0",
+			"-1",
+			"1.5",
+			"1e3",
+			"NaN",
+			"Infinity",
+			"9007199254740992",
+			"9007199254741",
+			"8640000000000",
+		])
+			expect(() => loadMerchantConfig({ ...env, QUOTUM_MCP_PROPOSAL_TTL_SECONDS: value })).toThrow(
+				"QUOTUM_MCP_PROPOSAL_TTL_SECONDS",
+			);
+	});
+	it("validates programmatic merchant configuration before persistence is used", () => {
+		const config = loadMerchantConfig(merchantEnv);
+		for (const value of [0, -1, 1.5, Number.NaN, Infinity, 8_640_000_000_000])
+			expect(
+				() =>
+					new MerchantStore({} as never, {
+						...config,
+						mcp: { origin: env.QUOTUM_MCP_PUBLIC_ORIGIN, proposalTtlSeconds: value },
+					}),
+			).toThrow("QUOTUM_MCP_PROPOSAL_TTL_SECONDS");
 	});
 });
 

@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { MCP_PROPOSAL_LIMITS, type McpProposalLimits, proposalLimits } from "./mcp/proposal-limits";
+import {
+	DEFAULT_MCP_PROPOSAL_TTL_SECONDS,
+	MCP_PROPOSAL_LIMITS,
+	type McpProposalLimits,
+	proposalLimits,
+	proposalTtlSeconds,
+} from "./mcp/proposal-limits";
 
 const enabled = (value: string | undefined) => value === "true";
 export type QuotumEmailConfig =
@@ -48,6 +54,8 @@ export interface MerchantConfig {
 	mcp?: {
 		origin: string;
 		writesEnabled?: boolean;
+		/** Review lifetime for new proposals and their domain previews, in seconds. */
+		proposalTtlSeconds?: number;
 		proposalLimits?: Partial<McpProposalLimits>;
 	} | null;
 	/** Maximum logical projects per organization; environments share one project slot. */
@@ -173,6 +181,13 @@ export function loadMerchantConfig(
 		mcp = {
 			origin: value,
 			writesEnabled,
+			proposalTtlSeconds: proposalTtlSeconds(
+				positiveIntegerSetting(
+					env,
+					"QUOTUM_MCP_PROPOSAL_TTL_SECONDS",
+					DEFAULT_MCP_PROPOSAL_TTL_SECONDS,
+				),
+			),
 			proposalLimits: proposalLimits(
 				Object.fromEntries(
 					Object.entries({

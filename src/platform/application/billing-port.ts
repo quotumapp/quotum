@@ -1,3 +1,4 @@
+import type { PreviewOptions } from "../../shared/preview-lifetime";
 import { MerchantError } from "../security";
 import type { BillingChangesPort } from "./billing-changes";
 
@@ -141,6 +142,8 @@ export type MerchantBillingOperation = (
 	| typeof mcpBillingOperations
 )[number][2];
 export interface MerchantBillingCommand {
+	/** Server-owned options used only by preview operations for MCP proposals. */
+	previewOptions?: PreviewOptions;
 	operation: MerchantBillingOperation;
 	parameters: string[];
 	projectInstanceId: string;
