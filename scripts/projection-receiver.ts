@@ -12,19 +12,29 @@
  * - Tracks the per-account `sequence` and flags a snapshot older than one already applied as
  *   stale while still acknowledging it, which is what a real receiver should do.
  * - Optionally fails the first responses to exercise retry and backoff behavior.
+ * - Requires the receiver's bearer secret for `/__stats` and `/__reset`.
  *
  * Usage:
- *   bun scripts/projection-receiver.ts [--port=4101] [--secret=<projection secret>] [--fail=<n>] [--log=<file>]
+ *   bun scripts/projection-receiver.ts [--host=127.0.0.1] [--port=4101]
+ *     [--secret=<projection secret>] [--fail=<n>] [--log=<file>]
+ * Use `--host=0.0.0.0` to receive requests from other containers on a private network.
+ * Non-loopback binds require a custom `--secret`; the development default is loopback-only.
  */
 
 import { timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { BlockList, isIP } from "node:net";
 import { dirname } from "node:path";
 import { createCliBillingLogger } from "../src/observability/logger";
 
 const logger = createCliBillingLogger();
+const defaultProjectionSecret = "local-projection-secret";
+const loopbackAddresses = new BlockList();
+loopbackAddresses.addSubnet("127.0.0.0", 8, "ipv4");
+loopbackAddresses.addAddress("::1", "ipv6");
 
 interface Args {
+	host: string;
 	port: number;
 	secret: string;
 	fail: number;
@@ -32,20 +42,29 @@ interface Args {
 }
 
 function parseArgs(argv: readonly string[]): Args {
+	let host = "127.0.0.1";
 	let port = 4101;
-	let secret = "local-projection-secret";
+	let secret = defaultProjectionSecret;
 	let fail = 0;
 	let log = "";
 	for (const arg of argv) {
-		if (arg.startsWith("--port=")) port = Number.parseInt(arg.slice("--port=".length), 10);
+		if (arg.startsWith("--host=")) host = arg.slice("--host=".length).trim();
+		else if (arg.startsWith("--port=")) port = Number.parseInt(arg.slice("--port=".length), 10);
 		else if (arg.startsWith("--secret=")) secret = arg.slice("--secret=".length);
 		else if (arg.startsWith("--fail=")) fail = Number.parseInt(arg.slice("--fail=".length), 10);
 		else if (arg.startsWith("--log=")) log = arg.slice("--log=".length);
 	}
+	if (host.length === 0) throw new Error("invalid --host");
 	if (!Number.isFinite(port) || port <= 0) throw new Error("invalid --port");
-	if (secret.length < 1) throw new Error("invalid --secret");
+	if (secret.trim().length < 1) throw new Error("invalid --secret");
+	const family = isIP(host);
+	if (
+		secret.trim() === defaultProjectionSecret &&
+		(family === 0 || !loopbackAddresses.check(host, family === 4 ? "ipv4" : "ipv6"))
+	)
+		throw new Error("Non-loopback --host requires a non-default --secret");
 	if (!Number.isFinite(fail) || fail < 0) throw new Error("invalid --fail");
-	return { port, secret, fail, log };
+	return { host, port, secret, fail, log };
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -188,10 +207,19 @@ function summarize(value: unknown): {
 
 const server = Bun.serve({
 	port: args.port,
-	hostname: "127.0.0.1",
+	hostname: args.host,
 	async fetch(request): Promise<Response> {
 		const url = new URL(request.url);
 		const stamp = new Date().toISOString();
+		const auth = request.headers.get("authorization") ?? "";
+		const expectedAuth = `Bearer ${args.secret}`;
+		if (
+			request.method === "GET" &&
+			(url.pathname === "/__stats" || url.pathname === "/__reset") &&
+			!constantTimeEquals(auth, expectedAuth)
+		) {
+			return new Response("unauthorized", { status: 401 });
+		}
 		if (request.method === "GET" && url.pathname === "/__stats") {
 			return Response.json({
 				accepted: acceptedCount,
@@ -222,8 +250,6 @@ const server = Bun.serve({
 		const body = await request.text();
 		const ts = request.headers.get("x-billing-timestamp");
 		const sig = request.headers.get("x-billing-signature");
-		const auth = request.headers.get("authorization") ?? "";
-		const expectedAuth = `Bearer ${args.secret}`;
 		const headerMap: Record<string, string> = {};
 		for (const [k, v] of request.headers.entries()) headerMap[k] = v;
 		if (!constantTimeEquals(auth, expectedAuth)) {
@@ -315,7 +341,7 @@ const server = Bun.serve({
 });
 
 logger.info("Projection receiver listening", {
-	url: `http://127.0.0.1:${server.port}`,
+	url: server.url.toString(),
 	deliberateFailRemaining: args.fail,
 	logFile: args.log || null,
 });

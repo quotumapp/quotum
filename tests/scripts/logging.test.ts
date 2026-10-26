@@ -93,7 +93,10 @@ describe("script output contracts", () => {
 			let ready = false;
 			for (let attempt = 0; attempt < 50; attempt++) {
 				try {
-					const stats = await fetch(`${url}/__stats`, { signal: AbortSignal.timeout(100) });
+					const stats = await fetch(`${url}/__stats`, {
+						headers: { authorization: `Bearer ${secret}` },
+						signal: AbortSignal.timeout(100),
+					});
 					if (stats.ok && (await stats.json()).accepted === 0) {
 						ready = true;
 						break;
@@ -122,7 +125,11 @@ describe("script output contracts", () => {
 				.split("\n")
 				.map((line) => JSON.parse(line)),
 		).toMatchObject([
-			{ level: 30, msg: "Projection receiver listening" },
+			{
+				level: 30,
+				msg: "Projection receiver listening",
+				context: { url: `http://[ip]:${port}/` },
+			},
 			{ level: 40, msg: "Projection rejected", context: { status: 401 } },
 		]);
 	});
