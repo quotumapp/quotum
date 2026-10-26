@@ -6114,6 +6114,24 @@
         ],
         "type": "object"
       },
+      "createOrganizationResponse200": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MerchantMembershipView"
+          },
+          "success": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "data"
+        ],
+        "type": "object"
+      },
       "createProjectResponse200": {
         "properties": {
           "data": {
@@ -48222,6 +48240,115 @@
           }
         ],
         "summary": "POST /api/platform/onboarding/provision",
+        "tags": [
+          "platform"
+        ]
+      }
+    },
+    "/api/platform/organizations": {
+      "post": {
+        "operationId": "createOrganization",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HeaderXCSRFToken"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderIdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumStepUpGrant"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderOrigin"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "maxLength": 100,
+                    "minLength": 2,
+                    "type": "string"
+                  },
+                  "slug": {
+                    "pattern": "^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "slug"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/createOrganizationResponse200"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "POST /api/platform/organizations",
         "tags": [
           "platform"
         ]

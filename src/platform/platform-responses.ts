@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
 	InvitationViewSchema,
 	MerchantConfigurationViewSchema,
+	MerchantMembershipViewSchema,
 	MerchantSessionViewSchema,
 	OnboardingDraftViewSchema,
 	ProvisioningOperationViewSchema,
@@ -58,6 +59,11 @@ export const postApiPlatformOnboardingProjectResponse200Schema = z.object({
 export const postApiPlatformOnboardingProvisionResponse200Schema = z.object({
 	success: z.literal(true),
 	data: ProvisioningOperationViewSchema,
+});
+
+export const createOrganizationResponse200Schema = z.object({
+	success: z.literal(true),
+	data: MerchantMembershipViewSchema,
 });
 
 export const createProjectResponse200Schema = z.object({

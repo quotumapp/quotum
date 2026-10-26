@@ -512,6 +512,27 @@ export function createMerchantApp({
 	);
 
 	app.post(
+		"/api/platform/organizations",
+		async ({ body, request }) => ({
+			success: true as const,
+			data: await onboarding.createOrganization(
+				await current(request),
+				idempotencyKey(request),
+				createOrganizationBodySchema.parse(body),
+			),
+		}),
+		{
+			parse: [MERCHANT_JSON_PARSE],
+			...route(
+				"createOrganization",
+				"/api/platform/organizations",
+				{ 200: responses.createOrganizationResponse200Schema },
+				{ body: createOrganizationBodySchema },
+			),
+		},
+	);
+
+	app.post(
 		"/api/platform/projects",
 		async ({ body, request }) => ({
 			success: true as const,
@@ -1094,6 +1115,7 @@ const postApiPlatformOnboardingProjectBodySchema = z.strictObject({
 const postApiPlatformOnboardingProvisionBodySchema = z.strictObject({
 	revision: z.number().int().positive(),
 });
+const createOrganizationBodySchema = z.strictObject({ name, slug });
 const createProjectBodySchema = z.strictObject({
 	organizationSlug: slug,
 	name,

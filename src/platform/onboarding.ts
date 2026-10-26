@@ -1,4 +1,8 @@
-import type { OnboardingDraftView, ProvisioningOperationView } from "./contracts";
+import type {
+	MerchantMembershipView,
+	OnboardingDraftView,
+	ProvisioningOperationView,
+} from "./contracts";
 import { generateProjectApiCredential } from "./credentials/project-api-token";
 import type { MerchantSql } from "./database";
 import type { PlatformQueryExecutor } from "./persistence/query-executor";
@@ -6,7 +10,7 @@ import {
 	PlatformOnboardingDraftRepository,
 	PlatformOrganizationRepository,
 } from "./persistence/repositories";
-import { MerchantError, requireCapability } from "./security";
+import { capabilitiesFor, MerchantError, requireCapability } from "./security";
 import type { MerchantIdentity, MerchantStore } from "./store";
 
 interface OperationRow {
@@ -22,6 +26,9 @@ interface OperationRow {
 	slug: string;
 	organization_id: string;
 }
+/** Organization creations one person may make per hour; the owned-organization cap is the quota. */
+const ORGANIZATIONS_PER_HOUR = 10;
+
 export class MerchantOnboarding {
 	constructor(
 		private readonly store: MerchantStore,
@@ -35,6 +42,7 @@ export class MerchantOnboarding {
 		return this.store.idempotent(identity, key, ["onboarding.organization", input], async (tx) => {
 			const draft = await this.lockedDraft(tx, identity.principalId);
 			if (draft?.organization) return this.renameOrganization(tx, identity, draft, input);
+			await this.requireOrganizationCapacity(tx, identity.principalId);
 			await new PlatformOrganizationRepository(tx).lockSlug(input.slug);
 			// The lock orders this with renames; the conflict clause also covers a writer without it.
 			const [org] = await tx<
@@ -63,6 +71,70 @@ export class MerchantOnboarding {
 			if (!result) throw new Error("Draft insert failed");
 			return result;
 		});
+	}
+	/**
+	 * Creates an organization for a person who may already belong to others, outside the onboarding
+	 * draft: the draft is one per person and walks them through their first organization and
+	 * project, so it cannot describe another. The caller becomes its Owner, and adds projects
+	 * through `createProject`.
+	 */
+	async createOrganization(
+		identity: MerchantIdentity,
+		key: string,
+		input: { name: string; slug: string },
+	): Promise<MerchantMembershipView> {
+		return this.store.idempotent(identity, key, ["organization.create", input], async (tx) => {
+			await this.requireOrganizationCapacity(tx, identity.principalId);
+			await new PlatformOrganizationRepository(tx).lockSlug(input.slug);
+			// Charged after the refusal above and inside the transaction, so a replay or a refused
+			// request spends nothing; a slug that is taken rolls the charge back with it.
+			await this.store.rateLimit(
+				`organization:principal:${identity.principalId}`,
+				ORGANIZATIONS_PER_HOUR,
+				60 * 60_000,
+				tx,
+			);
+			const [org] = await tx<
+				{ id: string }[]
+			>`INSERT INTO platform_organizations(name,slug) VALUES(${input.name},${input.slug}) ON CONFLICT(slug) DO NOTHING RETURNING id`;
+			if (!org)
+				throw new MerchantError(
+					"SLUG_UNAVAILABLE",
+					"Choose a different organization address.",
+					409,
+				);
+			const [membership] = await tx<
+				{ id: string }[]
+			>`INSERT INTO platform_memberships(organization_id,principal_id,role) VALUES(${org.id},${identity.principalId},'Owner') RETURNING id`;
+			if (!membership) throw new Error("Membership insert failed");
+			await this.store.audit(tx, identity.principalId, org.id, "organization.created", org.id);
+			return {
+				id: membership.id,
+				organizationId: org.id,
+				organizationName: input.name,
+				organizationSlug: input.slug,
+				role: "Owner",
+				capabilities: capabilitiesFor("Owner"),
+			};
+		});
+	}
+	/**
+	 * Refuses a person who already owns `QUOTUM_ORGANIZATION_LIMIT` organizations. The per-person
+	 * lock makes the count exact across their sessions; both ways of creating an organization come
+	 * through here, so neither can step around the cap. Lowering the setting preserves what exists.
+	 */
+	private async requireOrganizationCapacity(
+		executor: PlatformQueryExecutor,
+		principalId: string,
+	): Promise<void> {
+		const organizations = new PlatformOrganizationRepository(executor);
+		await organizations.lockOwner(principalId);
+		if ((await organizations.countOwned(principalId)) >= this.store.config.organizationLimit)
+			throw new MerchantError(
+				"ORGANIZATION_LIMIT_REACHED",
+				"You own the maximum number of organizations.",
+				409,
+			);
 	}
 	/**
 	 * Reads the draft with its organization locked by the immutable id. A step that waited on a

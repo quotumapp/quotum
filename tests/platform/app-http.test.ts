@@ -9,6 +9,7 @@ import { type MerchantIdentity, MerchantStore } from "../../src/platform/store";
 
 const config: MerchantConfig = {
 	projectLimit: 5,
+	organizationLimit: 5,
 	signupEnabled: true,
 	origin: "https://merchant.example.test",
 	publicUrl: "https://quotum.example.test",

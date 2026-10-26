@@ -106,6 +106,34 @@ export class PlatformOrganizationRepository {
 		});
 	}
 
+	/**
+	 * Serializes organization creation by one person. Their sessions each hold a different session
+	 * row, so only a lock keyed on the person makes the owned-organization count exact.
+	 */
+	async lockOwner(principalId: string): Promise<void> {
+		await this.executor.query({
+			text: "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+			values: [`platform_organizations.owner:${principalId}`],
+		});
+	}
+
+	/** Active organizations the person currently owns, which is what the creation cap counts. */
+	async countOwned(principalId: string): Promise<number> {
+		const rows = await this.executor.query<{ owned: number }>({
+			text: `
+				SELECT count(*)::int AS owned
+				FROM platform_memberships m
+				JOIN platform_organizations o ON o.id = m.organization_id
+				WHERE m.principal_id = $1
+					AND m.role = 'Owner'
+					AND m.status = 'active'
+					AND o.status = 'active'
+			`,
+			values: [principalId],
+		});
+		return rows[0]?.owned ?? 0;
+	}
+
 	async slugBelongsToAnotherOrganization(slug: string, organizationId: string): Promise<boolean> {
 		const rows = await this.executor.query<{ id: string }>({
 			text: `

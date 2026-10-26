@@ -80,7 +80,7 @@ export function safeReturnTo(value: unknown): string {
 	const url = new URL(value, "https://app.quotum.dev");
 	if (
 		url.pathname.includes("%") ||
-		!/^\/(?:$|organizations$|team$|invite$|onboarding\/(?:organization|project|provisioning|ready)$|orgs\/[a-z0-9-]+\/projects\/[a-z0-9_-]+\/(?:sandbox|production)(?:\/[^?#]*)?$)/.test(
+		!/^\/(?:$|organizations?$|team$|invite$|onboarding\/(?:organization|project|provisioning|ready)$|orgs\/[a-z0-9-]+\/projects\/[a-z0-9_-]+\/(?:sandbox|production)(?:\/[^?#]*)?$)/.test(
 			url.pathname,
 		)
 	)

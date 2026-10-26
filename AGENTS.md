@@ -60,7 +60,8 @@ How the runtime fits together, and the repository checks that most often reject 
   list, `src/shared/operator-key-paths.ts`, which both the guards and the documented security read.
 - Onboarding creates active sandbox and production environments together; there is no production
   activation approval. `QUOTUM_PROJECT_LIMIT` (positive integer, default 5) limits self-service
-  logical projects per organization, counting all projects once. Readiness is informational;
+  logical projects per organization, counting all projects once, and `QUOTUM_ORGANIZATION_LIMIT`
+  (positive integer, default 5) limits the organizations one person owns. Readiness is informational;
   credentials are issued independently and production operations retain applicable step-up.
 - `/api/*` is the merchant platform (`src/platform/app.ts`): Better Auth sessions, organizations,
   onboarding, provider connections. Merchant billing screens do not call billing code directly;

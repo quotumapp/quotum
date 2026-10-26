@@ -52,6 +52,8 @@ export interface MerchantConfig {
 	} | null;
 	/** Maximum logical projects per organization; environments share one project slot. */
 	projectLimit: number;
+	/** Maximum organizations one person may own; every organization has its own seats and projects. */
+	organizationLimit: number;
 	signupEnabled: boolean;
 	origin: string;
 	publicUrl: string;
@@ -74,6 +76,19 @@ function rejectRetiredSetting(
 function rejectRetiredSettings(env: Record<string, string | undefined>): void {
 	for (const oldName of Object.keys(retiredSettings) as (keyof typeof retiredSettings)[])
 		rejectRetiredSetting(env, oldName);
+}
+
+/** Parses a positive integer setting: unset or blank selects the default, anything else must be exact. */
+function positiveIntegerSetting(
+	env: Record<string, string | undefined>,
+	name: string,
+	fallback: number,
+): number {
+	const raw = env[name]?.trim() || String(fallback);
+	const value = Number(raw);
+	if (!/^\d+$/.test(raw) || !Number.isSafeInteger(value) || value < 1)
+		throw new Error(`${name} must be a positive integer`);
+	return value;
 }
 
 /** Parses a strict opt-in flag: unset or blank selects the default, anything else must be exact. */
@@ -129,13 +144,8 @@ export function loadMerchantConfig(
 	env: Record<string, string | undefined> = process.env,
 ): MerchantConfig {
 	rejectRetiredSettings(env);
-	const projectLimit = Number(env.QUOTUM_PROJECT_LIMIT?.trim() || "5");
-	if (
-		!/^\d+$/.test(env.QUOTUM_PROJECT_LIMIT?.trim() || "5") ||
-		!Number.isSafeInteger(projectLimit) ||
-		projectLimit < 1
-	)
-		throw new Error("QUOTUM_PROJECT_LIMIT must be a positive integer");
+	const projectLimit = positiveIntegerSetting(env, "QUOTUM_PROJECT_LIMIT", 5);
+	const organizationLimit = positiveIntegerSetting(env, "QUOTUM_ORGANIZATION_LIMIT", 5);
 	const production = (env.BILLING_ENV ?? "production") === "production";
 	if (production) {
 		for (const name of ["MERCHANT_ORIGIN", "MERCHANT_PUBLIC_URL"] as const) {
@@ -205,6 +215,7 @@ export function loadMerchantConfig(
 	const email = loadEmailConfig(env, testMode);
 	return {
 		projectLimit,
+		organizationLimit,
 		mcp,
 		signupEnabled,
 		origin,
