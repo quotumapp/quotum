@@ -24,6 +24,7 @@ import {
 	type QuotumRuntimeScheduler,
 	type QuotumScheduledJob,
 } from "./composition/runtime-lifecycle";
+import { stripeSetupProbeObserver } from "./composition/stripe-setup/probe";
 import { lazyWebhookSecretSealer } from "./composition/webhook-secrets";
 import { createWorkerProviderSelectors } from "./composition/worker-providers";
 import { AdminBillingRepository } from "./db/admin-repository";
@@ -58,6 +59,7 @@ import {
 } from "./observability/sentry";
 import { BillingAdminOperations } from "./operations/admin";
 import { loadOptionalMerchantConfig, type MerchantConfig } from "./platform/config";
+import { StripeSetupStore } from "./platform/connections/stripe-setup-store";
 import { createProjectionFetch, ProjectionHttpClient } from "./projections/http-client";
 import type { ApiProjectProjectionFetch } from "./projections/http-types";
 import type { RuntimeConnectionResolver } from "./projects/connections";
@@ -176,6 +178,10 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 		billingRepository,
 	);
 	const providerRegistry = createProviderRegistry({
+		onVerifiedStripeWebhook: stripeSetupProbeObserver(
+			new StripeSetupStore(persistence, connectionRepository.cipher),
+			connectionRepository,
+		),
 		connections,
 		getRepository: () => billingRepository,
 		overrides: dependencies.projectProviderServices,

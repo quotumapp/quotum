@@ -6,6 +6,7 @@ import * as billingSchema from "../../db/schema";
 import { loadPostgresPreparedStatements } from "../../env";
 import { loadConnectionCipher } from "../../platform/connections/cipher";
 import { rotateConnectionSecrets } from "../../platform/connections/rotation";
+import { StripeSetupStore } from "../../platform/connections/stripe-setup-store";
 import { writeStderr, writeStdout } from "../../shared/cli-output";
 import { merchantSql } from "../merchant-persistence";
 import { createWebhookSecretSealer } from "../webhook-secrets";
@@ -29,6 +30,13 @@ async function rotateSecrets(): Promise<void> {
 	const sql = openRotationDatabase();
 	try {
 		let count = 0;
+		let setupCount = 0;
+		const setups = new StripeSetupStore(merchantSql(sql), cipher);
+		for (;;) {
+			const changed = await setups.rotate();
+			setupCount += changed;
+			if (!changed) break;
+		}
 		for (;;) {
 			const changed = await rotateConnectionSecrets(merchantSql(sql), cipher);
 			count += changed;
@@ -54,6 +62,9 @@ async function rotateSecrets(): Promise<void> {
 			await Bun.sleep(1000);
 		}
 		writeStdout(`Re-encrypted ${count} connection secrets with key ${cipher.activeKeyId}.`);
+		writeStdout(
+			`Re-encrypted ${setupCount} pending Stripe setup secrets with key ${cipher.activeKeyId}.`,
+		);
 		writeStdout(
 			`Re-encrypted the signing secrets of ${endpoints} webhook endpoints with key ${cipher.activeKeyId}.`,
 		);

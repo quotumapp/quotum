@@ -198,6 +198,31 @@ CREATE TABLE platform_connection_operations (
 	UNIQUE(project_instance_id,request_key)
 );
 
+-- Initial Stripe onboarding retains ownership receipts across process and provider retries.
+CREATE TABLE platform_stripe_setups (
+	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+	project_instance_id uuid NOT NULL UNIQUE REFERENCES projects(id) ON DELETE RESTRICT,
+	instance_key text NOT NULL,
+	actor text NOT NULL,
+	fingerprint text NOT NULL,
+	manifest jsonb NOT NULL CHECK (jsonb_typeof(manifest)='object' AND octet_length(manifest::text)<=262144),
+	state jsonb NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(state)='object'),
+	secret jsonb,
+	lease_id uuid,
+	lease_until timestamptz,
+	created_at timestamptz NOT NULL DEFAULT now(),
+	updated_at timestamptz NOT NULL DEFAULT now(),
+	CHECK ((lease_id IS NULL) = (lease_until IS NULL))
+);
+CREATE TABLE platform_stripe_setup_steps (
+	setup_id uuid NOT NULL REFERENCES platform_stripe_setups(id) ON DELETE RESTRICT,
+	key text NOT NULL,
+	request jsonb NOT NULL,
+	result jsonb,
+	created_at timestamptz NOT NULL DEFAULT now(),
+	PRIMARY KEY(setup_id,key)
+);
+
 CREATE TABLE platform_stripe_app_events (
 	event_id text PRIMARY KEY,
 	account_id text NOT NULL,

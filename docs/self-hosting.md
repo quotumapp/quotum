@@ -109,6 +109,11 @@ rotates keys.
 
 ## 4. Connect your backend and providers
 
+For a new Stripe connection, the [real Stripe setup workflow](stripe-quickstart.md) provisions or
+reuses products/prices and a dedicated webhook, verifies signed delivery and publishes the
+reviewed catalog. It runs against this already-started deployment. The lower-level commands below
+remain available for projections, other providers and maintenance.
+
 Commands read their files inside the container. Copy in the non-secret settings, and pipe secrets
 through stdin so they never touch the container's disk. `--actor` names you in the audit log.
 

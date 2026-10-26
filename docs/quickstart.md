@@ -6,6 +6,11 @@ This guide runs the real service against a local Postgres, publishes a catalog, 
 purchase through the guarded fake Stripe boundary, meters usage, and then publishes a set of plan
 examples. No provider account is needed. It takes about five minutes. The fixtures it uses are in [`examples/quickstart/`](../examples/quickstart/).
 
+This is a synthetic billing demo. It does not configure a Stripe account or test a real payment.
+For automated product/price, connection and webhook setup on a running deployment, follow
+[Connect real Stripe](stripe-quickstart.md). That workflow verifies signed delivery in sandbox or
+production and reports payment testing separately.
+
 Prerequisites: [Bun](https://bun.sh) 1.4.x, Docker, `curl`, `jq`, and `openssl`. Quotum needs
 PostgreSQL 18 or newer; the first step starts one in Docker.
 

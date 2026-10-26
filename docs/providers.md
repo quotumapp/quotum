@@ -703,6 +703,12 @@ checkout starts a new one.
 
 ## Headless connection setup
 
+For initial Stripe onboarding, [Connect real Stripe](stripe-quickstart.md) automates provisioning
+or reuse of products, prices and a dedicated endpoint, connection draft/validation/commit, two
+signed delivery checks and catalog publication. The `quotum setup stripe` commands resume a
+persisted setup ID. The lower-level commands below remain available for other providers and
+connection maintenance.
+
 Without the merchant application, operators configure connections with `quotum connections` (see
 the [operator CLI](deployment.md#operator-cli)). A change goes through the same draft, validation
 and commit steps as the **Integrations** screens, and audit events name the operator given by
@@ -1004,11 +1010,12 @@ with `check`, `reason`, and, where relevant, `missingPermission` and `httpStatus
 `missingPermissions` deduplicates detected missing permissions. This recipe covers the manual
 billing adapter; the Stripe App manifest has additional installation/event permissions.
 
-Events: Read is probed (a list of one event through Stripe's events API) only for a production
+For ordinary connection validation, Events: Read is probed (a list of one event through Stripe's events API) only for a production
 environment's restricted key, the one connection that must verify a signed setup event before it is
 activated (see [headless connection setup](#headless-connection-setup)). A sandbox connection never
 waits for one, and a Stripe App install has its events delivered through the app, so neither needs
-the permission. Without it the setup event cannot be retrieved and activation stalls on
+the permission. The automated `quotum setup stripe` workflow additionally requires Events: Read
+and verifies signed delivery in sandbox. Without it the setup event cannot be retrieved and activation stalls on
 `STRIPE_EVENT_REQUIRED`. Payment Disputes: Read is not needed.
 
 A successful read does not prove write access, so each of the seven write permissions

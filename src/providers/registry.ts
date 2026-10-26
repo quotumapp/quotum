@@ -55,6 +55,7 @@ export const defaultProviderRegistryEntries: readonly AnyProviderRegistryEntry[]
 ];
 
 export interface ProviderRegistryDependencies {
+	onVerifiedStripeWebhook?: (project: ProjectInstanceContext, event: unknown) => Promise<void>;
 	connections?: RuntimeConnectionResolver;
 	getRepository: () => BillingRepository;
 	/** Per project instance key; an own key, even null, replaces the connection build. */
@@ -144,6 +145,7 @@ function declaresImplementation(
 }
 
 export function createProviderRegistry({
+	onVerifiedStripeWebhook,
 	connections = noRuntimeConnections,
 	getRepository,
 	overrides,
@@ -214,6 +216,7 @@ export function createProviderRegistry({
 		return {
 			source: "connection",
 			service: entry.build({
+				onVerifiedStripeWebhook,
 				project,
 				config,
 				repository: getRepository().forProject(project),

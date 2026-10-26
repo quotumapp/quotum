@@ -63,6 +63,29 @@ function acceptsCatalog(args: readonly string[]): boolean {
 
 export const quotumCommands: readonly QuotumCommand[] = [
 	{
+		path: ["mcp", "operator"],
+		file: "composition/operator-mcp/index.ts",
+		usage: "mcp operator --allow-writes --actor <name> --directory <private-directory>",
+		summary: "Run initial Stripe setup tools with local operator authority over stdio",
+		environment: "POSTGRES_URI, QUOTUM_AUTH_SECRET and QUOTUM_SECRETS_KEY_*",
+		accepts: (args) => args.length > 0,
+	},
+	{
+		path: ["setup", "stripe"],
+		file: "composition/cli/stripe-setup.ts",
+		usage:
+			"setup stripe prepare|apply|status|verify <manifest.json|setup-id> [--credentials-file <file>] --actor <name>",
+		summary: "Prepare and resume verified Stripe onboarding without taking a payment",
+		environment:
+			"POSTGRES_URI, QUOTUM_AUTH_SECRET and QUOTUM_SECRETS_KEY_*; see docs/stripe-quickstart.md",
+		details: [
+			"prepare saves an immutable plan without Stripe writes; apply resumes its ID.",
+			"status is read-only; verify sends a fresh nonfinancial delivery probe.",
+			"Credentials stay in private JSON files. Existing live connection replacement is refused.",
+		],
+		accepts: (args) => ["prepare", "apply", "status", "verify"].includes(args[0] ?? ""),
+	},
+	{
 		path: ["licenses"],
 		file: "composition/cli/licenses.ts",
 		usage: "licenses sync --instance <key> --actor <name> [--after <customer-id>] [--limit <n>]",

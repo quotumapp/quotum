@@ -369,6 +369,8 @@ interface StripeBillingRepositoryDependency
 }
 
 export interface StripeBillingServiceDependencies {
+	/** Composition-owned setup observation, after ordinary webhook verification. Never grants access. */
+	onVerifiedWebhook?: (event: unknown) => Promise<void>;
 	config: StripeBillingServiceConfig;
 	client: StripeBillingClientDependency;
 	repository: StripeBillingRepositoryDependency;
@@ -2446,6 +2448,7 @@ export class StripeBillingService
 			);
 		}
 
+		await this.dependencies.onVerifiedWebhook?.(event);
 		return this.handleVerifiedAppEvent(event);
 	}
 	/** Only composition's signature-verified, account-mapped app event inbox may call this entrypoint. */

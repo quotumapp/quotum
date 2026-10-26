@@ -8,6 +8,8 @@
 
 - Back up Postgres with `pg_dump` or your provider's snapshots. All billing state, migration history,
   and encrypted connections live there.
+- Resumable Stripe setup manifests, leases, step receipts and pending encrypted endpoint secrets
+  also live in Postgres. Preserve them to reconcile uncertain provider writes after restoring.
 - Back up `QUOTUM_SECRETS_KEY_BASE64` separately in your secret manager. Encrypted connections in a
   database backup are unreadable without it, and the key must never be stored with the backup.
 - Project credentials and the merchant service-principal token are one-way hashed; they cannot be
@@ -57,6 +59,12 @@ Never reset populated production data as a routine upgrade.
 
 [Upgrade transitions](upgrade-transitions.md) gives the data-preserving procedure for each baseline
 change that needs one.
+
+Initial Stripe automation adds two setup tables to `001_platform.sql`; follow its
+[upgrade transition](upgrade-transitions.md#resumable-stripe-setup) before deploying. Resume
+interrupted provisioning with the same setup ID using [the setup runbook](stripe-quickstart.md),
+without deleting receipts or creating a replacement webhook endpoint. Setup secrets participate
+in the existing connection-secret rotation command and are cleared from setup storage on completion.
 
 Remote MCP extends `004_merchant.sql` with the OAuth provider tables, JWKS storage, immutable
 authorizations, public desktop-client registrations and a transient proof-binding column. Two

@@ -12,6 +12,37 @@ The shared tools use the bundled SDK and a fixed read-only request allowlist. Th
 calls `/v1` with a project key. The optional remote transport runs at `/mcp` in the API process and
 dispatches through the merchant billing port with browser-authorized identity, without project keys.
 
+## Local operator MCP for self-hosted setup
+
+`quotum mcp operator` is a separate, opt-in stdio server for
+[initial Stripe setup](stripe-quickstart.md). It has local operator database authority and can
+provision Stripe resources, commit a connection and publish a catalog. These tools are never
+registered on the read-only `quotum mcp` server or browser-authorized remote transport.
+
+```sh
+quotum mcp operator --allow-writes --actor you@example.com --directory /absolute/private/setup
+```
+
+The host supplies the deployment's `POSTGRES_URI`, `QUOTUM_AUTH_SECRET` and `QUOTUM_SECRETS_KEY_*`
+environment, and a private directory (mode `0700`) containing the manifest and protected credential
+files. The server refuses startup without the explicit write flag, actor and private directory.
+Tools accept plain filenames within that directory; they reject traversal, symlinks, arbitrary
+paths, secret values and actor overrides. Credential files also require mode `0600` and a 64 KB
+limit. Only one command runs per server at a time; database leases fence separate processes.
+
+| Tool | Inputs and effect |
+| --- | --- |
+| `prepare_stripe_setup` | `manifestFile`, `credentialsFile`, optional `memberOverrideReason`; reads Stripe and saves the immutable plan for inspection. |
+| `apply_stripe_setup` | `setupId`, `credentialsFile`, optional `memberOverrideReason`; resumes the reviewed plan and returns its durable receipt. |
+| `get_stripe_setup` | `setupId`; reads status without provider credentials. |
+| `verify_stripe_setup` | `setupId`, `credentialsFile`, optional `memberOverrideReason`; starts a fresh nonfinancial signed delivery check. Resume pending delivery with `apply_stripe_setup`. |
+
+The operator identity comes from the host command. The host controls access to this server; it is
+not a merchant OAuth grant and does not use browser proposal approval. Inspect the prepared
+manifest before applying. A pending result is resumable, not a second setup request. Results are
+bounded to 256 KB, contain no provider secrets and distinguish verified configuration from an
+untested payment. Disconnect this operator server after setup.
+
 ## Connect in a browser
 
 Browser authorization uses merchant sign-in, so the remote transport needs the merchant console:
