@@ -137,6 +137,9 @@ describe("durable Stripe setup", () => {
 			stripe.deniedPath = "/v1/products";
 			const blocked = await run(["apply", id, "--credentials-file", credentials]);
 			expect(blocked.code).toBe(2);
+			const reviewed = await run(["status", id]);
+			expect(reviewed.code).toBe(2);
+			expect(JSON.parse(reviewed.out).status).toBe("requires_review");
 			expect(blocked.out).toContain("product_read");
 			expect(JSON.stringify(blocked)).not.toContain("rk_test_never_print");
 		});
@@ -363,6 +366,46 @@ describe("durable Stripe setup", () => {
 				expect(stripe.count("price")).toBe(1);
 			});
 		});
+	it("re-verifies a completed setup after the catalog has moved on", async () => {
+		await withSetup(false, async (service, stripe, deliver) => {
+			const manifest = setupManifest(false);
+			const credentials = stripe.credentials();
+			const { setupId } = await service.prepare(manifest, credentials);
+			await service.apply(setupId, credentials);
+			await deliver();
+			await service.apply(setupId, credentials);
+			await deliver();
+			expect((await service.apply(setupId, credentials)).status).toBe("complete");
+			const { context } = service.options;
+			const target = await context.target(manifest.instance);
+			const catalogs = new BillingRepository(context.billingDatabase);
+			const later = structuredClone(manifest.catalog);
+			later.features[0].name = "AI request credits";
+			const actor = "operator:setup-test";
+			const preview = await catalogs.previewCatalog(target.project, {
+				catalog: later,
+				expectedRevision: 1,
+				actor,
+			});
+			const published = await catalogs.publishCatalog(target.project, {
+				catalog: later,
+				expectedRevision: 1,
+				previewToken: preview.previewToken,
+				actor,
+			});
+			expect(published.revision).toBe(2);
+			// A publication after completion is ordinary catalog use, not drift: apply and verify still finish.
+			expect((await service.apply(setupId, credentials)).status).toBe("complete");
+			expect((await service.apply(setupId, credentials, true)).status).toBe(
+				"awaiting_delivery_event",
+			);
+			await deliver();
+			expect(await service.apply(setupId, credentials)).toMatchObject({
+				status: "complete",
+				catalogRevision: 1,
+			});
+		});
+	});
 	it("recovers an unknown create using the same request, fences competing runners and rejects plan drift", async () => {
 		await withSetup(false, async (service, stripe) => {
 			const prepared = await service.prepare(setupManifest(), stripe.credentials());

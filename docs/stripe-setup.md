@@ -73,8 +73,9 @@ require `--member-override-reason <reason>` for writes, as with other operator c
 `prepare` makes Stripe reads and persists the immutable plan; it performs no Stripe writes.
 
 `apply` advances until it needs webhook delivery. Repeat the same `apply` after Stripe delivers
-the event. `status` reads the receipt without Stripe credentials. Exit `0` means prepared or
-complete, `2` means pending or requires review, and malformed command inputs exit `64`.
+the event. `status` reads the receipt without Stripe credentials. Every command exits `0` when
+the setup is prepared or complete and `2` while it is pending or requires review; malformed
+command inputs exit `64`.
 
 | Status | Meaning and next action |
 | --- | --- |
@@ -147,9 +148,12 @@ quotum setup stripe apply <setup-id> \
   --credentials-file ./stripe-credentials.json --actor you@example.com
 ```
 
-`verify` starts a fresh nonfinancial delivery probe for a committed setup. It checks the same
-manifest and catalog revision; it does not silently replace a changed connection or publish over
-a later catalog. Use ordinary connection/catalog operations for those changes.
+`verify` starts a fresh nonfinancial delivery probe for a committed setup and rechecks the
+connection and the endpoint. It never publishes again, so a catalog revision published after
+setup completed is left as it is and does not stop a later `apply` or `verify`. It does not
+silently replace a changed connection either: once the active Stripe connection is no longer the
+one this setup committed, the run stops with `existing_connection_replacement_not_supported`
+before it writes to Stripe. Use ordinary connection and catalog operations for those changes.
 
 To qualify billing separately, complete a real Stripe sandbox Checkout through Quotum's
 [Checkout API](subscriptions.md) (the request in
@@ -163,4 +167,5 @@ HTTP transport; they are not evidence of live Stripe or network qualification.
 For an agent-driven run, use the explicitly enabled
 [local operator MCP](mcp.md#local-operator-mcp-for-self-hosted-setup): `prepare_stripe_setup` takes
 the manifest as JSON and the credentials file by name from its private directory;
-`apply_stripe_setup`, `get_stripe_setup` and `verify_stripe_setup` take the setup ID.
+`apply_stripe_setup` and `verify_stripe_setup` take the `setupId` and the credentials file name,
+and `get_stripe_setup` takes the `setupId` alone.

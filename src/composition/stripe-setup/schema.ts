@@ -143,6 +143,7 @@ export const stripeSetupEvents = [
 	"customer.subscription.trial_will_end",
 	"refund.created",
 	"refund.updated",
+	"refund.failed",
 	"charge.refunded",
 	"charge.dispute.created",
 ] as const;

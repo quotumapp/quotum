@@ -45,6 +45,7 @@ interface SetupState {
 	setupVerified?: boolean;
 	committed?: boolean;
 	publishedRevision?: number;
+	completedAt?: string;
 }
 export interface StripeSetupOptions {
 	context: OperatorContext;
@@ -494,7 +495,13 @@ export class StripeSetupService {
 			);
 		}
 		const current = await repository.getPublishedCatalog(target.project);
-		if (state.publishedRevision !== undefined && current.revision !== state.publishedRevision)
+		// Once a setup has completed, a later publication is ordinary catalog use; only the first run
+		// guards the revision it published.
+		if (
+			state.completedAt === undefined &&
+			state.publishedRevision !== undefined &&
+			current.revision !== state.publishedRevision
+		)
 			throw new SetupFailure("catalog_changed_after_setup");
 		if (state.publishedRevision === undefined) {
 			await authorize();
@@ -532,6 +539,12 @@ export class StripeSetupService {
 		)
 			throw new SetupFailure("webhook_configuration_changed");
 		await this.store.seal(run, lease, null);
-		await patch({ status: "complete", reason: null, currentStep: null, checks: null });
+		await patch({
+			status: "complete",
+			completedAt: state.completedAt ?? new Date().toISOString(),
+			reason: null,
+			currentStep: null,
+			checks: null,
+		});
 	}
 }

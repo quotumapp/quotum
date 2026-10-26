@@ -34,12 +34,12 @@ There are no changes to existing connection, billing or catalog rows, and no new
 environment variables. This is a baseline change: existing checksums will differ.
 
 For a populated deployment, stop API processes, workers and operator commands, take a restorable
-backup with its matching binary and encryption keys, and follow the stopped-service backup and
-data-only restore procedure under [stored job provider identity](#stored-job-provider-identity)
-into a database freshly migrated with the target release. Preserve all existing tables and rows;
-the two new tables start empty. Do not edit the migration ledger or reset populated production
-data. Verify restored counts, `quotum migrate status` and `/ready` before routing traffic.
-Disposable development/test databases can be recreated.
+backup with its matching binary and encryption keys, and follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity) into a database freshly migrated
+with the target release; its provider-column steps 3 and 5 do not apply. Preserve all existing
+tables and rows; the two new tables start empty. Do not edit the migration ledger or reset
+populated production data. Verify restored counts, `quotum migrate status` and `/ready` before
+routing traffic. Disposable development/test databases can be recreated.
 
 Deploy the matching runtime before using `quotum setup stripe` or the Stripe setup tools of
 `quotum mcp operator`: the normal webhook handler records the second signed delivery probe. Existing connections continue

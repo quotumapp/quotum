@@ -289,8 +289,8 @@ runtime using [self-hosting](self-hosting.md) and [headless connection setup](pr
    Select snapshot events for your account. Include the four Checkout events above plus
    `invoice.paid`, `invoice.payment_failed`, `customer.subscription.created`,
    `customer.subscription.updated`, `customer.subscription.deleted`,
-   `customer.subscription.trial_will_end`, `refund.created`, `refund.updated`, `charge.refunded`
-   and `charge.dispute.created` for the supported subscription/refund lifecycle.
+   `customer.subscription.trial_will_end`, `refund.created`, `refund.updated`, `refund.failed`,
+   `charge.refunded` and `charge.dispute.created` for the supported subscription/refund lifecycle.
 3. Draft and validate the live connection, then change the endpoint URL to the returned
    `setupWebhookPath` on your public origin. Select `product.updated` temporarily and edit metadata
    on a product in that live account **after drafting**. This produces a real event without a

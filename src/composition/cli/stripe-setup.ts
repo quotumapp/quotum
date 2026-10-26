@@ -39,6 +39,14 @@ export async function readSetupCredentials(path: string) {
 	}
 }
 
+/** Exit `0` once a setup is prepared or complete, `2` while a delivery or a review is outstanding. */
+function setupReport(result: { status: string }) {
+	return new CommandReport(
+		result,
+		result.status === "complete" || result.status === "prepared" ? 0 : 2,
+	);
+}
+
 export async function runStripeSetupCommand(
 	argv: readonly string[],
 	env: Readonly<Record<string, string | undefined>>,
@@ -72,15 +80,12 @@ export async function runStripeSetupCommand(
 					memberOverrideReason: memberOverrideReason(options),
 					client: dependencies.client,
 				});
-				if (command === "status") return await service.status(source);
+				if (command === "status") return setupReport(await service.status(source));
 				if (!credentials) throw new CliUsageError("Credentials are required.");
-				const result =
+				return setupReport(
 					command === "prepare"
 						? await service.prepare(await readSettings(source, readStdin), credentials)
-						: await service.apply(source, credentials, command === "verify");
-				return new CommandReport(
-					result,
-					result.status === "complete" || result.status === "prepared" ? 0 : 2,
+						: await service.apply(source, credentials, command === "verify"),
 				);
 			} catch (error) {
 				if (error instanceof CliUsageError) throw error;

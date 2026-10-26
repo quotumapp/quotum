@@ -522,8 +522,9 @@ project does not have, or a subscription the account does not hold, is
 `404 SUBSCRIPTION_CHANGE_TARGET_NOT_FOUND`.
 
 Refunds and disputes of a one-time purchase reverse its credits proportionally to the cumulative
-reversed amount paid and are deduplicated by refund id. Configure Stripe to send `refund.created`
-and `refund.updated`; `charge.refunded` is safely ignored. For promotion codes, also send
+reversed amount paid and are deduplicated by refund id. Configure Stripe to send `refund.created`,
+`refund.updated` and `refund.failed`, so a refund requested through Quotum records a failed
+outcome; `charge.refunded` is safely ignored. For promotion codes, also send
 `checkout.session.expired` and
 `checkout.session.async_payment_failed` so reserved uses are released promptly; the promotion
 maintenance worker releases them an hour after the session could have completed otherwise. Send
