@@ -10,6 +10,9 @@ This exercises billing and metering with a fake provider. To connect an actual S
 follow the [real Stripe quickstart](stripe-quickstart.md): it covers keys and permissions, product
 creation, connection validation, webhook forwarding, and a hosted test payment. You can start
 there directly; completing this demo is not a prerequisite.
+To have Quotum provision products, prices and the webhook endpoint for a running deployment, use
+[automated Stripe setup](stripe-setup.md); it verifies signed delivery and reports payment testing
+separately.
 
 Prerequisites: [Bun](https://bun.sh) 1.4.x, Docker, `curl`, `jq`, and `openssl`. Quotum needs
 PostgreSQL 18 or newer; the first step starts one in Docker.

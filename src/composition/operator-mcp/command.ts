@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ToolResult } from "../../mcp/results";
 import { maxResultBytes } from "../../mcp/results";
 import { resolveQuotumCommand } from "../cli/dispatch";
+import { setupDiagnosticsSchema } from "../stripe-setup/schema";
 
 export type OperatorEnvironment = Readonly<Record<string, string | undefined>>;
 export interface OperatorCommand {
@@ -137,6 +138,29 @@ export async function operatorFile(
 }
 
 /**
+ * Stripe setup refusals carry a fixed reason vocabulary and permission tokens, never provider
+ * text. Both are re-validated here, so nothing else on stderr can pass through.
+ */
+function setupFailureDetail(code: string | undefined, stderr: string) {
+	if (code === "STRIPE_SETUP_FAILED") {
+		const reason = /^STRIPE_SETUP_FAILED: ([a-z][a-z0-9_]{2,100})$/m.exec(stderr)?.[1];
+		return reason === undefined ? {} : { reason };
+	}
+	if (code === "STRIPE_CONNECTION_INVALID") {
+		const json = /^STRIPE_CONNECTION_INVALID: (\{.*\})(?: Run `[^`]*` for usage\.)?\s*$/s.exec(
+			stderr,
+		)?.[1];
+		try {
+			const diagnostics = setupDiagnosticsSchema.safeParse(JSON.parse(json ?? ""));
+			return diagnostics.success ? { diagnostics: diagnostics.data } : {};
+		} catch {
+			return {};
+		}
+	}
+	return {};
+}
+
+/**
  * CLI diagnostics can contain provider/database errors. Do not pass raw stderr or exceptions to
  * the model. Expose only a code, plus commands' deliberate JSON results (which exclude secrets).
  */
@@ -161,6 +185,7 @@ export function operatorResult(result: OperatorCommandResult): ToolResult {
 		? {
 				exitCode: result.exitCode,
 				error: errorCode ?? "Operator command failed.",
+				...setupFailureDetail(errorCode, result.stderr),
 				hint: "Inspect setup configuration and the target's current state before retrying. A failed or interrupted command may have committed; reuse the same requestKey where supported.",
 			}
 		: { exitCode: result.exitCode, ...(data === undefined ? { completed: true } : { data }) };

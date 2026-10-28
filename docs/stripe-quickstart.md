@@ -6,6 +6,9 @@ Connect a Stripe sandbox to the normal Quotum runtime, buy ten credits through h
 and consume three. This exercises real Stripe API calls and signed sandbox events, encrypted
 database-owned connections, product adoption and catalog publication. Stripe test payments move
 no real money. The [five-minute quickstart](quickstart.md) remains the account-free billing demo.
+To have Quotum create or reuse the product, price and webhook endpoint and verify signed delivery
+for you, use [automated Stripe setup](stripe-setup.md); this walkthrough does each step by hand and
+ends with a test payment.
 
 Prerequisites: Bun 1.4.x, Docker, Bash, `curl`, `jq`, `openssl`, the
 [Stripe CLI](https://docs.stripe.com/stripe-cli), and access to a Stripe sandbox where you can
@@ -286,8 +289,8 @@ runtime using [self-hosting](self-hosting.md) and [headless connection setup](pr
    Select snapshot events for your account. Include the four Checkout events above plus
    `invoice.paid`, `invoice.payment_failed`, `customer.subscription.created`,
    `customer.subscription.updated`, `customer.subscription.deleted`,
-   `customer.subscription.trial_will_end`, `refund.created`, `refund.updated`, `charge.refunded`
-   and `charge.dispute.created` for the supported subscription/refund lifecycle.
+   `customer.subscription.trial_will_end`, `refund.created`, `refund.updated`, `refund.failed`,
+   `charge.refunded` and `charge.dispute.created` for the supported subscription/refund lifecycle.
 3. Draft and validate the live connection, then change the endpoint URL to the returned
    `setupWebhookPath` on your public origin. Select `product.updated` temporarily and edit metadata
    on a product in that live account **after drafting**. This produces a real event without a

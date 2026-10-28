@@ -18,6 +18,8 @@ your own [merchant proxy](docs/deployment.md#merchant-proxy-service-principal). 
   purchase, and metered usage in five minutes.
 - [Real Stripe sandbox quickstart](docs/stripe-quickstart.md): restricted-key setup, a persisted
   connection, real product/price adoption, hosted Checkout, signed webhooks, and credited usage.
+- [Automated Stripe setup](docs/stripe-setup.md): resumable sandbox or production onboarding,
+  product/price provisioning and signed webhook verification without taking a payment.
 - [Self-hosting](docs/self-hosting.md): run Quotum headless with Docker Compose, from secrets to a
   published catalog, then operate and upgrade it.
 - [Deployment and configuration](docs/deployment.md): container image, required and optional

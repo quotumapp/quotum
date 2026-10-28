@@ -309,6 +309,7 @@ service. Disconnect it after setup and use `quotum mcp` with a read-only key for
 | `get_credentials`, `rotate_credentials` | Inspect credential presence, then explicitly select `full` or `read_only`. Rotation immediately revokes the replaced key and writes the new key to `credentialsOut`. |
 | `get_catalog`, `preview_catalog`, `publish_catalog` | Use JSON catalog data and an explicit `expectedRevision` (`null` for no published catalog). Preview persists a preview; publish revalidates and refuses stale revisions. Identical intent is a no-op. |
 | `list_catalog_bindings`, `adopt_catalog_bindings` | Inspect/adopt existing provider products through the CLI's validated, actor-attributed receipts. |
+| `prepare_stripe_setup`, `apply_stripe_setup`, `get_stripe_setup`, `verify_stripe_setup` | The [automated Stripe setup](stripe-setup.md). Prepare takes the manifest as JSON plus a `credentialsFile` name in the private directory (`setupKey`, `runtimeKey`, optional `webhookSecret`), reads Stripe and saves an immutable plan without writing to Stripe. Apply and verify take the `setupId` and `credentialsFile`; apply is safe to repeat and resumes after interruption, and a pending status means retry. No tool takes a payment or replaces an existing live connection. |
 | `get_environment_readiness` | Reports informational setup findings. These do not gate environment access or credential issuance. |
 
 Secret input/output arguments are filenames within the host-selected directory, never arbitrary
@@ -320,7 +321,7 @@ at a time. Mutation tools that support `requestKey` require one; reuse it on ret
 
 Results carry the CLI `exitCode` and parsed `data`. Exit `2` means outstanding bootstrap/readiness
 findings, not a tool failure. Raw provider/database diagnostics are withheld; failures expose the
-domain error code when available. Inspect the target's state before retrying a failed or interrupted
+domain error code when available, plus the bounded `reason` of a refused setup and its permission `diagnostics`. Inspect the target's state before retrying a failed or interrupted
 write, which may have committed. Large successful results return a completion receipt instead of
 the data. Commands have a ten-minute deadline; closing stdin drains outstanding requests for up to
 30 seconds, and disconnect/signal shutdown terminates outstanding child commands.

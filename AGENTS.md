@@ -323,6 +323,12 @@ Use Bun `>=1.4.0 <1.5.0`. Docker is required for every Postgres-backed lane.
   --project-key <key> --secret-file <path|->` checks receiver authentication without a connection commit.
 - `bun run mcp` starts the read-only stdio MCP server against `QUOTUM_MCP_BASE_URL` with a
   read-only or sandbox `QUOTUM_MCP_API_KEY`; see [docs/mcp.md](docs/mcp.md).
+- `quotum setup stripe prepare|apply|status|verify` automates initial real Stripe setup on a running
+  public HTTPS deployment. Its immutable manifests and step receipts live in platform tables;
+  provisioning and runtime restricted keys stay separate. The opt-in `quotum mcp operator` exposes
+  these local operator tools, separately from read-only and remote MCP. See
+  [docs/stripe-setup.md](docs/stripe-setup.md). Completion verifies configuration and two
+  signed deliveries, not a payment; existing connections cannot be replaced through this workflow.
 - `bun run test:coverage` runs the unit suite against its local coverage minimum.
 
 ## Coding style

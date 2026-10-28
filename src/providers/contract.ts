@@ -307,6 +307,7 @@ export interface ProviderOverrideKeys {
 }
 
 export interface ProviderBuildInput<P extends BillingProvider> {
+	onVerifiedStripeWebhook?: (project: ProjectInstanceContext, event: unknown) => Promise<void>;
 	project: ProjectInstanceContext;
 	config: RuntimeConnectionConfigs[P];
 	repository: ProjectScopedBillingRepository;
