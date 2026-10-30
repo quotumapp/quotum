@@ -14,6 +14,15 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Affiliate keys
+
+The billing baseline adds the nullable `customers.affiliate_key` and
+`customers.affiliate_key_set_at`, `customers_affiliate_key_check`, which requires both or neither,
+and `idx_billing_customers_affiliate_key`. Nothing is backfilled, so a dump from the previous
+release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup, which loses the keys recorded since.
+
 ## Invitation inbox
 
 The merchant baseline widens the `platform_invitations.status` check with `declined`, which an

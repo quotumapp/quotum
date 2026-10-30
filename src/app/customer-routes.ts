@@ -1,11 +1,14 @@
 import { z } from "zod";
+import type { AffiliateServiceLike } from "../billing/affiliates";
 import type { EntitlementService } from "../billing/entitlements";
 import { BillingError, isBillingError } from "../billing/errors";
 import { requireIdempotencyKey } from "../billing/idempotency-key";
 import { projectScopedRateLimitGuard } from "../http/rate-limit";
 import { type BillingLogger, safelyLogError } from "../observability/logger";
 import { type BillingMetrics, safelyIncrementBillingMetric } from "../observability/metrics";
+import type { ProjectInstanceContext } from "../projects/context";
 import { LENIENT_JSON_PARSE, operationDetail } from "../shared/http";
+import { affiliateKeySchema } from "./affiliate-routes";
 import {
 	type CommercialPreviewReader,
 	executeCommercial,
@@ -34,6 +37,7 @@ export interface CustomerRoutesDependencies {
 	entitlementService: EntitlementService;
 	providerServices: ProjectProviderServiceResolver;
 	commercialPreviewReader: CommercialPreviewReader;
+	affiliates: Pick<AffiliateServiceLike, "recordAffiliateKey">;
 	billingMetrics: BillingMetrics;
 	billingLogger: BillingLogger;
 	registerPostAuthGuard: (guard: PostAuthGuard) => void;
@@ -55,6 +59,7 @@ const stripeCheckoutSessionBodySchema = z
 		cancelUrl: z.string().trim().check(z.url()).nullable().optional(),
 		expiresAt: z.number().int().positive().optional(),
 		uiMode: checkoutUiModeSchema.optional(),
+		affiliateKey: affiliateKeySchema.optional(),
 	})
 	.strict()
 	.refine((value) => (value.productKey === undefined) !== (value.planKey === undefined));
@@ -229,6 +234,10 @@ export const commercialActionPreviewBodySchema = z
 	})
 	.strict();
 export const commercialActionExecuteBodySchema = z.object({ previewToken: z.uuid() }).strict();
+/** The console shares the schema above; only a trusted backend names an affiliate. */
+const commercialActionExecuteWithAffiliateBodySchema = commercialActionExecuteBodySchema.extend({
+	affiliateKey: affiliateKeySchema.optional(),
+});
 
 const purchaseVerificationSchema = z
 	.discriminatedUnion("provider", [
@@ -236,6 +245,7 @@ const purchaseVerificationSchema = z
 			provider: z.literal("apple"),
 			billingAccountId: z.string().trim().min(1),
 			transactionId: z.string().trim().min(1),
+			affiliateKey: affiliateKeySchema.optional(),
 		}),
 		z.object({
 			provider: z.literal("google"),
@@ -243,6 +253,7 @@ const purchaseVerificationSchema = z
 			purchaseKind: z.enum(["subscription", "consumable", "non_consumable"]),
 			purchaseToken: z.string().trim().min(1),
 			productId: z.string().trim().min(1).optional(),
+			affiliateKey: affiliateKeySchema.optional(),
 		}),
 	])
 	.superRefine((body, context) => {
@@ -266,10 +277,21 @@ export function registerCustomerRoutes({
 	entitlementService,
 	providerServices,
 	commercialPreviewReader,
+	affiliates,
 	billingMetrics,
 	billingLogger,
 	registerPostAuthGuard,
 }: CustomerRoutesDependencies): void {
+	/** Runs after the provider call, so a failed purchase names no one and a replay changes nothing. */
+	const recordAffiliate = async (
+		project: ProjectInstanceContext,
+		billingAccountId: string,
+		affiliateKey: string | undefined,
+	): Promise<void> => {
+		if (affiliateKey === undefined) return;
+		await affiliates.recordAffiliateKey(project, { billingAccountId, affiliateKey });
+	};
+
 	registerPostAuthGuard(
 		projectScopedRateLimitGuard({
 			limiter: verifyLimiter,
@@ -397,6 +419,10 @@ export function registerCustomerRoutes({
 				previewToken: body.previewToken,
 				idempotencyKey,
 			});
+			// A setup that names a plan starts a purchase; one that only saves a card does not.
+			if (result.kind === "checkout" || (result.kind === "payment_setup" && result.plan !== null)) {
+				await recordAffiliate(privateProject(project), params.billingAccountId, body.affiliateKey);
+			}
 			// Only a queued subscription change is accepted for later work; a cancellation is done.
 			set.status = result.kind === "subscription_change" ? 202 : 200;
 			return { success: true, data: result };
@@ -404,7 +430,7 @@ export function registerCustomerRoutes({
 		{
 			parse: [LENIENT_JSON_PARSE],
 			params: stripeCustomerRouteParamsSchema,
-			body: commercialActionExecuteBodySchema,
+			body: commercialActionExecuteWithAffiliateBodySchema,
 			transform: rejectCallerProjectSelectorBody,
 			detail: operationDetail({
 				operationId: "postV1BillingAccountsByBillingAccountIdCommercialActions",
@@ -499,21 +525,24 @@ export function registerCustomerRoutes({
 		async ({ params, body, request, project }) => {
 			const service = await providerServices.paddleBillingService?.(privateProject(project));
 			if (!service) throw paddleNotConfigured();
-			return {
-				success: true,
-				data: await service.createCheckoutSession({
-					billingAccountId: params.billingAccountId,
-					productKey: body.productKey,
-					email: body.email,
-					idempotencyKey: request.headers.get("idempotency-key"),
-				}),
-			};
+			const session = await service.createCheckoutSession({
+				billingAccountId: params.billingAccountId,
+				productKey: body.productKey,
+				email: body.email,
+				idempotencyKey: request.headers.get("idempotency-key"),
+			});
+			await recordAffiliate(privateProject(project), params.billingAccountId, body.affiliateKey);
+			return { success: true, data: session };
 		},
 		{
 			parse: [LENIENT_JSON_PARSE],
 			params: stripeCustomerRouteParamsSchema,
 			body: z
-				.object({ productKey: z.string().trim().min(1), email: z.email().optional() })
+				.object({
+					productKey: z.string().trim().min(1),
+					email: z.email().optional(),
+					affiliateKey: affiliateKeySchema.optional(),
+				})
 				.strict(),
 			transform: rejectCallerProjectSelectorBody,
 			detail: operationDetail({
@@ -572,6 +601,7 @@ export function registerCustomerRoutes({
 					cancelUrl: body.cancelUrl,
 				});
 			}
+			await recordAffiliate(privateProject(project), params.billingAccountId, body.affiliateKey);
 			return { success: true, data: session };
 		},
 		{
@@ -726,21 +756,24 @@ export function registerCustomerRoutes({
 				}
 
 				provider = parsed.data.provider;
-				return parsed.data.provider === "apple"
-					? await requireAppleStoreKitService(
-							await providerServices.appleStoreKitService(context),
-						).verifyPurchase({
-							billingAccountId: parsed.data.billingAccountId,
-							transactionId: parsed.data.transactionId,
-						})
-					: await requireGooglePlayBillingService(
-							await providerServices.googlePlayBillingService(context),
-						).verifyPurchase({
-							billingAccountId: parsed.data.billingAccountId,
-							purchaseKind: parsed.data.purchaseKind,
-							purchaseToken: parsed.data.purchaseToken,
-							productId: parsed.data.productId,
-						});
+				const snapshot =
+					parsed.data.provider === "apple"
+						? await requireAppleStoreKitService(
+								await providerServices.appleStoreKitService(context),
+							).verifyPurchase({
+								billingAccountId: parsed.data.billingAccountId,
+								transactionId: parsed.data.transactionId,
+							})
+						: await requireGooglePlayBillingService(
+								await providerServices.googlePlayBillingService(context),
+							).verifyPurchase({
+								billingAccountId: parsed.data.billingAccountId,
+								purchaseKind: parsed.data.purchaseKind,
+								purchaseToken: parsed.data.purchaseToken,
+								productId: parsed.data.productId,
+							});
+				await recordAffiliate(context, parsed.data.billingAccountId, parsed.data.affiliateKey);
+				return snapshot;
 			};
 
 			try {

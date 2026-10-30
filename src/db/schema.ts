@@ -240,6 +240,8 @@ export const customers = pgTable(
 		projectionSequence: bigint("projection_sequence", { mode: "number" }).notNull().default(0),
 		...timestampColumns(),
 		erasedAt: timestamp("erased_at", { withTimezone: true }),
+		affiliateKey: text("affiliate_key"),
+		affiliateKeySetAt: timestamp("affiliate_key_set_at", { withTimezone: true }),
 	},
 	(table): PgTableExtraConfigValue[] => [
 		check("customers_projection_sequence_check", sql`((projection_sequence >= 0))`),
@@ -247,10 +249,17 @@ export const customers = pgTable(
 			"customers_erased_check",
 			sql`${table.erasedAt} IS NULL OR (${table.email} IS NULL AND ${table.metadata} = '{}'::jsonb)`,
 		),
+		check(
+			"customers_affiliate_key_check",
+			sql`(${table.affiliateKey} IS NULL) = (${table.affiliateKeySetAt} IS NULL)`,
+		),
 		index("idx_billing_customers_billing_account_id_trgm").using(
 			"gin",
 			table.billingAccountId.op("gin_trgm_ops"),
 		),
+		index("idx_billing_customers_affiliate_key")
+			.on(table.projectId, table.affiliateKey, table.id)
+			.where(sql`${table.affiliateKey} IS NOT NULL`),
 		unique("customers_project_id_id_unique").on(table.projectId, table.id),
 		uniqueIndex("idx_billing_customers_billing_account_id").on(
 			table.projectId,

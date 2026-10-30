@@ -73,6 +73,7 @@ import type { ProjectInstanceContext } from "../projects/context";
 import type { StripeCatalog } from "../providers/stripe/types";
 import { db as defaultDb } from "./client";
 import { administrationTarget } from "./repository/administration-target";
+import { AffiliateRepository } from "./repository/affiliates";
 import { AppleBillingRepository } from "./repository/apple";
 import { ApplePromotionRepository } from "./repository/apple-promotions";
 import { AutoTopupJobRepository } from "./repository/auto-topup-jobs";
@@ -222,6 +223,7 @@ export class BillingRepository {
 	readonly applePromotions: ApplePromotionRepository;
 	readonly planGrants: PlanGrantRepository;
 	readonly balanceAdjustments: BalanceAdjustmentRepository;
+	readonly affiliates: AffiliateRepository;
 	readonly refundRequests: RefundRequestRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
 	readonly providerCustomerUnlinks: ProviderCustomerUnlinkRepository;
@@ -258,6 +260,7 @@ export class BillingRepository {
 		this.applePromotions = new ApplePromotionRepository(database);
 		this.planGrants = new PlanGrantRepository(database);
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
+		this.affiliates = new AffiliateRepository(database);
 		this.refundRequests = new RefundRequestRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 		this.providerCustomerUnlinks = new ProviderCustomerUnlinkRepository(database);

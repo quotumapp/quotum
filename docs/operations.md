@@ -944,7 +944,8 @@ skipped. Verification counts every remaining projection job, including null payl
 terminal statuses, and holds the account lock through the completion commit.
 
 Quantities, ledger entries, usage windows and the purchase, subscription and invoice rows stay,
-because the ledger must keep its integrity; only what names the person goes.
+because the ledger must keep its integrity; only what names the person goes. An
+[affiliate key](affiliates.md) stays too, because it names the partner.
 
 An operation in `failed` with `lastError: RESIDUAL_ROWS` found rows that still carried the id;
 `counts` lists them as `residual.<table>`. Send the same `POST` again with the same key to queue it
