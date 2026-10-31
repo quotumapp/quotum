@@ -54,6 +54,8 @@ const readOnlyOperations = [
 	"getV1AdminStoreEventsByEventId",
 	"getV1AdminSubscriptions",
 	"getV1AdminUsageEvents",
+	"getV1AffiliatesByAffiliateKeyCustomers",
+	"getV1AffiliatesByAffiliateKeySummary",
 	"getV1BillingAccountsByBillingAccountIdAutoTopup",
 	"getV1BillingAccountsByBillingAccountIdAvailableActions",
 	"getV1BillingAccountsByBillingAccountIdBalancesByFeatureKey",

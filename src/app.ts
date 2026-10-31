@@ -1,6 +1,7 @@
 import { Elysia } from "elysia";
 import type { AdminBillingReader } from "./admin/types";
 import { registerAdminRoutes } from "./app/admin-routes";
+import { registerAffiliateRoutes } from "./app/affiliate-routes";
 import { registerBalanceAdjustmentRoutes } from "./app/balance-adjustment-routes";
 import { registerCapabilityRoutes } from "./app/capability-routes";
 import { registerCatalogRoutes } from "./app/catalog-routes";
@@ -34,6 +35,7 @@ import type {
 import { registerUsageReceiptRoutes } from "./app/usage-receipt-routes";
 import { registerWebhookEndpointRoutes } from "./app/webhook-endpoint-routes";
 import { registerWebhookRoutes } from "./app/webhook-routes";
+import type { AffiliateServiceLike } from "./billing/affiliates";
 import { EntitlementService } from "./billing/entitlements";
 import {
 	BillingError,
@@ -120,6 +122,7 @@ export function createApp({
 	controlsEnterpriseService,
 	promotionService,
 	trialService,
+	affiliateService,
 	balanceAdjustmentService,
 	providerCustomerUnlinkService,
 	customerErasureService,
@@ -547,11 +550,17 @@ export function createApp({
 		finishObservedRequest(request, "completed");
 	});
 
+	const affiliates: AffiliateServiceLike = affiliateService ?? {
+		recordAffiliateKey: (...args) => getRepository().affiliates.recordAffiliateKey(...args),
+		getAffiliateSummary: (...args) => getRepository().affiliates.getAffiliateSummary(...args),
+		listAffiliateCustomers: (...args) => getRepository().affiliates.listAffiliateCustomers(...args),
+	};
 	registerCustomerRoutes({
 		app,
 		commercialPreviewReader: commercialPreviewReader ?? {
 			getCommercialActionPreview: (...args) => getRepository().getCommercialActionPreview(...args),
 		},
+		affiliates,
 		verifyLimiter: createVerifyLimiter(),
 		rateLimitKeyOptions,
 		entitlementService: service,
@@ -571,6 +580,7 @@ export function createApp({
 			getInvoice: (...args) => getRepository().getInvoice(...args),
 		},
 	});
+	registerAffiliateRoutes({ app, service: affiliates });
 	registerCapabilityRoutes({ app, reads: capabilityReads });
 	registerProviderOperationRoutes({
 		app,

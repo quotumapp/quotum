@@ -40,6 +40,7 @@ const KEEP_SEGMENT_PATTERN = /^(?:[a-z]+(?:-[a-z]+)*|v\d+)$/;
 /** Path segments followed by one identifier, e.g. `billing-accounts/:billingAccountId`. */
 const COLLECTIONS = new Set([
 	"administrative-debits",
+	"affiliates",
 	"balances",
 	"billing-accounts",
 	"by-billing-account",

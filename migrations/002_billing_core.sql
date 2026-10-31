@@ -96,9 +96,16 @@ CREATE TABLE IF NOT EXISTS customers (
 	-- ledger, usage and invoice facts that hang off it keep their referential integrity; its
 	-- external id is rewritten and the contact fields are cleared.
 	erased_at TIMESTAMPTZ,
+	-- The affiliate that brought the account, set once from the first purchase call naming one. It
+	-- stays after erasure: it names the partner rather than the person, and keeps the totals correct.
+	affiliate_key TEXT,
+	affiliate_key_set_at TIMESTAMPTZ,
 	CONSTRAINT customers_project_id_id_unique UNIQUE (project_id, id),
 	CONSTRAINT customers_erased_check CHECK (
 		erased_at IS NULL OR (email IS NULL AND metadata = '{}'::jsonb)
+	),
+	CONSTRAINT customers_affiliate_key_check CHECK (
+		(affiliate_key IS NULL) = (affiliate_key_set_at IS NULL)
 	)
 );
 
@@ -451,6 +458,10 @@ CREATE TABLE IF NOT EXISTS projection_sync_jobs (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_customers_billing_account_id
 	ON customers (project_id, billing_account_id);
+
+CREATE INDEX IF NOT EXISTS idx_billing_customers_affiliate_key
+	ON customers (project_id, affiliate_key, id)
+	WHERE affiliate_key IS NOT NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_products_key
 	ON products (project_id, key);

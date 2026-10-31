@@ -107,6 +107,17 @@
           "type": "string"
         }
       },
+      "PathAffiliateKey": {
+        "in": "path",
+        "name": "affiliateKey",
+        "required": true,
+        "schema": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._-]+$",
+          "type": "string"
+        }
+      },
       "PathBillingAccountId": {
         "in": "path",
         "name": "billingAccountId",
@@ -36002,6 +36013,12 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "affiliateKey": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "type": "string"
+                  },
                   "previewToken": {
                     "format": "uuid",
                     "type": "string"
@@ -60988,6 +61005,288 @@
         ]
       }
     },
+    "/v1/affiliates/{affiliateKey}/customers": {
+      "get": {
+        "operationId": "getV1AffiliatesByAffiliateKeyCustomers",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathAffiliateKey"
+          },
+          {
+            "$ref": "#/components/parameters/QueryLimit"
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "affiliateKeySetAt": {
+                            "type": "string"
+                          },
+                          "billingAccountId": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "billingAccountId",
+                          "affiliateKeySetAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "pagination": {
+                      "properties": {
+                        "nextCursor": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "nextCursor"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "pagination"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/affiliates/{affiliateKey}/customers",
+        "tags": [
+          "affiliates"
+        ],
+        "x-quotum-credential-access": "read_only"
+      }
+    },
+    "/v1/affiliates/{affiliateKey}/summary": {
+      "get": {
+        "description": "Customers and revenue attributed to one affiliate key. App Store and Google Play amounts are estimates: the product's catalog price once per payment.",
+        "operationId": "getV1AffiliatesByAffiliateKeySummary",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathAffiliateKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "affiliateKey": {
+                          "type": "string"
+                        },
+                        "customers": {
+                          "type": "number"
+                        },
+                        "revenue": {
+                          "items": {
+                            "properties": {
+                              "amountMinor": {
+                                "type": [
+                                  "null",
+                                  "number"
+                                ]
+                              },
+                              "currency": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "estimated": {
+                                "type": "boolean"
+                              },
+                              "payments": {
+                                "type": "number"
+                              },
+                              "provider": {
+                                "enum": [
+                                  "apple",
+                                  "google",
+                                  "stripe",
+                                  "paddle"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "provider",
+                              "currency",
+                              "payments",
+                              "amountMinor",
+                              "estimated"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "affiliateKey",
+                        "customers",
+                        "revenue"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/affiliates/{affiliateKey}/summary",
+        "tags": [
+          "affiliates"
+        ],
+        "x-quotum-credential-access": "read_only"
+      }
+    },
     "/v1/billing-accounts/{billingAccountId}": {
       "get": {
         "operationId": "getV1BillingAccountsByBillingAccountId",
@@ -61781,6 +62080,12 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "affiliateKey": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "type": "string"
+                  },
                   "previewToken": {
                     "format": "uuid",
                     "type": "string"
@@ -64355,6 +64660,12 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "affiliateKey": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "type": "string"
+                  },
                   "email": {
                     "format": "email",
                     "type": "string"
@@ -64487,6 +64798,12 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "affiliateKey": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9._-]+$",
+                    "type": "string"
+                  },
                   "cancelUrl": {
                     "format": "uri",
                     "type": [
@@ -69038,6 +69355,12 @@
                 "oneOf": [
                   {
                     "properties": {
+                      "affiliateKey": {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9._-]+$",
+                        "type": "string"
+                      },
                       "billingAccountId": {
                         "minLength": 1,
                         "type": "string"
@@ -69062,6 +69385,12 @@
                   },
                   {
                     "properties": {
+                      "affiliateKey": {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9._-]+$",
+                        "type": "string"
+                      },
                       "billingAccountId": {
                         "minLength": 1,
                         "type": "string"
@@ -69323,6 +69652,10 @@
     {
       "description": "Implemented admin operations.",
       "name": "admin"
+    },
+    {
+      "description": "Implemented affiliates operations.",
+      "name": "affiliates"
     },
     {
       "description": "Implemented authentication operations.",

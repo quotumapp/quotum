@@ -1,4 +1,5 @@
 import type { AdminBillingReader } from "../admin/types";
+import type { AffiliateServiceLike } from "../billing/affiliates";
 import type { ApplePromotionSigner } from "../billing/apple-promotions";
 import type { BalanceAdjustmentServiceLike } from "../billing/balance-adjustments";
 import type { ControlsEnterpriseRepositoryLike } from "../billing/controls";
@@ -162,6 +163,7 @@ export interface AppDependencies {
 	controlsEnterpriseService?: ControlsEnterpriseRepositoryLike;
 	promotionService?: PromotionServiceLike;
 	trialService?: TrialServiceLike;
+	affiliateService?: AffiliateServiceLike;
 	balanceAdjustmentService?: BalanceAdjustmentServiceLike;
 	providerCustomerUnlinkService?: ProviderCustomerUnlinkServiceLike;
 	customerErasureService?: CustomerErasureServiceLike;

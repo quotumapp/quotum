@@ -308,6 +308,50 @@ localDescribe("operator binding adoption", () => {
 			expect(listed.map((binding) => binding.provider).sort()).toEqual(["apple", "stripe"]);
 		});
 
+		it("adds a price to a mapping that has none, and keeps a price once set", async () => {
+			const bindings = nativeService();
+			const project = integrationProjectContext();
+			const priced = { ...apple, currency: "USD", priceAmountMinor: 999 };
+			const unpriced = await bindings.adopt(project, apple, "operator", "apple-1");
+
+			expect(await bindings.adopt(project, priced, "operator", "apple-2")).toEqual(unpriced);
+			const [row] = await context.sql<Array<{ currency: string; price_amount: string }>>`
+				SELECT currency, price_amount::text FROM store_products
+				WHERE project_id = ${project.projectInstanceId} AND id = ${unpriced.storeProductId}
+			`;
+			expect(row).toEqual({ currency: "usd", price_amount: "999" });
+
+			expect(await bindings.adopt(project, priced, "operator", "apple-3")).toEqual(unpriced);
+			await expect(
+				bindings.adopt(project, { ...priced, priceAmountMinor: 1299 }, "operator", "apple-4"),
+			).rejects.toMatchObject({
+				code: "STORE_BINDING_INVALID",
+				details: { check: "binding", reason: "binding_identity_conflict" },
+			});
+			await expect(bindings.adopt(project, apple, "operator", "apple-5")).rejects.toMatchObject({
+				code: "STORE_BINDING_INVALID",
+				details: { check: "binding", reason: "binding_identity_conflict" },
+			});
+		});
+
+		it("does not add a price when the rest of the mapping differs", async () => {
+			const bindings = nativeService();
+			const project = integrationProjectContext();
+			await bindings.adopt(project, apple, "operator", "apple-1");
+
+			await expect(
+				bindings.adopt(
+					project,
+					{ ...apple, billingPeriod: "year" as const, currency: "USD", priceAmountMinor: 999 },
+					"operator",
+					"apple-2",
+				),
+			).rejects.toMatchObject({
+				code: "STORE_BINDING_INVALID",
+				details: { check: "binding", reason: "binding_identity_conflict" },
+			});
+		});
+
 		it("refuses a reused key, a changed product and a store product mapped twice", async () => {
 			const bindings = nativeService();
 			const project = integrationProjectContext();

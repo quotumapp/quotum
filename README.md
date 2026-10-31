@@ -30,6 +30,7 @@ your own [merchant proxy](docs/deployment.md#merchant-proxy-service-principal). 
   [subscriptions and commercial actions](docs/subscriptions.md),
   [catalog publication](docs/catalog.md), [promotions](docs/promotions.md),
   [trials, the default plan and operator grants](docs/grants.md),
+  [affiliate tracking](docs/affiliates.md),
   [provider capability errors and reads](docs/provider-capabilities.md) and
   [outbound webhooks](docs/webhooks.md).
 - [Operations](docs/operations.md): backup, restore, upgrade, rollback, credentials, health and
