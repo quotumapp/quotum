@@ -282,14 +282,23 @@ export function registerCustomerRoutes({
 	billingLogger,
 	registerPostAuthGuard,
 }: CustomerRoutesDependencies): void {
-	/** Runs after the provider call, so a failed purchase names no one and a replay changes nothing. */
+	/**
+	 * Runs after the provider call, so a failed purchase names no one and a replay changes nothing.
+	 * The purchase has already succeeded by then, so a failed write is logged and not answered.
+	 */
 	const recordAffiliate = async (
 		project: ProjectInstanceContext,
 		billingAccountId: string,
 		affiliateKey: string | undefined,
 	): Promise<void> => {
 		if (affiliateKey === undefined) return;
-		await affiliates.recordAffiliateKey(project, { billingAccountId, affiliateKey });
+		try {
+			await affiliates.recordAffiliateKey(project, { billingAccountId, affiliateKey });
+		} catch (error) {
+			safelyLogError(billingLogger, "Affiliate key was not recorded", error, {
+				projectKey: project.projectInstanceKey,
+			});
+		}
 	};
 
 	registerPostAuthGuard(

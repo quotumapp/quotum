@@ -29,7 +29,9 @@ a plan. Other actions accept the field and ignore it, and the console cannot sen
 The key belongs to the account, not to one purchase, and the first key stays. A later call with a
 different key changes nothing and does not fail. Quotum writes the key after the provider call
 succeeds, so a checkout that fails leaves the account unattributed, but one that is started and
-abandoned does not: the key stays for the account's later purchases.
+abandoned does not: the key stays for the account's later purchases. If the key cannot be saved,
+the purchase still succeeds, the failure is logged, and a later purchase call naming a key can set
+it.
 
 Every payment the account makes counts toward its affiliate, including payments from before the
 key was recorded. There are no dates, credit periods or expiry.

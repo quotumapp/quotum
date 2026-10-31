@@ -4,6 +4,7 @@ import { commercialActionExecuteBodySchema } from "../../src/app/customer-routes
 import type { AppDependencies, StripeBillingServiceLike } from "../../src/app/types";
 import type { AffiliateServiceLike, AffiliateSummary } from "../../src/billing/affiliates";
 import { BillingError } from "../../src/billing/errors";
+import { createNoopBillingLogger } from "../../src/observability/logger";
 import type { FixtureBillingEnv as BillingEnv } from "../../src/testing/connection-fixtures";
 import { fixtureConnections } from "../../src/testing/connection-fixtures";
 import { storedCommercialPreview } from "../helpers/commercial-preview";
@@ -77,6 +78,7 @@ interface Fixture {
 function fixture(
 	options: {
 		failCheckout?: boolean;
+		failRecording?: boolean;
 		execution?: Record<string, unknown>;
 		dependencies?: Partial<AppDependencies>;
 	} = {},
@@ -84,6 +86,7 @@ function fixture(
 	const recorded: Fixture["recorded"] = [];
 	const affiliateService: AffiliateServiceLike = {
 		async recordAffiliateKey(_project, input) {
+			if (options.failRecording === true) throw new Error("connection lost");
 			recorded.push(input);
 		},
 		async getAffiliateSummary(_project, affiliateKey) {
@@ -250,6 +253,37 @@ describe("affiliate key on purchase calls", () => {
 		const plain = fixture();
 		expect((await post(plain.app, stripeCheckout, { productKey: "credits_100" })).status).toBe(200);
 		expect(plain.recorded).toEqual([]);
+	});
+
+	it("answers a purchase that succeeded when the key cannot be saved, and logs it", async () => {
+		const purchases: Array<[string, Record<string, unknown>]> = [
+			[stripeCheckout, { productKey: "credits_100" }],
+			[paddleCheckout, { productKey: "credits_100" }],
+			[
+				"/v1/purchases/verify",
+				{ provider: "apple", billingAccountId: "user_1", transactionId: "1" },
+			],
+			[commercialActions, { previewToken }],
+		];
+		for (const [path, body] of purchases) {
+			const errors: unknown[] = [];
+			const { app } = fixture({
+				failRecording: true,
+				dependencies: {
+					logger: {
+						...createNoopBillingLogger(),
+						error: (message, error, context) => {
+							errors.push([message, (error as Error).message, context]);
+						},
+					},
+				},
+			});
+			const response = await post(app, path, { ...body, affiliateKey: "acme-partner" });
+			expect([path, response.status]).toEqual([path, 200]);
+			expect(errors).toEqual([
+				["Affiliate key was not recorded", "connection lost", { projectKey: "acme" }],
+			]);
+		}
 	});
 
 	it("refuses a key that cannot name a partner in a URL", async () => {
