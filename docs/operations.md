@@ -926,9 +926,10 @@ batches under a lease and resumes after a stop:
   claims, entitlements, projection jobs, outbound webhook events with their deliveries and closed
   Paddle reservations;
 - rewrites ids, actors and free text on entities, provider operations, commercial action previews,
-  promotion codes, plan grants, redemptions, operator grants, debits, balance allocation keys and
-  refund requests (the account id, the caller's reason and both idempotency keys; the amounts,
-  currency and provider ids stay);
+  promotion codes, plan grants, redemptions and their Apple signature attempts (reasons, keys and
+  stored replies), operator grants, debits, balance allocation keys and refund requests (the
+  account id, the caller's reason and both idempotency keys; the amounts, currency and provider ids
+  stay);
 - blanks provider payloads and error text on store events, purchases, subscriptions and invoices,
   and the receipt, window keys and caller metadata of usage events;
 - verifies that nothing still carries the original id, then completes and drops the id from the
@@ -1011,3 +1012,85 @@ Re-run the preview after each batch. Finish only when `remaining` is zero: `dele
 that another transaction still locks the remaining rows. Repeating the cleanup is safe. A running
 erasure that fails with `RESIDUAL_ROWS` retains its subject id and can be queued again using its
 original request and idempotency key.
+
+#### Historical redemption cleanup
+
+Older processes completed an erasure while `promotion_redemptions` and
+`promotion_apple_signature_attempts` still held the account id in their stored replies, and the
+caller's idempotency keys and reversal reason. Replace every old API and worker process first, or
+a running erasure can still finish with those rows untouched. This fix needs no schema migration
+or environment changes. The cleanup touches only rows of an erased customer. What was redeemed, its
+status and its dates stay, so promotion limits and the redemption ledger do not change.
+
+Using an operator database connection, preview the rows that remain, without selecting their
+contents:
+
+```sql
+SELECT
+  (SELECT count(*)
+   FROM promotion_redemptions redemption
+   JOIN customers customer
+     ON customer.project_id = redemption.project_id AND customer.id = redemption.customer_id
+   WHERE customer.erased_at IS NOT NULL
+     AND redemption.idempotency_key NOT LIKE 'erased:%') AS redemptions,
+  (SELECT count(*)
+   FROM promotion_apple_signature_attempts attempt
+   JOIN customers customer
+     ON customer.project_id = attempt.project_id AND customer.id = attempt.customer_id
+   WHERE customer.erased_at IS NOT NULL
+     AND attempt.idempotency_key NOT LIKE 'erased:%') AS signature_attempts;
+```
+
+Run each statement repeatedly. Each one commits a batch of at most 500 rows and skips rows locked
+by another transaction.
+
+```sql
+-- Erased redemption cleanup batch
+WITH batch AS (
+  SELECT redemption.project_id, redemption.id
+  FROM promotion_redemptions redemption
+  JOIN customers customer
+    ON customer.project_id = redemption.project_id AND customer.id = redemption.customer_id
+  WHERE customer.erased_at IS NOT NULL
+    AND redemption.idempotency_key NOT LIKE 'erased:%'
+  ORDER BY redemption.created_at, redemption.id
+  LIMIT 500
+  FOR UPDATE OF redemption SKIP LOCKED
+), updated AS (
+  UPDATE promotion_redemptions redemption
+  SET reason = NULL, reversal_reason = NULL, result = NULL, reversal_result = NULL,
+    idempotency_key = 'erased:' || redemption.id::text,
+    reversal_idempotency_key = CASE WHEN redemption.reversal_idempotency_key IS NULL
+      THEN NULL ELSE 'erased:' || redemption.id::text END,
+    updated_at = now()
+  FROM batch
+  WHERE redemption.project_id = batch.project_id AND redemption.id = batch.id
+  RETURNING redemption.id
+)
+SELECT count(*) AS updated FROM updated;
+```
+
+```sql
+-- Erased signature attempt cleanup batch
+WITH batch AS (
+  SELECT attempt.project_id, attempt.id
+  FROM promotion_apple_signature_attempts attempt
+  JOIN customers customer
+    ON customer.project_id = attempt.project_id AND customer.id = attempt.customer_id
+  WHERE customer.erased_at IS NOT NULL
+    AND attempt.idempotency_key NOT LIKE 'erased:%'
+  ORDER BY attempt.created_at, attempt.id
+  LIMIT 500
+  FOR UPDATE OF attempt SKIP LOCKED
+), updated AS (
+  UPDATE promotion_apple_signature_attempts attempt
+  SET idempotency_key = 'erased:' || attempt.id::text, result = '{}'::jsonb
+  FROM batch
+  WHERE attempt.project_id = batch.project_id AND attempt.id = batch.id
+  RETURNING attempt.id
+)
+SELECT count(*) AS updated FROM updated;
+```
+
+Re-run the preview after each batch and finish when both counts are zero: `updated = 0` can mean
+that another transaction still locks the remaining rows. Repeating the cleanup is safe.
