@@ -453,8 +453,11 @@ no project key. Add `provider` to the file:
   entitlement key and credits.
 
 The rules are Stripe's: adoption is additive, an exact repeat returns the same IDs, and a mapping is
-never rewritten, so a different declared period or product id needs a new product key. A refusal
-answers `STORE_BINDING_INVALID` with `409` and `details.reason`: `idempotency_key_reused`,
+never rewritten, so a different declared period or product id needs a new product key. The one
+exception is a mapping with no price: adopting it again with `currency` and `priceAmountMinor`, and
+everything else unchanged, adds the price under a new request key. A price is not changed once set.
+[Affiliate summaries](affiliates.md#how-amounts-are-worked-out) use it to estimate store revenue. A
+refusal answers `STORE_BINDING_INVALID` with `409` and `details.reason`: `idempotency_key_reused`,
 `product_identity_conflict` or `binding_identity_conflict`. The response and `bindings list` carry
 `provider` and `channel` for every mapping.
 

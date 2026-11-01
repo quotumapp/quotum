@@ -5,6 +5,7 @@ import type {
 	AdminStatsSummary,
 	AdminStoreEvent,
 } from "../admin/types";
+import type { AffiliateCustomer, AffiliateSummary } from "../billing/affiliates";
 import type { AppleOfferInput, ApplePromotionAction } from "../billing/apple-promotions";
 import type {
 	AdministrativeDebitMutationResult,
@@ -95,9 +96,10 @@ export interface BillingClientOptions {
 
 export type BillingFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-export type PurchaseVerificationInput =
+export type PurchaseVerificationInput = (
 	| ({ provider: "apple" } & AppleVerifyPurchaseInput)
-	| ({ provider: "google" } & GoogleVerifyPurchaseInput);
+	| ({ provider: "google" } & GoogleVerifyPurchaseInput)
+) & { affiliateKey?: string };
 
 export interface CursorPage<T> {
 	data: T[];
@@ -143,6 +145,7 @@ export class BillingClient {
 	readonly usage;
 	readonly invoices;
 	readonly purchases;
+	readonly affiliates;
 	readonly promotions;
 	readonly trials;
 	readonly adjustments;
@@ -200,7 +203,7 @@ export class BillingClient {
 		this.commercial = {
 			createPaddleCheckout: (
 				billingAccountId: string,
-				input: { productKey: string; email?: string },
+				input: { productKey: string; email?: string; affiliateKey?: string },
 				idempotencyKey: string,
 			) =>
 				this.request<{ sessionId: string; url: string; duplicate: boolean }>(
@@ -356,6 +359,15 @@ export class BillingClient {
 					method: "POST",
 					body: input,
 				}),
+		};
+		this.affiliates = {
+			/** Totals one affiliate key; App Store and Google Play amounts are estimates. */
+			summary: (affiliateKey: string) =>
+				this.request<AffiliateSummary>(`/v1/affiliates/${segment(affiliateKey)}/summary`),
+			customers: (affiliateKey: string, query: { limit?: number; cursor?: string } = {}) =>
+				this.requestPage<AffiliateCustomer>(
+					pathWithQuery(`/v1/affiliates/${segment(affiliateKey)}/customers`, query),
+				),
 		};
 		this.trials = {
 			/**

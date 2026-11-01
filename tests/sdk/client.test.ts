@@ -34,6 +34,43 @@ describe("BillingClient", () => {
 		expect(calls[1]?.headers.get("x-billing-operator-key")).toBe("operator");
 	});
 
+	it("sends an affiliate key on purchases and reads an affiliate's totals", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example",
+			apiKey: "project",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return request.url.includes("/customers")
+					? Response.json({ success: true, data: [], pagination: { nextCursor: null } })
+					: Response.json({ success: true, data: {} });
+			},
+		});
+		const affiliateKey = "acme-partner";
+		await client.commercial.createPaddleCheckout(
+			"account_1",
+			{ productKey: "pro", affiliateKey },
+			"stable",
+		);
+		await client.purchases.verify({
+			provider: "apple",
+			billingAccountId: "account_1",
+			transactionId: "1000",
+			affiliateKey,
+		});
+		await client.affiliates.summary(affiliateKey);
+		expect(await client.affiliates.customers(affiliateKey, { limit: 5 })).toEqual({
+			data: [],
+			nextCursor: null,
+		});
+
+		expect(await calls[0]?.json()).toMatchObject({ affiliateKey });
+		expect(await calls[1]?.json()).toMatchObject({ affiliateKey });
+		expect(calls[2]?.url).toEndWith("/v1/affiliates/acme-partner/summary");
+		expect(calls[3]?.url).toEndWith("/v1/affiliates/acme-partner/customers?limit=5");
+	});
+
 	it("selects Paddle only in the preview request and preserves the default Stripe wire shape", async () => {
 		const bodies: unknown[] = [];
 		const client = new BillingClient({

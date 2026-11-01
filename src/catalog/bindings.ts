@@ -355,7 +355,7 @@ export class CatalogBindings extends RepositoryModule implements CatalogBindings
 	 * API offers a product lookup to a Quotum connection, so nothing is read from the store and no
 	 * connection is needed: the first publish and the first real purchase verify it end to end. The
 	 * rules match a Stripe adoption: additive, an exact repeat answers the same ids, and an existing
-	 * product or mapping is never rewritten.
+	 * product or mapping is never rewritten, except that a mapping without a price may gain one.
 	 */
 	private async adoptNative(
 		project: ProjectInstanceContext,
@@ -417,7 +417,16 @@ export class CatalogBindings extends RepositoryModule implements CatalogBindings
 					tx,
 					sql`SELECT id FROM store_products WHERE project_id = ${projectId} AND id = ${mapping.id} AND product_id = ${productRow.id} AND channel = ${channel} AND external_product_id = ${input.externalProductId} AND external_price_id IS NOT DISTINCT FROM ${externalPriceId} AND billing_period = ${period} AND billing_period_count = ${periodCount} AND currency IS NOT DISTINCT FROM ${currency} AND price_amount IS NOT DISTINCT FROM ${priceAmount} AND active = true`,
 				);
-				if (!match) storeConflict("binding_identity_conflict");
+				// A mapping adopted without a price may gain one; everything else it declares stays fixed.
+				const priced =
+					match ??
+					(priceAmount === null
+						? null
+						: await executeOne(
+								tx,
+								sql`UPDATE store_products SET currency = ${currency}, price_amount = ${priceAmount}, updated_at = now() WHERE project_id = ${projectId} AND id = ${mapping.id} AND product_id = ${productRow.id} AND channel = ${channel} AND external_product_id = ${input.externalProductId} AND external_price_id IS NOT DISTINCT FROM ${externalPriceId} AND billing_period = ${period} AND billing_period_count = ${periodCount} AND currency IS NULL AND price_amount IS NULL AND active = true RETURNING id`,
+							));
+				if (!priced) storeConflict("binding_identity_conflict");
 			}
 			const stored =
 				mapping ??

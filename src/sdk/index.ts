@@ -1,3 +1,8 @@
+export type {
+	AffiliateCustomer,
+	AffiliateRevenue,
+	AffiliateSummary,
+} from "../billing/affiliates";
 export type { AppleOfferInput, ApplePromotionAction } from "../billing/apple-promotions";
 export type {
 	AdministrativeDebitMutationResult,
