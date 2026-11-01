@@ -395,6 +395,38 @@ localDescribe("customer erasure", () => {
 		expect(active.has_result).toBe(true);
 	});
 
+	it("finishes for an account that holds a code restricted to it", async () => {
+		const seeded = await seedAccount();
+		await context.repository.promotions.createPromotion(project, {
+			key: "canary-only",
+			name: "Canary only",
+			effect: {
+				kind: "feature_grant",
+				items: [{ featureKey: "ai_credits", quantity: "5", expiresAfterSeconds: null }],
+			},
+			codes: [{ code: "CANARY-ONLY", billingAccountId: canary }],
+			actor,
+		});
+
+		const accepted = await seeded.erase("erase-restricted", {
+			acknowledge: ["forfeit_paid_balances"],
+		});
+		expect(accepted.status).toBe(201);
+		const { erasure } = (await accepted.json()).data;
+		await work();
+
+		const finished = await (await seeded.receipt(erasure.id)).json();
+		expect(finished.data).toMatchObject({ state: "completed", lastError: null });
+		expect(await tablesMentioningCanary()).toEqual([]);
+		const [code] = await context.sql`
+			SELECT active, deactivated_at, deactivated_by FROM promotion_codes
+			WHERE project_id = ${projectId} AND normalized_code = 'CANARY-ONLY'
+		`;
+		expect(code.active).toBe(false);
+		expect(code.deactivated_at).not.toBeNull();
+		expect(code.deactivated_by).toBe("system:customer-erasure");
+	});
+
 	it("replays an erasure by its key and refuses the key for a different request", async () => {
 		const seeded = await seedAccount();
 		const body = { reference: "ticket-1", acknowledge: ["forfeit_paid_balances"] };

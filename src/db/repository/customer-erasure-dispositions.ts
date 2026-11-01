@@ -216,7 +216,10 @@ export const rewriteBatches: CustomerErasureBatch[] = [
 	updateBatch(
 		"promotion_codes",
 		(context) => drizzleSql`
-			billing_account_id = ${erasedMarker(context)}, active = false, updated_at = now()`,
+			billing_account_id = ${erasedMarker(context)}, active = false,
+			deactivated_at = COALESCE(target.deactivated_at, now()),
+			deactivated_by = COALESCE(target.deactivated_by, 'system:customer-erasure'),
+			updated_at = now()`,
 		ofAccount,
 	),
 	updateBatch(

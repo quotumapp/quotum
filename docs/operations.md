@@ -1094,3 +1094,8 @@ SELECT count(*) AS updated FROM updated;
 
 Re-run the preview after each batch and finish when both counts are zero: `updated = 0` can mean
 that another transaction still locks the remaining rows. Repeating the cleanup is safe.
+
+Older processes also failed an erasure when the account held an active promotion code restricted
+to it, with `lastError` `STEP_FAILED` or a `SQLSTATE_` code, leaving the rest of the account's data
+in place. Queue such an erasure again with its original request and idempotency key once the new
+processes run.
