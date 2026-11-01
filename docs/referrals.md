@@ -204,6 +204,9 @@ account's own rewards, so one side never sees the other's codes. The read needs 
 because a held reward carries its code. The SDK call is
 `client.referrals.list(billingAccountId, { role, limit, cursor })`.
 
+The merchant console reads the same list for a customer's page, through
+`GET /api/billing/admin/billing-accounts/:billingAccountId/referrals`.
+
 To tell a customer they earned something, subscribe to the
 [`referral.reward_issued` event](webhooks.md#event-types). Its data names the reward and never the
 other account, and it never carries a code: read a held code from this route.

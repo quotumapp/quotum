@@ -86,6 +86,7 @@ export const merchantBillingOperations = [
 		"/billing-accounts/:billingAccountId/promotion-redemptions",
 		"account.promotion-redemptions",
 	],
+	["GET", "/billing-accounts/:billingAccountId/referrals", "account.referrals"],
 	["POST", "/admin/catalog/preview", "catalog.preview"],
 	["POST", "/admin/catalog/publish", "catalog.publish"],
 	["POST", "/admin/store-events/:eventId/replay", "events.replay"],

@@ -294,6 +294,7 @@ describe("merchant security boundaries", () => {
 			"/api/billing/admin/promotions/spring-sale/codes",
 			"/api/billing/admin/promotions/spring-sale/redemptions",
 			"/api/billing/admin/billing-accounts/acct_1/promotion-redemptions",
+			"/api/billing/admin/billing-accounts/acct_1/referrals",
 		])
 			expect(merchantBillingRoute("GET", path, "production")).toMatchObject({
 				capability: "billing.read",

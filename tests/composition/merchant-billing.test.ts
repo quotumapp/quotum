@@ -585,6 +585,32 @@ describe("merchant billing port", () => {
 		expect(bad.status).toBe(400);
 	});
 
+	it("reads who an account referred and who referred it, by role", async () => {
+		const listed: unknown[] = [];
+		const billing = port({
+			repository: {
+				referrals: {
+					async listAccountReferrals(_project: unknown, billingAccountId: string, input: unknown) {
+						listed.push({ billingAccountId, input });
+						return { items: [], nextCursor: null };
+					},
+				},
+			} as unknown as Partial<BillingRepository>,
+		});
+
+		const list = await billing.dispatch(
+			command("account.referrals", { query: { role: "referrer", limit: "5" } }),
+		);
+
+		expect(list.status).toBe(200);
+		expect(list.body).toMatchObject({ success: true, data: [] });
+		expect(listed).toEqual([
+			{ billingAccountId: "user_1", input: { limit: 5, cursor: null, role: "referrer" } },
+		]);
+		const bad = await billing.dispatch(command("account.referrals", { query: { role: "nobody" } }));
+		expect(bad.status).toBe(400);
+	});
+
 	it("keeps the envelope without details when an error carries none", async () => {
 		expect(await port({ stripe: null }).dispatch(command("account.billing"))).toEqual({
 			status: 503,
