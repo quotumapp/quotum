@@ -115,14 +115,22 @@ async function customerId(billingAccountId: string): Promise<string> {
 async function insertInvoice(
 	id: string,
 	billingAccountId: string,
-	input: { status?: string; amountPaid: number; reversed?: number; currency?: string },
+	input: {
+		status?: string;
+		amountPaid: number;
+		reversed?: number;
+		currency?: string;
+		/** A subscription invoice by default; an automatic top-up has no subscription. */
+		externalSubscriptionId?: string | null;
+	},
 ): Promise<void> {
 	await context.sql`
 		INSERT INTO billing_invoices (
-			project_id, customer_id, external_invoice_id, status, amount_paid, reversed_amount, currency,
-			paid_at, provider_created_at
+			project_id, customer_id, external_invoice_id, external_subscription_id, status, amount_paid,
+			reversed_amount, currency, paid_at, provider_created_at
 		) VALUES (
 			${project().projectInstanceId}, ${await customerId(billingAccountId)}, ${id},
+			${input.externalSubscriptionId === undefined ? "sub_fixture" : input.externalSubscriptionId},
 			${input.status ?? "paid"}, ${input.amountPaid}, ${input.reversed ?? 0},
 			${input.currency ?? "usd"}, ${start.toISOString()}, ${start.toISOString()}
 		)
@@ -154,6 +162,48 @@ async function insertPurchase(
 		FROM products
 		WHERE products.project_id = ${project().projectInstanceId} AND products.key = 'echo_credits_10'
 	`;
+}
+
+/** A completed one-time Checkout, through the path Stripe's webhook takes. */
+async function recordStripeCheckout(
+	billingAccountId: string,
+	id: string,
+	input: { amountPaidCents: number },
+): Promise<void> {
+	await context.repository.recordStripeCreditPurchaseAndEnqueueProjection(project(), {
+		purchaseKind: "consumable",
+		billingAccountId,
+		stripeCustomerId: `cus_${id}`,
+		externalProductId: "prod_stripe_credits_10",
+		externalPriceId: "price_credits_10",
+		transactionId: `pi_${id}`,
+		paymentIntentId: `pi_${id}`,
+		chargeId: `ch_${id}`,
+		checkoutSessionId: `cs_${id}`,
+		amountPaidCents: input.amountPaidCents,
+		currency: "usd",
+		purchasedAt: start,
+		rawPayload: { id: `cs_${id}` },
+		eventType: "checkout.session.completed",
+		externalEventId: `evt_${id}`,
+		projectionIdempotencyKey: `stripe:payment:pi_${id}:projection`,
+	});
+}
+
+async function refundStripeCheckout(id: string, amount: number): Promise<void> {
+	await context.repository.recordStripeCreditReversalAndEnqueueProjection(project(), {
+		reversalReason: "refund",
+		reversalId: `re_${id}`,
+		reversalAmount: amount,
+		reversalCurrency: "usd",
+		paymentIntentId: `pi_${id}`,
+		chargeId: `ch_${id}`,
+		reversedAt: new Date(start.getTime() + day),
+		rawPayload: { id: `re_${id}` },
+		eventType: "refund.created",
+		externalEventId: `evt_${id}_refund`,
+		projectionIdempotencyKey: `stripe:refund:re_${id}:projection`,
+	});
 }
 
 localDescribe("affiliate tracking", () => {
@@ -386,7 +436,10 @@ localDescribe("affiliate tracking", () => {
 	});
 
 	it("counts an automatic top-up once, from its invoice", async () => {
-		await insertInvoice("in_topup", "topup_user", { amountPaid: 1000 });
+		await insertInvoice("in_topup", "topup_user", {
+			amountPaid: 1000,
+			externalSubscriptionId: null,
+		});
 		await insertPurchase("pi_topup", "topup_user", {
 			provider: "stripe",
 			amountPaid: 1000,
@@ -397,6 +450,37 @@ localDescribe("affiliate tracking", () => {
 			billingAccountId: "topup_user",
 			affiliateKey: "acme-partner",
 		});
+
+		expect((await affiliates().getAffiliateSummary(project(), "acme-partner")).revenue).toEqual([
+			{ provider: "stripe", currency: "usd", payments: 1, amountMinor: 1000, estimated: false },
+		]);
+	});
+
+	it("counts a one-time Stripe checkout once, and not at all after a full refund", async () => {
+		await customerId("checkout_user");
+		await affiliates().recordAffiliateKey(project(), {
+			billingAccountId: "checkout_user",
+			affiliateKey: "acme-partner",
+		});
+		await recordStripeCheckout("checkout_user", "one", { amountPaidCents: 1500 });
+
+		expect((await affiliates().getAffiliateSummary(project(), "acme-partner")).revenue).toEqual([
+			{ provider: "stripe", currency: "usd", payments: 1, amountMinor: 1500, estimated: false },
+		]);
+
+		await refundStripeCheckout("one", 1500);
+
+		expect((await affiliates().getAffiliateSummary(project(), "acme-partner")).revenue).toEqual([]);
+	});
+
+	it("subtracts a partial refund of a one-time Stripe checkout", async () => {
+		await customerId("partial_user");
+		await affiliates().recordAffiliateKey(project(), {
+			billingAccountId: "partial_user",
+			affiliateKey: "acme-partner",
+		});
+		await recordStripeCheckout("partial_user", "two", { amountPaidCents: 1500 });
+		await refundStripeCheckout("two", 500);
 
 		expect((await affiliates().getAffiliateSummary(project(), "acme-partner")).revenue).toEqual([
 			{ provider: "stripe", currency: "usd", payments: 1, amountMinor: 1000, estimated: false },

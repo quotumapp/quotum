@@ -41,9 +41,11 @@ export class AffiliateRepository extends RepositoryModule implements AffiliateSe
 			`,
 		);
 		// Stripe subscriptions and automatic top-ups are paid invoices; a top-up also has a purchase
-		// row, which the invoice match skips. Store products have one catalog price, so an App Store
-		// or Google Play amount is that price per payment. Google overwrites one purchase row per
-		// token, so its renewals come from their notifications, and a free trial row is no payment.
+		// row, which the invoice match skips. A one-time Checkout has both rows too, but its refunds
+		// land on the purchase, so that one counts and its session invoice does not. Store products
+		// have one catalog price, so an App Store or Google Play amount is that price per payment.
+		// Google overwrites one purchase row per token, so its renewals come from their
+		// notifications, and a free trial row is no payment.
 		const rows = await executeRows<{
 			provider: BillingProvider;
 			currency: string | null;
@@ -69,6 +71,16 @@ export class AffiliateRepository extends RepositoryModule implements AffiliateSe
 					WHERE invoice.project_id = ${projectId}
 						AND invoice.status = 'paid'
 						AND invoice.amount_paid > invoice.reversed_amount
+						AND (
+							invoice.external_subscription_id IS NOT NULL
+							OR EXISTS (
+								SELECT 1
+								FROM purchases purchase
+								WHERE purchase.project_id = invoice.project_id
+									AND purchase.customer_id = invoice.customer_id
+									AND purchase.original_transaction_id = invoice.external_invoice_id
+							)
+						)
 					UNION ALL
 					SELECT
 						purchase.provider,
