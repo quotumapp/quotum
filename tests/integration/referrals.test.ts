@@ -649,11 +649,14 @@ localDescribe("Referral programs", () => {
 		it("issues what the inline attempt could not, once", async () => {
 			await program(credits, { recipient: "both" });
 			await accounts("alice", "bob");
-			const flaky = new ReferralRepository(context.db as never, {
-				redeemPromotionCode: async () => {
-					throw new Error("connection reset");
-				},
-			});
+			const flaky = new ReferralRepository(
+				context.db as never,
+				{
+					redeemPromotionCode: async () => {
+						throw new Error("connection reset");
+					},
+				} as never,
+			);
 
 			const { referral } = await flaky.redeemCode(project, {
 				billingAccountId: "bob",
@@ -677,11 +680,14 @@ localDescribe("Referral programs", () => {
 		it("backs off, then gives up", async () => {
 			await program(credits);
 			await accounts("alice", "bob");
-			const flaky = new ReferralRepository(context.db as never, {
-				redeemPromotionCode: async () => {
-					throw new Error("connection reset");
-				},
-			});
+			const flaky = new ReferralRepository(
+				context.db as never,
+				{
+					redeemPromotionCode: async () => {
+						throw new Error("connection reset");
+					},
+				} as never,
+			);
 			await flaky.redeemCode(project, {
 				billingAccountId: "bob",
 				code: await codeOf("alice"),

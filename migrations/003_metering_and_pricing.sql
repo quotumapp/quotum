@@ -3109,6 +3109,10 @@ CREATE INDEX IF NOT EXISTS idx_billing_referral_rewards_due
 	ON referral_rewards (next_attempt_at, id)
 	WHERE status = 'pending';
 
+CREATE INDEX IF NOT EXISTS idx_billing_referral_rewards_held
+	ON referral_rewards (next_attempt_at, id)
+	WHERE status = 'held';
+
 CREATE INDEX IF NOT EXISTS idx_billing_referral_rewards_customer
 	ON referral_rewards (project_id, customer_id, recipient);
 

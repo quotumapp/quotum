@@ -42,6 +42,8 @@ import {
 	type PromotionStripeSyncOutcome,
 	type PromotionTarget,
 	promotionError,
+	type SubscriptionDiscountInput,
+	type SubscriptionDiscountOutcome,
 } from "../../billing/promotions";
 import type {
 	SubscriptionCancellationContext,
@@ -1951,6 +1953,38 @@ export class StripeBillingService
 			throw promotionError("PROMOTION_PROVIDER_NOT_READY");
 		}
 		return await repository.resolveCommercialPromotion({ billingAccountId, code, target });
+	}
+
+	/**
+	 * Adds a promotion's coupon to a live subscription with no plan change. Stripe documents that
+	 * updating discounts alone makes no proration and no invoice, so it applies at the next invoice.
+	 * A subscription that already has a discount is left alone: a second `once` discount of one
+	 * coupon cannot be attached until the first is used up, and any other would stack. The only
+	 * exception is a retry finding its own coupon, which an attempt that lost its response added.
+	 */
+	async addSubscriptionDiscount(
+		input: SubscriptionDiscountInput,
+	): Promise<SubscriptionDiscountOutcome> {
+		const { client } = this.dependencies;
+		if (client.updateSubscription === undefined) {
+			throw new Error("Stripe subscription updates are unavailable");
+		}
+		if (client.retrieveSubscriptionDiscounts === undefined) {
+			throw new Error("Stripe subscription discounts are unavailable");
+		}
+		const couponId = await this.ensureStripeCoupon(input.promotionId);
+		const existing = await client.retrieveSubscriptionDiscounts(input.externalSubscriptionId);
+		if (existing.length > 0) {
+			return input.retry && existing.some((discount) => discount.couponId === couponId)
+				? "added"
+				: "already_discounted";
+		}
+		await client.updateSubscription(
+			input.externalSubscriptionId,
+			{ discounts: [{ coupon: couponId }] },
+			input.idempotencyKey,
+		);
+		return "added";
 	}
 
 	async applySubscriptionChange(operation: SubscriptionChangeOperation): Promise<string> {

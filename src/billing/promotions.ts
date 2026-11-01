@@ -215,6 +215,17 @@ export type PromotionStripeSyncJob = {
 	  }
 );
 
+export interface SubscriptionDiscountInput {
+	promotionId: string;
+	externalSubscriptionId: string;
+	idempotencyKey: string;
+	/** True when this same reservation already tried, so its own coupon may be attached. */
+	retry: boolean;
+}
+
+/** `already_discounted`: the subscription has a discount, so nothing was changed. */
+export type SubscriptionDiscountOutcome = "added" | "already_discounted";
+
 export type PromotionStripeSyncOutcome =
 	| { kind: "ready"; externalId: string; providerActive: boolean }
 	| { kind: "retired"; externalId: string | null }

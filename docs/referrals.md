@@ -173,11 +173,26 @@ revocation are those of promotions.
 | `feature_grant` | The recipient's balance gets the credits. | `issued` |
 | `plan_grant` | The recipient holds the plan for its term. | `issued` |
 | `plan_grant`, recipient has a paid plan, a trial or another grant | The plan cannot start now, so the code waits. The reward's `reason` is `PROMOTION_BASE_PLAN_ACTIVE` or `PROMOTION_PLAN_GRANT_ACTIVE`. Redeem it later through [`promotion-redemptions`](promotions.md). | `held` |
-| `discount` | Nothing to apply yet, so the code waits. Pass it as `promotionCode` to the recipient's next checkout or `subscription_change`. | `held` |
+| `discount`, recipient has a live Stripe subscription | The discount goes on the subscription and applies from its next invoice. Stripe makes no proration or invoice for it. | `issued` |
+| `discount`, any other recipient | The code waits. Pass it as `promotionCode` to the recipient's next checkout or `subscription_change`. | `held` |
 
 A held reward carries its `code`, and only that account can use it. Once it is used the reward reads
 `used`. Apple and Google have no server-side discount, so choose credits for customers who pay
 through a store.
+
+The worker keeps looking at a held discount, so a referrer who subscribes later without using the
+code receives it on that subscription. While it waits, `reason` says why:
+
+| `reason` | Meaning |
+| --- | --- |
+| `DISCOUNT_CODE` | The recipient has no live Stripe subscription, or it is set to cancel. |
+| `SUBSCRIPTION_HAS_DISCOUNT` | The subscription already has a discount, the merchant's own included. Quotum looks again a day later, so a second `once` reward goes on after the first is used. |
+| `SUBSCRIPTION_CHANGE_PENDING` | A plan change is queued, and it rewrites the same discount list. |
+| `PROMOTION_CODE_NOT_APPLICABLE` | The promotion's targets do not cover the subscription's plan. |
+| `STRIPE_NOT_CONFIGURED` | The environment has no usable Stripe connection. |
+
+After eight failed Stripe attempts the worker stops trying, and the code stays usable. A discount
+that went on cannot be taken back through the revoke route; remove it in Stripe.
 
 If issuing a reward fails, it reads `pending` and the promotion maintenance worker retries it with
 backoff; after eight attempts it reads `failed`, with
@@ -188,7 +203,7 @@ the new customer still receives their reward, while the referrer's reads `skippe
 `REFERRER_LIMIT_REACHED`. A reward whose promotion was archived reads `failed` with
 `PROMOTION_ARCHIVED`, and a recipient erased in the meantime reads `skipped` with `RECIPIENT_ERASED`.
 
-Take a reward back with
+Take back a credit or plan reward with
 [`POST /v1/admin/promotion-redemptions/:redemptionId/revoke`](promotions.md). A later refund of the
 new customer's payment changes no reward by itself.
 
