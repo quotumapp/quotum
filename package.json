@@ -74,9 +74,11 @@
 	},
 	"overrides": {
 		"form-data": "4.0.6",
+		"glob": "14.0.3",
 		"google-auth-library": "11.3.0",
+		"minimatch": "11.0.3",
 		"protobufjs": "7.6.6",
-		"qs": "6.16.0"
+		"qs": "6.17.1"
 	},
 	"engines": {
 		"bun": ">=1.4.0 <1.5.0"
