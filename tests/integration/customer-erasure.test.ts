@@ -26,6 +26,15 @@ const canaryEntity = "canary-entity-7f3a9c";
 const actor = "support@example.com";
 let context: LocalPostgresContext;
 
+async function refusal(call: () => Promise<unknown>): Promise<string> {
+	try {
+		await call();
+	} catch (error) {
+		return (error as { code: string }).code;
+	}
+	throw new Error("the call was not refused");
+}
+
 localDescribe("customer erasure", () => {
 	beforeAll(async () => {
 		context = await createLocalPostgresContext();
@@ -425,6 +434,134 @@ localDescribe("customer erasure", () => {
 		expect(code.active).toBe(false);
 		expect(code.deactivated_at).not.toBeNull();
 		expect(code.deactivated_by).toBe("system:customer-erasure");
+	});
+
+	/** A program rewarding both sides with credits, for referrals around the erased account. */
+	async function referralProgram() {
+		await context.repository.promotions.createPromotion(project, {
+			key: "referral-credits",
+			name: "Referral credits",
+			effect: {
+				kind: "feature_grant",
+				items: [{ featureKey: "ai_credits", quantity: "5", expiresAfterSeconds: null }],
+			},
+			actor,
+		});
+		await context.repository.referrals.createProgram(project, {
+			key: "friends",
+			name: "Friends",
+			rewardPromotionKey: "referral-credits",
+			trigger: "redemption",
+			recipient: "both",
+			actor,
+		});
+		await ensureCustomer(context.db as never, projectId, "friend-account");
+		return context.repository.referrals;
+	}
+
+	it("removes an erased referrer's code and leaves nothing that names it in a referral", async () => {
+		const seeded = await seedAccount();
+		const referrals = await referralProgram();
+		const { code } = await referrals.getOrCreateCode(project, {
+			billingAccountId: canary,
+			programKey: "friends",
+		});
+		await referrals.redeemCode(project, {
+			billingAccountId: "friend-account",
+			code,
+			channel: "web",
+		});
+
+		const accepted = await seeded.erase("erase-referrer", {
+			acknowledge: ["forfeit_paid_balances"],
+		});
+		expect(accepted.status).toBe(201);
+		await work();
+
+		expect(await tablesMentioningCanary()).toEqual([]);
+		const [codes] = await context.sql`SELECT count(*)::int AS count FROM referral_codes`;
+		expect(codes.count).toBe(0);
+		const page = await referrals.listAccountReferrals(project, "friend-account", {
+			limit: 10,
+			cursor: null,
+			role: "referee",
+		});
+		expect(page.items[0]?.counterpartBillingAccountId).toBeNull();
+		// The friend keeps what the friend was given.
+		expect(page.items[0]?.rewards[0]?.status).toBe("issued");
+		expect(
+			await refusal(() =>
+				referrals.redeemCode(project, {
+					billingAccountId: "friend-account",
+					code,
+					channel: "web",
+				}),
+			),
+		).toBe("REFERRAL_CODE_NOT_FOUND");
+	});
+
+	it("leaves nothing that names an erased referee, and shows the referrer no id", async () => {
+		const referrals = await referralProgram();
+		const { code } = await referrals.getOrCreateCode(project, {
+			billingAccountId: "friend-account",
+			programKey: "friends",
+		});
+		// A referee enters the code before paying; seeding gives the account its paid purchase.
+		await ensureCustomer(context.db as never, projectId, canary, canaryEmail);
+		await referrals.redeemCode(project, { billingAccountId: canary, code, channel: "web" });
+		const seeded = await seedAccount();
+
+		const accepted = await seeded.erase("erase-referee", {
+			acknowledge: ["forfeit_paid_balances"],
+		});
+		expect(accepted.status).toBe(201);
+		await work();
+
+		expect(await tablesMentioningCanary()).toEqual([]);
+		const ledger = await referrals.listProgramReferrals(project, "friends", {
+			limit: 10,
+			cursor: null,
+		});
+		expect(ledger.items[0]).toMatchObject({
+			referrerBillingAccountId: "friend-account",
+			refereeBillingAccountId: null,
+		});
+	});
+
+	it("skips a reward still owed to an account erased in the meantime", async () => {
+		const seeded = await seedAccount();
+		const referrals = await referralProgram();
+		const { code } = await referrals.getOrCreateCode(project, {
+			billingAccountId: canary,
+			programKey: "friends",
+		});
+		await referrals.redeemCode(project, {
+			billingAccountId: "friend-account",
+			code,
+			channel: "web",
+		});
+		// The inline attempt issued it, so put the reward back to what a failed attempt leaves.
+		const [reward] = await context.sql`
+			UPDATE referral_rewards SET status = 'pending', issued_at = NULL, promotion_code_id = NULL
+			WHERE recipient = 'referrer'
+			RETURNING id
+		`;
+
+		const accepted = await seeded.erase("erase-owed", {
+			acknowledge: ["forfeit_paid_balances"],
+		});
+		expect(accepted.status).toBe(201);
+		await work();
+		await referrals.issueReward(project, reward.id);
+
+		const [row] = await context.sql`
+			SELECT status, reason, promotion_code_id FROM referral_rewards WHERE id = ${reward.id}
+		`;
+		expect(row).toEqual({
+			status: "skipped",
+			reason: "RECIPIENT_ERASED",
+			promotion_code_id: null,
+		});
 	});
 
 	it("replays an erasure by its key and refuses the key for a different request", async () => {

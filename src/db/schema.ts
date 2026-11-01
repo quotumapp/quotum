@@ -6481,3 +6481,242 @@ export const catalogBindingAdoptions = pgTable(
 	},
 	(table) => [primaryKey({ columns: [table.projectId, table.requestKey] })],
 );
+
+export const referralPrograms = pgTable(
+	"referral_programs",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		key: text("key").notNull(),
+		name: text("name").notNull(),
+		status: text("status").notNull().default("active"),
+		rewardPromotionId: uuid("reward_promotion_id").notNull(),
+		trigger: text("trigger").notNull(),
+		recipient: text("recipient").notNull(),
+		maxRewardsPerReferrer: integer("max_rewards_per_referrer"),
+		termsHash: text("terms_hash").notNull(),
+		createdBy: text("created_by").notNull(),
+		archivedBy: text("archived_by"),
+		archivedAt: timestamp("archived_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"referral_programs_key_check",
+			sql`((char_length(key) >= 1) AND (char_length(key) <= 120))`,
+		),
+		check(
+			"referral_programs_name_check",
+			sql`((char_length(name) >= 1) AND (char_length(name) <= 200))`,
+		),
+		check(
+			"referral_programs_status_check",
+			sql`(status = ANY (ARRAY['active'::text, 'archived'::text]))`,
+		),
+		check("referral_programs_trigger_check", sql`(trigger = 'redemption'::text)`),
+		check(
+			"referral_programs_recipient_check",
+			sql`(recipient = ANY (ARRAY['referrer'::text, 'both'::text]))`,
+		),
+		check(
+			"referral_programs_max_rewards_per_referrer_check",
+			sql`((max_rewards_per_referrer IS NULL) OR (max_rewards_per_referrer > 0))`,
+		),
+		check("referral_programs_terms_hash_check", sql`(char_length(terms_hash) = 64)`),
+		check(
+			"referral_programs_created_by_check",
+			sql`((char_length(created_by) >= 1) AND (char_length(created_by) <= 200))`,
+		),
+		check(
+			"referral_programs_archived_by_check",
+			sql`((archived_by IS NULL) OR ((char_length(archived_by) >= 1) AND (char_length(archived_by) <= 200)))`,
+		),
+		check(
+			"referral_programs_archive_check",
+			sql`(((status = 'active'::text) AND (archived_at IS NULL) AND (archived_by IS NULL)) OR ((status = 'archived'::text) AND (archived_at IS NOT NULL) AND (archived_by IS NOT NULL)))`,
+		),
+		unique("referral_programs_project_id_id_unique").on(table.projectId, table.id),
+		unique("referral_programs_project_key_unique").on(table.projectId, table.key),
+		foreignKey({
+			name: "referral_programs_project_promotion_fk",
+			columns: [table.projectId, table.rewardPromotionId],
+			foreignColumns: [promotions.projectId, promotions.id],
+		}).onDelete("restrict"),
+		index("idx_billing_referral_programs_promotion")
+			.on(table.projectId, table.rewardPromotionId)
+			.where(sql`${table.status} = 'active'`),
+	],
+);
+
+export const referralCodes = pgTable(
+	"referral_codes",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		programId: uuid("program_id").notNull(),
+		customerId: uuid("customer_id").notNull(),
+		code: text("code").notNull(),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check("referral_codes_code_check", sql`(code ~ '^[2-9A-Z]{8}$'::text)`),
+		unique("referral_codes_project_code_unique").on(table.projectId, table.code),
+		unique("referral_codes_program_customer_unique").on(
+			table.projectId,
+			table.programId,
+			table.customerId,
+		),
+		foreignKey({
+			name: "referral_codes_project_program_fk",
+			columns: [table.projectId, table.programId],
+			foreignColumns: [referralPrograms.projectId, referralPrograms.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "referral_codes_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		index("idx_billing_referral_codes_customer").on(table.projectId, table.customerId),
+	],
+);
+
+export const referrals = pgTable(
+	"referrals",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		programId: uuid("program_id").notNull(),
+		referrerCustomerId: uuid("referrer_customer_id").notNull(),
+		customerId: uuid("customer_id").notNull(),
+		status: text("status").notNull(),
+		qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"referrals_status_check",
+			sql`(status = ANY (ARRAY['pending'::text, 'qualified'::text]))`,
+		),
+		check("referrals_not_self_check", sql`(referrer_customer_id <> customer_id)`),
+		check(
+			"referrals_qualified_check",
+			sql`((status = 'qualified'::text) = (qualified_at IS NOT NULL))`,
+		),
+		unique("referrals_project_id_id_unique").on(table.projectId, table.id),
+		unique("referrals_program_customer_unique").on(
+			table.projectId,
+			table.programId,
+			table.customerId,
+		),
+		foreignKey({
+			name: "referrals_project_program_fk",
+			columns: [table.projectId, table.programId],
+			foreignColumns: [referralPrograms.projectId, referralPrograms.id],
+		}).onDelete("restrict"),
+		foreignKey({
+			name: "referrals_project_referrer_fk",
+			columns: [table.projectId, table.referrerCustomerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "referrals_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		index("idx_billing_referrals_program_created").on(
+			table.projectId,
+			table.programId,
+			table.id.desc(),
+		),
+		index("idx_billing_referrals_referrer_created").on(
+			table.projectId,
+			table.referrerCustomerId,
+			table.id.desc(),
+		),
+		index("idx_billing_referrals_customer_created").on(
+			table.projectId,
+			table.customerId,
+			table.id.desc(),
+		),
+	],
+);
+
+export const referralRewards = pgTable(
+	"referral_rewards",
+	{
+		id: uuid("id").primaryKey().default(sql`uuidv7()`),
+		projectId: uuid("project_id")
+			.notNull()
+			.references(() => projects.id, { onDelete: "restrict" }),
+		referralId: uuid("referral_id").notNull(),
+		recipient: text("recipient").notNull(),
+		customerId: uuid("customer_id").notNull(),
+		status: text("status").notNull().default("pending"),
+		reason: text("reason"),
+		promotionCodeId: uuid("promotion_code_id"),
+		attempts: integer("attempts").notNull().default(0),
+		nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+		issuedAt: timestamp("issued_at", { withTimezone: true }),
+		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+	},
+	(table): PgTableExtraConfigValue[] => [
+		check(
+			"referral_rewards_recipient_check",
+			sql`(recipient = ANY (ARRAY['referrer'::text, 'referee'::text]))`,
+		),
+		check(
+			"referral_rewards_status_check",
+			sql`(status = ANY (ARRAY['pending'::text, 'issued'::text, 'held'::text, 'skipped'::text, 'failed'::text]))`,
+		),
+		check(
+			"referral_rewards_reason_check",
+			sql`((reason IS NULL) OR ((char_length(reason) >= 1) AND (char_length(reason) <= 500)))`,
+		),
+		check("referral_rewards_attempts_check", sql`(attempts >= 0)`),
+		check(
+			"referral_rewards_issued_check",
+			sql`((status = 'issued'::text) = (issued_at IS NOT NULL))`,
+		),
+		unique("referral_rewards_project_id_id_unique").on(table.projectId, table.id),
+		unique("referral_rewards_referral_recipient_unique").on(
+			table.projectId,
+			table.referralId,
+			table.recipient,
+		),
+		foreignKey({
+			name: "referral_rewards_project_referral_fk",
+			columns: [table.projectId, table.referralId],
+			foreignColumns: [referrals.projectId, referrals.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "referral_rewards_project_customer_fk",
+			columns: [table.projectId, table.customerId],
+			foreignColumns: [customers.projectId, customers.id],
+		}).onDelete("cascade"),
+		foreignKey({
+			name: "referral_rewards_project_code_fk",
+			columns: [table.projectId, table.promotionCodeId],
+			foreignColumns: [promotionCodes.projectId, promotionCodes.id],
+		}).onDelete("restrict"),
+		index("idx_billing_referral_rewards_due")
+			.on(table.nextAttemptAt, table.id)
+			.where(sql`${table.status} = 'pending'`),
+		index("idx_billing_referral_rewards_customer").on(
+			table.projectId,
+			table.customerId,
+			table.recipient,
+		),
+		index("idx_billing_referral_rewards_code")
+			.on(table.projectId, table.promotionCodeId)
+			.where(sql`${table.promotionCodeId} IS NOT NULL`),
+	],
+);

@@ -309,6 +309,16 @@
           "type": "string"
         }
       },
+      "PathProgramKey": {
+        "in": "path",
+        "name": "programKey",
+        "required": true,
+        "schema": {
+          "maxLength": 120,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
       "PathProjectKey": {
         "in": "path",
         "name": "projectKey",
@@ -457,6 +467,15 @@
         "required": false,
         "schema": {
           "minLength": 1,
+          "type": "string"
+        }
+      },
+      "QueryCursor3": {
+        "in": "query",
+        "name": "cursor",
+        "required": false,
+        "schema": {
+          "format": "uuid",
           "type": "string"
         }
       },
@@ -779,7 +798,8 @@
         "schema": {
           "enum": [
             "operator",
-            "gift"
+            "gift",
+            "referral"
           ],
           "type": "string"
         }
@@ -58310,6 +58330,1053 @@
         ]
       }
     },
+    "/v1/admin/referral-programs": {
+      "get": {
+        "operationId": "getV1AdminReferralPrograms",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/QueryLimit"
+          },
+          {
+            "$ref": "#/components/parameters/QueryCursor3"
+          },
+          {
+            "$ref": "#/components/parameters/QueryStatus4"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "archivedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "archivedBy": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "createdBy": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string"
+                          },
+                          "maxRewardsPerReferrer": {
+                            "type": [
+                              "null",
+                              "number"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "recipient": {
+                            "enum": [
+                              "referrer",
+                              "both"
+                            ],
+                            "type": "string"
+                          },
+                          "rewardPromotionKey": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "active",
+                              "archived"
+                            ],
+                            "type": "string"
+                          },
+                          "trigger": {
+                            "enum": [
+                              "redemption"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "name",
+                          "status",
+                          "rewardPromotionKey",
+                          "trigger",
+                          "recipient",
+                          "maxRewardsPerReferrer",
+                          "createdBy",
+                          "createdAt",
+                          "archivedBy",
+                          "archivedAt"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "pagination": {
+                      "properties": {
+                        "nextCursor": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "nextCursor"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "pagination"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "GET /v1/admin/referral-programs",
+        "tags": [
+          "referrals"
+        ]
+      },
+      "post": {
+        "description": "Creates a referral program. Sending the same terms again answers 200; different terms under the key answer REFERRAL_PROGRAM_KEY_CONFLICT.",
+        "operationId": "postV1AdminReferralPrograms",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/HeaderXBillingActor"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "key": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "maxRewardsPerReferrer": {
+                    "exclusiveMinimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "name": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "recipient": {
+                    "enum": [
+                      "referrer",
+                      "both"
+                    ],
+                    "type": "string"
+                  },
+                  "rewardPromotionKey": {
+                    "maxLength": 120,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "trigger": {
+                    "enum": [
+                      "redemption"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "rewardPromotionKey",
+                  "trigger",
+                  "recipient"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "archivedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "archivedBy": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "maxRewardsPerReferrer": {
+                          "type": [
+                            "null",
+                            "number"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "recipient": {
+                          "enum": [
+                            "referrer",
+                            "both"
+                          ],
+                          "type": "string"
+                        },
+                        "rewardPromotionKey": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "archived"
+                          ],
+                          "type": "string"
+                        },
+                        "trigger": {
+                          "enum": [
+                            "redemption"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name",
+                        "status",
+                        "rewardPromotionKey",
+                        "trigger",
+                        "recipient",
+                        "maxRewardsPerReferrer",
+                        "createdBy",
+                        "createdAt",
+                        "archivedBy",
+                        "archivedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "archivedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "archivedBy": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "maxRewardsPerReferrer": {
+                          "type": [
+                            "null",
+                            "number"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "recipient": {
+                          "enum": [
+                            "referrer",
+                            "both"
+                          ],
+                          "type": "string"
+                        },
+                        "rewardPromotionKey": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "archived"
+                          ],
+                          "type": "string"
+                        },
+                        "trigger": {
+                          "enum": [
+                            "redemption"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name",
+                        "status",
+                        "rewardPromotionKey",
+                        "trigger",
+                        "recipient",
+                        "maxRewardsPerReferrer",
+                        "createdBy",
+                        "createdAt",
+                        "archivedBy",
+                        "archivedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/referral-programs",
+        "tags": [
+          "referrals"
+        ]
+      }
+    },
+    "/v1/admin/referral-programs/{programKey}": {
+      "get": {
+        "operationId": "getV1AdminReferralProgramsByProgramKey",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathProgramKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "archivedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "archivedBy": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "maxRewardsPerReferrer": {
+                          "type": [
+                            "null",
+                            "number"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "recipient": {
+                          "enum": [
+                            "referrer",
+                            "both"
+                          ],
+                          "type": "string"
+                        },
+                        "rewardPromotionKey": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "archived"
+                          ],
+                          "type": "string"
+                        },
+                        "trigger": {
+                          "enum": [
+                            "redemption"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name",
+                        "status",
+                        "rewardPromotionKey",
+                        "trigger",
+                        "recipient",
+                        "maxRewardsPerReferrer",
+                        "createdBy",
+                        "createdAt",
+                        "archivedBy",
+                        "archivedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "GET /v1/admin/referral-programs/{programKey}",
+        "tags": [
+          "referrals"
+        ]
+      }
+    },
+    "/v1/admin/referral-programs/{programKey}/archive": {
+      "post": {
+        "description": "Stops new codes and redemptions. Referrals already recorded keep their rewards.",
+        "operationId": "postV1AdminReferralProgramsByProgramKeyArchive",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathProgramKey"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXBillingActor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "archivedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "archivedBy": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string"
+                        },
+                        "maxRewardsPerReferrer": {
+                          "type": [
+                            "null",
+                            "number"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "recipient": {
+                          "enum": [
+                            "referrer",
+                            "both"
+                          ],
+                          "type": "string"
+                        },
+                        "rewardPromotionKey": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active",
+                            "archived"
+                          ],
+                          "type": "string"
+                        },
+                        "trigger": {
+                          "enum": [
+                            "redemption"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "name",
+                        "status",
+                        "rewardPromotionKey",
+                        "trigger",
+                        "recipient",
+                        "maxRewardsPerReferrer",
+                        "createdBy",
+                        "createdAt",
+                        "archivedBy",
+                        "archivedAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "POST /v1/admin/referral-programs/{programKey}/archive",
+        "tags": [
+          "referrals"
+        ]
+      }
+    },
+    "/v1/admin/referral-programs/{programKey}/referrals": {
+      "get": {
+        "description": "Who referred whom in one program, newest first, with both sides' rewards.",
+        "operationId": "getV1AdminReferralProgramsByProgramKeyReferrals",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathProgramKey"
+          },
+          {
+            "$ref": "#/components/parameters/QueryLimit"
+          },
+          {
+            "$ref": "#/components/parameters/QueryCursor3"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "qualifiedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "refereeBillingAccountId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "referrerBillingAccountId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "rewards": {
+                            "items": {
+                              "properties": {
+                                "code": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "effectKind": {
+                                  "enum": [
+                                    "discount",
+                                    "feature_grant",
+                                    "plan_grant"
+                                  ],
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "issuedAt": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "promotionKey": {
+                                  "type": "string"
+                                },
+                                "reason": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "recipient": {
+                                  "enum": [
+                                    "referrer",
+                                    "referee"
+                                  ],
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "pending",
+                                    "issued",
+                                    "held",
+                                    "used",
+                                    "skipped",
+                                    "failed"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "recipient",
+                                "status",
+                                "reason",
+                                "promotionKey",
+                                "effectKind",
+                                "code",
+                                "issuedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "status": {
+                            "enum": [
+                              "pending",
+                              "qualified"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "referrerBillingAccountId",
+                          "refereeBillingAccountId",
+                          "status",
+                          "qualifiedAt",
+                          "createdAt",
+                          "rewards"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "pagination": {
+                      "properties": {
+                        "nextCursor": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "nextCursor"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "pagination"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "operatorKey": [],
+            "projectKey": []
+          },
+          {
+            "gatewayProject": [],
+            "operatorKey": []
+          }
+        ],
+        "summary": "GET /v1/admin/referral-programs/{programKey}/referrals",
+        "tags": [
+          "referrals"
+        ]
+      }
+    },
     "/v1/admin/stats/summary": {
       "get": {
         "operationId": "getV1AdminStatsSummary",
@@ -61016,13 +62083,7 @@
             "$ref": "#/components/parameters/QueryLimit"
           },
           {
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/QueryCursor3"
           }
         ],
         "responses": {
@@ -65176,6 +66237,612 @@
         "summary": "POST /v1/billing-accounts/{billingAccountId}/providers/stripe/portal-sessions",
         "tags": [
           "customer"
+        ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/referral-codes/{programKey}": {
+      "put": {
+        "description": "Answers the account's code for the program, creating it the first time.",
+        "operationId": "putV1BillingAccountsReferralCodes",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathBillingAccountId3"
+          },
+          {
+            "$ref": "#/components/parameters/PathProgramKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "billingAccountId": {
+                          "type": "string"
+                        },
+                        "code": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "programKey": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "programKey",
+                        "billingAccountId",
+                        "code",
+                        "createdAt"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "PUT /v1/billing-accounts/{billingAccountId}/referral-codes/{programKey}",
+        "tags": [
+          "referrals"
+        ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/referral-redemptions": {
+      "post": {
+        "description": "Records who referred this account. Repeating the same code answers the same referral with `duplicate: true`, so the call needs no Idempotency-Key.",
+        "operationId": "postV1BillingAccountsReferralRedemptions",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathBillingAccountId3"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "channel": {
+                    "enum": [
+                      "web",
+                      "ios",
+                      "android"
+                    ],
+                    "type": "string"
+                  },
+                  "code": {
+                    "pattern": "^[A-Za-z0-9]{8}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "channel"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "properties": {
+                        "duplicate": {
+                          "type": "boolean"
+                        },
+                        "referral": {
+                          "properties": {
+                            "counterpartBillingAccountId": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "createdAt": {
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "programKey": {
+                              "type": "string"
+                            },
+                            "qualifiedAt": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "rewards": {
+                              "items": {
+                                "properties": {
+                                  "code": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "effectKind": {
+                                    "enum": [
+                                      "discount",
+                                      "feature_grant",
+                                      "plan_grant"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "issuedAt": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "promotionKey": {
+                                    "type": "string"
+                                  },
+                                  "reason": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "recipient": {
+                                    "enum": [
+                                      "referrer",
+                                      "referee"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "status": {
+                                    "enum": [
+                                      "pending",
+                                      "issued",
+                                      "held",
+                                      "used",
+                                      "skipped",
+                                      "failed"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "recipient",
+                                  "status",
+                                  "reason",
+                                  "promotionKey",
+                                  "effectKind",
+                                  "code",
+                                  "issuedAt"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "role": {
+                              "enum": [
+                                "referrer",
+                                "referee"
+                              ],
+                              "type": "string"
+                            },
+                            "status": {
+                              "enum": [
+                                "pending",
+                                "qualified"
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "programKey",
+                            "role",
+                            "counterpartBillingAccountId",
+                            "status",
+                            "qualifiedAt",
+                            "createdAt",
+                            "rewards"
+                          ],
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "duplicate",
+                        "referral"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "POST /v1/billing-accounts/{billingAccountId}/referral-redemptions",
+        "tags": [
+          "referrals"
+        ]
+      }
+    },
+    "/v1/billing-accounts/{billingAccountId}/referrals": {
+      "get": {
+        "description": "The referrals this account made or came from, with its own rewards. A held reward carries its code, so this read needs a full credential.",
+        "operationId": "getV1BillingAccountsReferrals",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathBillingAccountId3"
+          },
+          {
+            "$ref": "#/components/parameters/QueryLimit"
+          },
+          {
+            "$ref": "#/components/parameters/QueryCursor3"
+          },
+          {
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "enum": [
+                "referrer",
+                "referee"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "counterpartBillingAccountId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "programKey": {
+                            "type": "string"
+                          },
+                          "qualifiedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "rewards": {
+                            "items": {
+                              "properties": {
+                                "code": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "effectKind": {
+                                  "enum": [
+                                    "discount",
+                                    "feature_grant",
+                                    "plan_grant"
+                                  ],
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "issuedAt": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "promotionKey": {
+                                  "type": "string"
+                                },
+                                "reason": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "recipient": {
+                                  "enum": [
+                                    "referrer",
+                                    "referee"
+                                  ],
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "pending",
+                                    "issued",
+                                    "held",
+                                    "used",
+                                    "skipped",
+                                    "failed"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "recipient",
+                                "status",
+                                "reason",
+                                "promotionKey",
+                                "effectKind",
+                                "code",
+                                "issuedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "role": {
+                            "enum": [
+                              "referrer",
+                              "referee"
+                            ],
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "pending",
+                              "qualified"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "programKey",
+                          "role",
+                          "counterpartBillingAccountId",
+                          "status",
+                          "qualifiedAt",
+                          "createdAt",
+                          "rewards"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "pagination": {
+                      "properties": {
+                        "nextCursor": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "nextCursor"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "pagination"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "projectKey": []
+          },
+          {
+            "gatewayProject": []
+          }
+        ],
+        "summary": "GET /v1/billing-accounts/{billingAccountId}/referrals",
+        "tags": [
+          "referrals"
         ]
       }
     },
@@ -69720,6 +71387,10 @@
     {
       "description": "Implemented provider-customers operations.",
       "name": "provider-customers"
+    },
+    {
+      "description": "Implemented referrals operations.",
+      "name": "referrals"
     },
     {
       "description": "Implemented trials operations.",

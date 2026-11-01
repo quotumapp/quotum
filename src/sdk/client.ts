@@ -46,6 +46,11 @@ import type {
 } from "../billing/promotions";
 import type { ProviderOperationReceipt } from "../billing/provider-operations";
 import type {
+	AccountReferralRecord,
+	ReferralCodeRecord,
+	ReferralRedemptionResult,
+} from "../billing/referrals";
+import type {
 	BillingChannel,
 	BillingProvider,
 	EntitlementSnapshot,
@@ -146,6 +151,7 @@ export class BillingClient {
 	readonly invoices;
 	readonly purchases;
 	readonly affiliates;
+	readonly referrals;
 	readonly promotions;
 	readonly trials;
 	readonly adjustments;
@@ -367,6 +373,31 @@ export class BillingClient {
 			customers: (affiliateKey: string, query: { limit?: number; cursor?: string } = {}) =>
 				this.requestPage<AffiliateCustomer>(
 					pathWithQuery(`/v1/affiliates/${segment(affiliateKey)}/customers`, query),
+				),
+		};
+		this.referrals = {
+			/** The account's code for the program, created the first time it is asked for. */
+			code: (billingAccountId: string, programKey: string) =>
+				this.request<ReferralCodeRecord>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/referral-codes/${segment(programKey)}`,
+					{ method: "PUT" },
+				),
+			/** Records who referred this account. Repeating the same code answers the same referral. */
+			redeem: (
+				billingAccountId: string,
+				input: { code: string; channel: "web" | "ios" | "android" },
+			) =>
+				this.request<ReferralRedemptionResult>(
+					`/v1/billing-accounts/${segment(billingAccountId)}/referral-redemptions`,
+					{ method: "POST", body: input },
+				),
+			/** The referrals the account made or came from, with its own rewards and held codes. */
+			list: (
+				billingAccountId: string,
+				query: { limit?: number; cursor?: string; role?: "referrer" | "referee" } = {},
+			) =>
+				this.requestPage<AccountReferralRecord>(
+					pathWithQuery(`/v1/billing-accounts/${segment(billingAccountId)}/referrals`, query),
 				),
 		};
 		this.trials = {

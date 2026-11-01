@@ -58,6 +58,8 @@ const COLLECTIONS = new Set([
 	"licenses",
 	"members",
 	"payment-setup-sessions",
+	"referral-codes",
+	"referral-programs",
 	"provider-customer-unlinks",
 	"provider-operations",
 	"projection-jobs",

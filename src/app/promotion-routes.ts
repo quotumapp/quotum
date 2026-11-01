@@ -177,7 +177,7 @@ export const listPromotionCodesQuerySchema = z
 		cursor: z.string().trim().min(1).optional(),
 		active: z.enum(["true", "false"]).optional(),
 		/** Only codes an operator created, or only codes a gift purchase minted. */
-		source: z.enum(["operator", "gift"]).optional(),
+		source: z.enum(["operator", "gift", "referral"]).optional(),
 	})
 	.strict();
 

@@ -13,6 +13,8 @@ those means creating a new promotion.
 A `plan_grant` gives the account the plan itself, with no provider, payment method or invoice; see
 [plan grant codes](#plan-grant-codes).
 
+A [referral program](referrals.md) gives a promotion as its reward.
+
 Operators manage promotions with project authentication, `X-Billing-Operator-Key`, and
 `X-Billing-Actor` on mutations:
 
@@ -23,7 +25,8 @@ Operators manage promotions with project authentication, `X-Billing-Operator-Key
   with code and redemption counts.
 - `POST /v1/admin/promotions/:promotionKey/codes` adds codes all-or-nothing;
   `GET .../codes` lists them; `POST .../codes/:codeId/deactivate` deactivates one.
-- `POST /v1/admin/promotions/:promotionKey/archive` stops new redemptions.
+- `POST /v1/admin/promotions/:promotionKey/archive` stops new redemptions. A promotion that rewards
+  an active referral program answers `PROMOTION_HAS_ACTIVE_REFERRAL_PROGRAM`.
 - `POST /v1/admin/promotions/:promotionKey/terms` changes the name, metadata or discount of an active
   promotion for later redemptions; see [changing a promotion's terms](#changing-a-promotions-terms).
 - `POST /v1/admin/promotions/:promotionKey/provider-sync` queues every failed provider-side object
@@ -256,7 +259,8 @@ refusals, and the buyer receives no access from the purchase itself.
   the redeemed ones to review. The SDK reads it as `promotions.accountGifts`.
 - **Operators.** A minted code's `createdBy` is the string `"system:gift-purchase"`.
   `GET /v1/admin/promotions/:promotionKey/codes` lists it with the operator's own, names the
-  purchase and ordinal in `gift`, and takes `source=gift` or `source=operator` to keep one kind.
+  purchase and ordinal in `gift`, and takes `source=gift`, `source=referral` or `source=operator`
+  to keep one kind.
   Find codes about to expire unredeemed with `source=gift&active=true` and each `expiresAt`.
 
 ### Apple subscription offers

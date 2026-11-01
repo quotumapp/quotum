@@ -419,6 +419,69 @@ localDescribe("retiring a feature", () => {
 		});
 	}
 
+	it("protects a feature a referral program still promises, until nothing is owed", async () => {
+		const api = await publishInitial();
+		await createPromotion("feature_grant", null);
+		await context.repository.referrals.createProgram(project, {
+			key: "friends",
+			name: "Friends",
+			rewardPromotionKey: "feature_grant",
+			trigger: "redemption",
+			recipient: "referrer",
+			actor: "retirement-test",
+		});
+
+		const blocked = await expectBlocked(api, [
+			{ kind: "referral_reward", promotionKey: "feature_grant", count: 1 },
+		]);
+		expect(blocked.body.error.message).toContain(
+			"1 referral program rewarding with promotion feature_grant",
+		);
+
+		await context.repository.referrals.archiveProgram(project, "friends", "retirement-test");
+
+		const preview = await api.preview(retired, 1);
+		expect(preview.status).toBe(200);
+	});
+
+	it("protects a feature while an archived program still owes a reward", async () => {
+		const api = await publishInitial();
+		await createPromotion("feature_grant", null);
+		await context.repository.referrals.createProgram(project, {
+			key: "friends",
+			name: "Friends",
+			rewardPromotionKey: "feature_grant",
+			trigger: "redemption",
+			recipient: "referrer",
+			actor: "retirement-test",
+		});
+		await context.repository.referrals.archiveProgram(project, "friends", "retirement-test");
+		await context.sql`
+			WITH referrer AS (
+				INSERT INTO customers (project_id, billing_account_id)
+				VALUES (${project.projectInstanceId}, 'owed-referrer') RETURNING id
+			), referee AS (
+				INSERT INTO customers (project_id, billing_account_id)
+				VALUES (${project.projectInstanceId}, 'owed-referee') RETURNING id
+			), referral AS (
+				INSERT INTO referrals (
+					project_id, program_id, referrer_customer_id, customer_id, status, qualified_at
+				)
+				SELECT ${project.projectInstanceId}, program.id, referrer.id, referee.id, 'qualified', now()
+				FROM referral_programs program, referrer, referee
+				WHERE program.project_id = ${project.projectInstanceId}
+				RETURNING id, referrer_customer_id
+			)
+			INSERT INTO referral_rewards (project_id, referral_id, recipient, customer_id)
+			SELECT ${project.projectInstanceId}, referral.id, 'referrer', referral.referrer_customer_id
+			FROM referral
+		`;
+
+		await expectBlocked(api, [
+			{ kind: "referral_reward", promotionKey: "feature_grant", count: 1 },
+		]);
+	});
+
 	for (const expiresAfterSeconds of [null, 86_400]) {
 		it(`protects ${expiresAfterSeconds === null ? "permanent" : "unexpired"} promotion credits, including archived and fully held ones`, async () => {
 			const api = await publishInitial();

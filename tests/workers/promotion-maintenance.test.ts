@@ -7,6 +7,7 @@ import { createInMemoryBillingMetrics } from "../../src/observability/metrics";
 import {
 	type PromotionMaintenanceRepository,
 	PromotionMaintenanceWorker,
+	type ReferralRewardSweep,
 } from "../../src/workers/promotion-maintenance";
 import { heartbeatTimers } from "../helpers/heartbeat-timers";
 import { projectContextResolver, projectInstanceContext } from "../helpers/project-context";
@@ -29,6 +30,12 @@ const job = (objectId: string, attempts = 1): PromotionStripeSyncJob => ({
 	discount: { type: "percent", percentOffBps: 2000, duration: "once", durationMonths: null },
 	appliesToProducts: null,
 });
+
+const noReferralRewards: ReferralRewardSweep = {
+	listDueRewards: async () => [],
+	issueReward: async () => {},
+	deferReward: async () => {},
+};
 
 const resolver = projectContextResolver({
 	contexts: [projectInstanceContext("acme", { projectInstanceId: "project-1" })],
@@ -76,6 +83,7 @@ describe("PromotionMaintenanceWorker", () => {
 		const { repo, outcomes, calls } = repository(Object.keys(results).map((id) => job(id)));
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "worker-1",
+			referralRewards: noReferralRewards,
 			batchSize: 10,
 			repository: repo,
 			projectContextResolver: resolver,
@@ -103,6 +111,8 @@ describe("PromotionMaintenanceWorker", () => {
 			failed: 1,
 			deferred: 0,
 			leaseSkipped: 0,
+			referralRewardsProcessed: 0,
+			referralRewardsDeferred: 0,
 		});
 		expect(outcomes.map((entry) => [entry.objectId, entry.outcome.kind])).toEqual([
 			["ready", "ready"],
@@ -114,10 +124,49 @@ describe("PromotionMaintenanceWorker", () => {
 		expect(outcomes[3]?.outcome.retryDelayMs).toBeNull();
 	});
 
+	it("issues due referral rewards and backs off, then gives up, on a failure", async () => {
+		const { repo } = repository([]);
+		const issued: string[] = [];
+		const deferred: Array<{ rewardId: string; retryDelayMs: number | null }> = [];
+		const logged: string[] = [];
+		const worker = new PromotionMaintenanceWorker({
+			workerId: "worker-1",
+			referralRewards: {
+				listDueRewards: async () => [
+					{ rewardId: "fine", projectId: "project-1", projectKey: "acme", attempts: 0 },
+					{ rewardId: "retried", projectId: "project-1", projectKey: "acme", attempts: 0 },
+					{ rewardId: "exhausted", projectId: "project-1", projectKey: "acme", attempts: 1 },
+				],
+				issueReward: async (project, rewardId) => {
+					if (rewardId !== "fine") throw new Error("database went away");
+					issued.push(`${project.projectInstanceKey}:${rewardId}`);
+				},
+				deferReward: async (_projectId, rewardId, input) => {
+					deferred.push({ rewardId, retryDelayMs: input.retryDelayMs });
+				},
+			},
+			maxAttempts: 2,
+			repository: repo,
+			projectContextResolver: resolver,
+			adapterForJob: () => null,
+			logger: { error: (message) => logged.push(message) },
+		});
+
+		const result = await worker.runOnce();
+
+		expect(issued).toEqual(["acme:fine"]);
+		expect(result).toMatchObject({ referralRewardsProcessed: 1, referralRewardsDeferred: 2 });
+		expect(deferred.map((entry) => entry.rewardId)).toEqual(["retried", "exhausted"]);
+		expect(deferred[0]?.retryDelayMs).toBeGreaterThan(0);
+		expect(deferred[1]?.retryDelayMs).toBeNull();
+		expect(logged).toHaveLength(2);
+	});
+
 	it("defers projects without Stripe and gives up after the attempt budget", async () => {
 		const { repo, outcomes } = repository([job("unconfigured"), job("exhausted", 8)]);
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "worker-1",
+			referralRewards: noReferralRewards,
 			repository: repo,
 			projectContextResolver: resolver,
 			adapterForJob: (() => {
@@ -155,6 +204,7 @@ describe("PromotionMaintenanceWorker", () => {
 		const { repo, outcomes } = repository([{ ...job("google-object"), provider: "google" }]);
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "worker-1",
+			referralRewards: noReferralRewards,
 			repository: repo,
 			projectContextResolver: resolver,
 			adapterForJob(project, provider) {
@@ -193,6 +243,7 @@ it.each(["before", "during", "unavailable"] as const)(
 		};
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "worker-1",
+			referralRewards: noReferralRewards,
 			repository: f.repo,
 			metrics,
 			projectContextResolver: resolver,
@@ -228,6 +279,7 @@ it("heartbeats waiting promotion jobs while the first provider call is active", 
 	};
 	const worker = new PromotionMaintenanceWorker({
 		workerId: "worker-1",
+		referralRewards: noReferralRewards,
 		repository: f.repo,
 		projectContextResolver: resolver,
 		leaseHeartbeatTimers: clock.timers,

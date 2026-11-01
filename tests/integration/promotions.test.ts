@@ -858,6 +858,7 @@ localDescribe("promotion Stripe provisioning", () => {
 		let failNext = false;
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "promotion-worker",
+			referralRewards: context.repository.referrals,
 			repository: {
 				releaseExpiredPromotionReservations: (limit) =>
 					context.repository.promotions.releaseExpiredPromotionReservations(limit),
@@ -1741,6 +1742,7 @@ localDescribe("promotion Checkout", () => {
 		const fixture = createIntegrationApp({ env: context.env, repository: context.repository });
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "hosted-worker",
+			referralRewards: context.repository.referrals,
 			repository: {
 				releaseExpiredPromotionReservations: (limit) =>
 					context.repository.promotions.releaseExpiredPromotionReservations(limit),
@@ -2599,6 +2601,7 @@ async function codeIdOf(promotionKey: string, code: string): Promise<string> {
 function promotionWorker(stripe: ReturnType<typeof createFakeStripePromotions>) {
 	return new PromotionMaintenanceWorker({
 		workerId: "promotion-worker",
+		referralRewards: context.repository.referrals,
 		repository: {
 			releaseExpiredPromotionReservations: (limit) =>
 				context.repository.promotions.releaseExpiredPromotionReservations(limit),

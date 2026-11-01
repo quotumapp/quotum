@@ -95,6 +95,7 @@ function testApp(
 		meteringService: recordingService(calls),
 		usageApiService: recordingService(calls),
 		promotionService: recordingService(calls),
+		referralService: recordingService(calls),
 		trialService: recordingService(calls),
 		projectContextResolver: projectContextResolver({
 			contexts: [projectInstanceContext("acme")],
@@ -229,8 +230,10 @@ describe("read-only project credentials", () => {
 			const outcome = `${response.status} ${body.error?.code}`;
 			expect(pastTheGate, `${route.method} ${route.path} answered ${outcome}`).toContain(outcome);
 		}
-		// The four operations an empty request can complete reach their handlers.
-		expect(calls).toEqual(["createAccount", "release", "getAccountRedemption", "endTrial"]);
+		// The five operations an empty request can complete reach their handlers.
+		expect(calls.sort()).toEqual(
+			["createAccount", "endTrial", "getAccountRedemption", "getOrCreateCode", "release"].sort(),
+		);
 	});
 
 	it("never get raw provider payloads, even from a store-event read they may call", async () => {

@@ -1363,6 +1363,121 @@
         },
         "data": {
           "properties": {
+            "reward": {
+              "properties": {
+                "effectKind": {
+                  "enum": [
+                    "discount",
+                    "feature_grant",
+                    "plan_grant"
+                  ],
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "programKey": {
+                  "type": "string"
+                },
+                "promotionKey": {
+                  "type": "string"
+                },
+                "recipient": {
+                  "enum": [
+                    "referrer",
+                    "referee"
+                  ],
+                  "type": "string"
+                },
+                "referralId": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "issued",
+                    "held"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "referralId",
+                "programKey",
+                "recipient",
+                "status",
+                "promotionKey",
+                "effectKind"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "reward"
+          ],
+          "type": "object"
+        },
+        "environment": {
+          "description": "The environment of the project instance the event belongs to.",
+          "enum": [
+            "sandbox",
+            "production",
+            "internal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "description": "The event. It is also the webhook-id header and stays the same across retries and replays: deduplicate on it.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "occurredAt": {
+          "description": "When the fact the event reports happened.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "projectKey": {
+          "description": "Key of the project instance.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": {
+          "const": "referral.reward_issued",
+          "description": "What happened. Ignore types you do not handle.",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "description": "Version of this body's format.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "version",
+        "createdAt",
+        "occurredAt",
+        "environment",
+        "projectKey",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "billingAccountId": {
+          "description": "Your identifier for the billing account the event is about, when it is about one.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "When Quotum recorded the event.",
+          "format": "date-time",
+          "type": "string"
+        },
+        "data": {
+          "properties": {
             "reversal": {
               "properties": {
                 "channel": {

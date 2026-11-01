@@ -702,8 +702,8 @@ error body repeats it as `retryAfter`. `ratelimit-reset` is the window's end as 
 timestamp, not the delta seconds of the IETF RateLimit header draft; the SDK and existing clients
 read it that way. Buckets never include a path value the caller chooses:
 
-- Purchase verification, promotion code entry (`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`, counted
-  separately), usage and balance routes (`BILLING_METERING_RATE_LIMIT_PER_WINDOW`) and
+- Purchase verification, promotion and referral code entry
+  (`BILLING_VERIFY_RATE_LIMIT_PER_WINDOW`, each counted separately), usage and balance routes (`BILLING_METERING_RATE_LIMIT_PER_WINDOW`) and
   `/v1/admin/*` (`BILLING_ADMIN_RATE_LIMIT_PER_WINDOW`) are limited per project, client IP and
   route, after authentication. Identifiers in the path, such as a billing account, share their
   route's budget. On `/v1/admin/*` the limit counts before the operator key is checked, so

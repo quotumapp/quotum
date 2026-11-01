@@ -91,6 +91,8 @@ const neverReadOnly = [
 	"/v1/billing-accounts/:billingAccountId/promotion-redemptions/:redemptionId",
 	// The codes a buyer bought are bearer secrets.
 	"/v1/billing-accounts/:billingAccountId/gifts",
+	// A held reward carries its code, and the read names the other account.
+	"/v1/billing-accounts/:billingAccountId/referrals",
 ];
 
 describe("read-only credential route inventory", () => {

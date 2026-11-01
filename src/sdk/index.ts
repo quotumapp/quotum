@@ -53,6 +53,12 @@ export type {
 	ProviderOperationStatus,
 } from "../billing/provider-operations";
 export type {
+	AccountReferralRecord,
+	ReferralCodeRecord,
+	ReferralRedemptionResult,
+	ReferralRewardRecord,
+} from "../billing/referrals";
+export type {
 	UsageOperationKind,
 	UsageOperationLookupInput,
 	UsageOperationLookupResult,

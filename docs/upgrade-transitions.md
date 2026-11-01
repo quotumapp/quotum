@@ -14,6 +14,16 @@ later release without it leaves the baselines alone, so its migration job runs a
 existing database; its pull requests can still ask for other steps. From 1.0, schema changes
 arrive as incremental migrations and this procedure is no longer part of an upgrade.
 
+## Referral programs
+
+The metering baseline adds `referral_programs`, `referral_codes`, `referrals` and
+`referral_rewards` with their indexes. They start empty and nothing else changes, so a dump from
+the previous release restores as it is: follow steps 1, 2, 4 and 6 of
+[stored job provider identity](#stored-job-provider-identity). An older image cannot read the new
+baseline, so a rollback restores the pre-upgrade backup, which loses the programs and referrals
+recorded since. Endpoints that subscribe to every event type start receiving
+`referral.reward_issued` once a program exists.
+
 ## Affiliate keys
 
 The billing baseline adds the nullable `customers.affiliate_key` and

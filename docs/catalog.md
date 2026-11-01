@@ -26,10 +26,13 @@ names the holder types and sources; `error.details` contains `featureKey` and a 
   distinct live grants. Gift redemptions have origin `promotion`.
 - `kind: "promotion_feature_grant"`: `promotionKey` and `count` of distinct redemptions with
   remaining credits for the feature.
+- `kind: "referral_reward"`: `promotionKey` and `count` of [referral programs](referrals.md) that
+  still promise the feature: active ones, and archived ones with a reward not yet issued.
 
 When several retired features have holders, the error describes the first feature in key order.
 Move subscriptions with a [catalog migration](#catalog-migrations), end or let plan grants expire,
-and consume, revoke or let promotion credits expire before retiring the feature. Publish checks
+archive referral programs, and consume, revoke or let promotion credits expire before retiring the
+feature. Publish checks
 again so a grant created after preview blocks retirement too. This guard prevents new unsafe
 retirements; it does not reactivate features retired by an earlier revision.
 

@@ -18,6 +18,7 @@ import {
 	projectProviderServiceResolver,
 	requireApplePromotionSigner,
 } from "./app/provider-services";
+import { registerReferralRoutes } from "./app/referral-routes";
 import { registerRefundRoutes } from "./app/refund-routes";
 import {
 	projectSelectorRejectedError,
@@ -123,6 +124,7 @@ export function createApp({
 	promotionService,
 	trialService,
 	affiliateService,
+	referralService,
 	balanceAdjustmentService,
 	providerCustomerUnlinkService,
 	customerErasureService,
@@ -581,6 +583,23 @@ export function createApp({
 		},
 	});
 	registerAffiliateRoutes({ app, service: affiliates });
+	registerReferralRoutes({
+		app,
+		operatorApiKey: env.operatorApiKey,
+		service: referralService ?? {
+			createProgram: (...args) => getRepository().referrals.createProgram(...args),
+			getProgram: (...args) => getRepository().referrals.getProgram(...args),
+			listPrograms: (...args) => getRepository().referrals.listPrograms(...args),
+			archiveProgram: (...args) => getRepository().referrals.archiveProgram(...args),
+			listProgramReferrals: (...args) => getRepository().referrals.listProgramReferrals(...args),
+			getOrCreateCode: (...args) => getRepository().referrals.getOrCreateCode(...args),
+			redeemCode: (...args) => getRepository().referrals.redeemCode(...args),
+			listAccountReferrals: (...args) => getRepository().referrals.listAccountReferrals(...args),
+		},
+		validationLimiter: createVerifyLimiter(),
+		rateLimitKeyOptions,
+		registerPostAuthGuard,
+	});
 	registerCapabilityRoutes({ app, reads: capabilityReads });
 	registerProviderOperationRoutes({
 		app,

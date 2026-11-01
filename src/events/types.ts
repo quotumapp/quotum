@@ -124,6 +124,23 @@ const autoTopupSchema = z
 	})
 	.strict();
 
+/** A reward reached its recipient, or `held` while it waits as a code. It names only that account. */
+const referralRewardSchema = z
+	.object({
+		reward: z
+			.object({
+				id: z.string(),
+				referralId: z.string(),
+				programKey: z.string(),
+				recipient: z.enum(["referrer", "referee"]),
+				status: z.enum(["issued", "held"]),
+				promotionKey: z.string(),
+				effectKind: z.enum(["discount", "feature_grant", "plan_grant"]),
+			})
+			.strict(),
+	})
+	.strict();
+
 /**
  * The event types an endpoint can subscribe to, each with the schema of its `data`. A billing fact
  * records them in its own transaction; `contracts/v1/domain-events.schema.json` is rendered from
@@ -145,6 +162,7 @@ export const domainEventDataSchemas = {
 	"auto_topup.succeeded": autoTopupSchema,
 	"auto_topup.failed": autoTopupSchema,
 	"auto_topup.action_required": autoTopupSchema,
+	"referral.reward_issued": referralRewardSchema,
 } as const satisfies Record<string, z.ZodType<Record<string, unknown>>>;
 
 export type DomainEventType = keyof typeof domainEventDataSchemas;

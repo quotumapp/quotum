@@ -376,7 +376,7 @@ on the interval shown; unset per-worker overrides preserve the shared fallbacks 
 | Metering maintenance (reservation expiry, reset-window subscription allocations, rollovers, rollup close, retention sweeps) | `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS` |
 | Recurring billing | `BILLING_RECURRING_BILLING_POLL_INTERVAL_MS` (falls back to `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`) |
 | Automatic top-ups | `BILLING_AUTO_TOPUP_POLL_INTERVAL_MS` (falls back to `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`) |
-| Promotion maintenance (expired reservation release, Stripe coupons and hosted promotion codes) | `BILLING_PROMOTION_MAINTENANCE_POLL_INTERVAL_MS` (falls back to `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`) |
+| Promotion maintenance (expired reservation release, Stripe coupons, hosted promotion codes and [referral rewards](referrals.md)) | `BILLING_PROMOTION_MAINTENANCE_POLL_INTERVAL_MS` (falls back to `BILLING_METERING_MAINTENANCE_POLL_INTERVAL_MS`) |
 | [Provider operation recovery](#provider-write-recovery-foundation) | `BILLING_PROVIDER_OPERATION_RECOVERY_POLL_INTERVAL_MS` (10000) |
 | [Customer erasure](#customer-erasure) | `BILLING_CUSTOMER_ERASURE_POLL_INTERVAL_MS` (falls back to `BILLING_WORKER_POLL_INTERVAL_MS`) |
 | Stripe App event processing, only when the Apps OAuth integration is configured | `BILLING_STRIPE_APP_EVENTS_POLL_INTERVAL_MS` (falls back to `BILLING_STORE_EVENT_REPLAY_POLL_INTERVAL_MS`) |
@@ -923,8 +923,8 @@ after that the id is an ordinary new account. The `customer-erasure` worker then
 batches under a lease and resumes after a stop:
 
 - deletes the account's provider links, checkout requests, payment setup sessions, idempotency
-  claims, entitlements, projection jobs, outbound webhook events with their deliveries and closed
-  Paddle reservations;
+  claims, entitlements, projection jobs, outbound webhook events with their deliveries, closed
+  Paddle reservations and referral codes;
 - rewrites ids, actors and free text on entities, provider operations, commercial action previews,
   promotion codes, plan grants, redemptions and their Apple signature attempts (reasons, keys and
   stored replies), operator grants, debits, balance allocation keys and refund requests (the
@@ -946,7 +946,8 @@ terminal statuses, and holds the account lock through the completion commit.
 
 Quantities, ledger entries, usage windows and the purchase, subscription and invoice rows stay,
 because the ledger must keep its integrity; only what names the person goes. An
-[affiliate key](affiliates.md) stays too, because it names the partner.
+[affiliate key](affiliates.md) stays too, because it names the partner, and so do referrals and
+their rewards, which hold only internal ids.
 
 An operation in `failed` with `lastError: RESIDUAL_ROWS` found rows that still carried the id;
 `counts` lists them as `residual.<table>`. Send the same `POST` again with the same key to queue it

@@ -610,6 +610,34 @@ describe("BillingClient", () => {
 		expect(calls[0]?.headers.has("x-billing-operator-key")).toBe(false);
 	});
 
+	it("gets a referral code, redeems one and lists an account's referrals", async () => {
+		const calls: Request[] = [];
+		const client = new BillingClient({
+			baseUrl: "https://billing.example.com",
+			apiKey: "project-secret",
+			fetch: async (input, init) => {
+				const request = new Request(input, init);
+				calls.push(request);
+				return request.url.includes("/referrals")
+					? Response.json({ success: true, data: [], pagination: { nextCursor: null } })
+					: Response.json({ success: true, data: { ok: true } });
+			},
+		});
+
+		await client.referrals.code("account 1", "refer a friend");
+		await client.referrals.redeem("account 2", { code: "K7Q2M9XD", channel: "web" });
+		await client.referrals.list("account 1", { role: "referrer", limit: 5 });
+
+		expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+			"PUT /v1/billing-accounts/account%201/referral-codes/refer%20a%20friend",
+			"POST /v1/billing-accounts/account%202/referral-redemptions",
+			"GET /v1/billing-accounts/account%201/referrals",
+		]);
+		expect(await calls[1]?.json()).toEqual({ code: "K7Q2M9XD", channel: "web" });
+		expect(new URL(calls[2]?.url ?? "").search).toBe("?role=referrer&limit=5");
+		expect(calls.every((call) => !call.headers.has("x-billing-operator-key"))).toBe(true);
+	});
+
 	it("redeems codes, reads the account ledger and revokes redemptions", async () => {
 		const calls: Request[] = [];
 		const client = new BillingClient({

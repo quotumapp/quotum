@@ -334,6 +334,7 @@ function headerParameters(route: DocumentedRoute): ParameterObject[] {
 			((tags.includes("catalog") || tags.includes("controls")) &&
 				!route.path.endsWith("/entities")) ||
 			(tags.includes("promotions") && route.path.startsWith("/v1/admin/")) ||
+			(tags.includes("referrals") && route.path.startsWith("/v1/admin/")) ||
 			tags.includes("balance-adjustments") ||
 			tags.includes("provider-customers") ||
 			tags.includes("customer-erasures") ||

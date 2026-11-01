@@ -48,6 +48,7 @@ import {
 	promotionQuantity,
 	type StripeCheckoutPromotionFacts,
 } from "../../billing/promotions";
+import { REFERRAL_REWARD_ACTOR } from "../../billing/referrals";
 import type { BillingProvider } from "../../billing/types";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { maxExpirySeconds } from "../../shared/cadence";
@@ -387,6 +388,24 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 			if (await promotionBacksGifts(tx, projectId, key)) {
 				throw promotionError("PROMOTION_HAS_ACTIVE_GIFTS");
 			}
+			// Program creation holds a share lock on the promotion, so it cannot slip past this.
+			const rewardsProgram = await executeOne<{ id: string }>(
+				tx,
+				drizzleSql`
+					SELECT program.id
+					FROM referral_programs program
+					JOIN promotions promotion
+						ON promotion.project_id = program.project_id
+						AND promotion.id = program.reward_promotion_id
+					WHERE program.project_id = ${projectId}
+						AND promotion.key = ${key}
+						AND program.status = 'active'
+					LIMIT 1
+				`,
+			);
+			if (rewardsProgram !== null) {
+				throw promotionError("PROMOTION_HAS_ACTIVE_REFERRAL_PROGRAM");
+			}
 			const archived = await executeOne<{ id: string }>(
 				tx,
 				drizzleSql`
@@ -527,7 +546,10 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 	async listPromotionCodes(
 		project: ProjectInstanceContext,
 		key: string,
-		input: PromotionListInput & { active?: boolean | null; source?: "operator" | "gift" | null },
+		input: PromotionListInput & {
+			active?: boolean | null;
+			source?: "operator" | "gift" | "referral" | null;
+		},
 	): Promise<PromotionListResult<PromotionCodeRecord>> {
 		const projectId = project.projectInstanceId;
 		const promotion = await requirePromotion(this.database, projectId, drizzleSql`p.key = ${key}`);
@@ -536,7 +558,14 @@ export class PromotionRepository extends RepositoryModule implements PromotionSe
 			conditions.push(drizzleSql`c.active = ${input.active}`);
 		}
 		if (input.source === "gift") conditions.push(drizzleSql`c.gift_purchase_id IS NOT NULL`);
-		if (input.source === "operator") conditions.push(drizzleSql`c.gift_purchase_id IS NULL`);
+		if (input.source === "referral") {
+			conditions.push(drizzleSql`c.created_by = ${REFERRAL_REWARD_ACTOR}`);
+		}
+		if (input.source === "operator") {
+			conditions.push(
+				drizzleSql`c.gift_purchase_id IS NULL AND c.created_by <> ${REFERRAL_REWARD_ACTOR}`,
+			);
+		}
 		const cursor = keysetCondition(input.cursor, "c");
 		if (cursor !== null) {
 			conditions.push(cursor);

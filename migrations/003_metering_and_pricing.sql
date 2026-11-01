@@ -2977,3 +2977,128 @@ CREATE TABLE IF NOT EXISTS catalog_binding_adoptions (
  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
  PRIMARY KEY (project_id, request_key)
 );
+
+-- Referral programs: who referred whom, and what each side was given for it. A reward is an
+-- account-bound promotion code, so its limits, provenance and revocation are those of promotions.
+CREATE TABLE IF NOT EXISTS referral_programs (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	key TEXT COLLATE "C" NOT NULL CHECK (char_length(key) BETWEEN 1 AND 120),
+	name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 200),
+	status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+	reward_promotion_id UUID NOT NULL,
+	trigger TEXT NOT NULL CHECK (trigger IN ('redemption')),
+	recipient TEXT NOT NULL CHECK (recipient IN ('referrer', 'both')),
+	max_rewards_per_referrer INTEGER CHECK (
+		max_rewards_per_referrer IS NULL OR max_rewards_per_referrer > 0
+	),
+	terms_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(terms_hash) = 64),
+	created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 200),
+	archived_by TEXT CHECK (archived_by IS NULL OR char_length(archived_by) BETWEEN 1 AND 200),
+	archived_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT referral_programs_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT referral_programs_project_key_unique UNIQUE (project_id, key),
+	CONSTRAINT referral_programs_project_promotion_fk FOREIGN KEY (project_id, reward_promotion_id)
+		REFERENCES promotions(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT referral_programs_archive_check CHECK (
+		(status = 'active' AND archived_at IS NULL AND archived_by IS NULL)
+		OR (status = 'archived' AND archived_at IS NOT NULL AND archived_by IS NOT NULL)
+	)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referral_programs_promotion
+	ON referral_programs (project_id, reward_promotion_id)
+	WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS referral_codes (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	program_id UUID NOT NULL,
+	-- The referrer. Nothing but the code row itself references this, so erasure can delete it.
+	customer_id UUID NOT NULL,
+	code TEXT COLLATE "C" NOT NULL CHECK (code ~ '^[2-9A-Z]{8}$'),
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT referral_codes_project_code_unique UNIQUE (project_id, code),
+	CONSTRAINT referral_codes_program_customer_unique UNIQUE (project_id, program_id, customer_id),
+	CONSTRAINT referral_codes_project_program_fk FOREIGN KEY (project_id, program_id)
+		REFERENCES referral_programs(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT referral_codes_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referral_codes_customer
+	ON referral_codes (project_id, customer_id);
+
+CREATE TABLE IF NOT EXISTS referrals (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	program_id UUID NOT NULL,
+	referrer_customer_id UUID NOT NULL,
+	-- The referee, named so the erasure classification sees this table.
+	customer_id UUID NOT NULL,
+	status TEXT NOT NULL CHECK (status IN ('pending', 'qualified')),
+	qualified_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT referrals_project_id_id_unique UNIQUE (project_id, id),
+	-- One referral per referee per program, which is also what makes redemption idempotent.
+	CONSTRAINT referrals_program_customer_unique UNIQUE (project_id, program_id, customer_id),
+	CONSTRAINT referrals_project_program_fk FOREIGN KEY (project_id, program_id)
+		REFERENCES referral_programs(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT referrals_project_referrer_fk FOREIGN KEY (project_id, referrer_customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT referrals_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT referrals_not_self_check CHECK (referrer_customer_id <> customer_id),
+	CONSTRAINT referrals_qualified_check CHECK ((status = 'qualified') = (qualified_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referrals_program_created
+	ON referrals (project_id, program_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referrals_referrer_created
+	ON referrals (project_id, referrer_customer_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referrals_customer_created
+	ON referrals (project_id, customer_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS referral_rewards (
+	id UUID PRIMARY KEY DEFAULT uuidv7(),
+	project_id UUID NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+	referral_id UUID NOT NULL,
+	recipient TEXT NOT NULL CHECK (recipient IN ('referrer', 'referee')),
+	customer_id UUID NOT NULL,
+	status TEXT NOT NULL DEFAULT 'pending' CHECK (
+		status IN ('pending', 'issued', 'held', 'skipped', 'failed')
+	),
+	reason TEXT CHECK (reason IS NULL OR char_length(reason) BETWEEN 1 AND 500),
+	-- Set once minted, and what the per-referrer cap counts, so a reward mid-issue is counted too.
+	promotion_code_id UUID,
+	attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+	next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	issued_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT referral_rewards_project_id_id_unique UNIQUE (project_id, id),
+	CONSTRAINT referral_rewards_referral_recipient_unique UNIQUE (project_id, referral_id, recipient),
+	CONSTRAINT referral_rewards_project_referral_fk FOREIGN KEY (project_id, referral_id)
+		REFERENCES referrals(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT referral_rewards_project_customer_fk FOREIGN KEY (project_id, customer_id)
+		REFERENCES customers(project_id, id) ON DELETE CASCADE,
+	CONSTRAINT referral_rewards_project_code_fk FOREIGN KEY (project_id, promotion_code_id)
+		REFERENCES promotion_codes(project_id, id) ON DELETE RESTRICT,
+	CONSTRAINT referral_rewards_issued_check CHECK ((status = 'issued') = (issued_at IS NOT NULL))
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referral_rewards_due
+	ON referral_rewards (next_attempt_at, id)
+	WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_billing_referral_rewards_customer
+	ON referral_rewards (project_id, customer_id, recipient);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referral_rewards_code
+	ON referral_rewards (project_id, promotion_code_id)
+	WHERE promotion_code_id IS NOT NULL;

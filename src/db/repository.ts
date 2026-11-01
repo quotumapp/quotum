@@ -109,6 +109,7 @@ import {
 	type SubscriptionChangeClaimOptions,
 	type UsageInvoiceClaimOptions,
 } from "./repository/recurring-pricing";
+import { ReferralRepository } from "./repository/referrals";
 import { RefundRequestRepository } from "./repository/refund-requests";
 import { StoreEventReplayBillingRepository } from "./repository/store-event-replay";
 import {
@@ -224,6 +225,7 @@ export class BillingRepository {
 	readonly planGrants: PlanGrantRepository;
 	readonly balanceAdjustments: BalanceAdjustmentRepository;
 	readonly affiliates: AffiliateRepository;
+	readonly referrals: ReferralRepository;
 	readonly refundRequests: RefundRequestRepository;
 	readonly promotionProviders: PromotionProviderObjectRepository;
 	readonly providerCustomerUnlinks: ProviderCustomerUnlinkRepository;
@@ -261,6 +263,7 @@ export class BillingRepository {
 		this.planGrants = new PlanGrantRepository(database);
 		this.balanceAdjustments = new BalanceAdjustmentRepository(database);
 		this.affiliates = new AffiliateRepository(database);
+		this.referrals = new ReferralRepository(database, this.promotions);
 		this.refundRequests = new RefundRequestRepository(database);
 		this.promotionProviders = new PromotionProviderObjectRepository(database);
 		this.providerCustomerUnlinks = new ProviderCustomerUnlinkRepository(database);
