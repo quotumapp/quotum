@@ -6496,6 +6496,8 @@ export const referralPrograms = pgTable(
 		trigger: text("trigger").notNull(),
 		recipient: text("recipient").notNull(),
 		maxRewardsPerReferrer: integer("max_rewards_per_referrer"),
+		targets: jsonb("targets").notNull().default(sql`'[]'::jsonb`),
+		excludeTrial: boolean("exclude_trial").notNull().default(true),
 		termsHash: text("terms_hash").notNull(),
 		createdBy: text("created_by").notNull(),
 		archivedBy: text("archived_by"),
@@ -6516,7 +6518,11 @@ export const referralPrograms = pgTable(
 			"referral_programs_status_check",
 			sql`(status = ANY (ARRAY['active'::text, 'archived'::text]))`,
 		),
-		check("referral_programs_trigger_check", sql`(trigger = 'redemption'::text)`),
+		check(
+			"referral_programs_trigger_check",
+			sql`(trigger = ANY (ARRAY['redemption'::text, 'first_payment'::text]))`,
+		),
+		check("referral_programs_targets_check", sql`jsonb_typeof(targets) = 'array'`),
 		check(
 			"referral_programs_recipient_check",
 			sql`(recipient = ANY (ARRAY['referrer'::text, 'both'::text]))`,
@@ -6597,6 +6603,7 @@ export const referrals = pgTable(
 		customerId: uuid("customer_id").notNull(),
 		status: text("status").notNull(),
 		qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
+		checkDueAt: timestamp("check_due_at", { withTimezone: true }),
 		createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 		updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 	},
@@ -6646,6 +6653,12 @@ export const referrals = pgTable(
 			table.customerId,
 			table.id.desc(),
 		),
+		index("idx_billing_referrals_pending_customer")
+			.on(table.projectId, table.customerId)
+			.where(sql`${table.status} = 'pending'`),
+		index("idx_billing_referrals_check_due")
+			.on(table.checkDueAt, table.id)
+			.where(sql`${table.checkDueAt} IS NOT NULL`),
 	],
 );
 

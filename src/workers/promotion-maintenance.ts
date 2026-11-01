@@ -37,6 +37,7 @@ export interface PromotionMaintenanceRepository {
 
 /** What the worker needs to issue referral rewards that are due. */
 export interface ReferralRewardSweep {
+	qualifyDueReferrals(limit: number): Promise<number>;
 	listDueRewards(limit: number): Promise<ReferralRewardJob[]>;
 	issueReward(project: ProjectInstanceContext, rewardId: string): Promise<void>;
 	deferReward(
@@ -64,6 +65,7 @@ export interface PromotionMaintenanceRunResult {
 	failed: number;
 	deferred: number;
 	leaseSkipped: number;
+	referralsQualified: number;
 	referralRewardsProcessed: number;
 	referralRewardsDeferred: number;
 }
@@ -119,6 +121,7 @@ export class PromotionMaintenanceWorker {
 			failed: 0,
 			deferred: 0,
 			leaseSkipped: 0,
+			referralsQualified: await this.dependencies.referralRewards.qualifyDueReferrals(batchSize),
 			referralRewardsProcessed: 0,
 			referralRewardsDeferred: 0,
 		};

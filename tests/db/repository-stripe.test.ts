@@ -208,6 +208,8 @@ describe("BillingRepository Stripe", () => {
 				[{ project_id: "project-id" }],
 				// The refund event: no endpoint subscribes, so nothing is recorded.
 				[],
+				// The nudge for a pending referral of this customer: there is none.
+				[],
 			],
 			{ strict: true },
 		);
@@ -248,8 +250,9 @@ describe("BillingRepository Stripe", () => {
 		expect(customerLockIndex).toBeGreaterThan(-1);
 		expect(purchaseLockIndex).toBeGreaterThan(customerLockIndex);
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(15);
-		expect(database.queries.at(-1)).toContain("INSERT INTO domain_events");
+		expect(database.queries).toHaveLength(16);
+		expect(database.queries.at(-2)).toContain("INSERT INTO domain_events");
+		expect(database.queries.at(-1)).toContain("UPDATE referrals");
 	});
 
 	it("records Stripe subscription events without synthetic purchase rows", async () => {
@@ -326,6 +329,8 @@ describe("BillingRepository Stripe", () => {
 				[],
 				[],
 				[{ id: "projection-job-id" }],
+				// The nudge for a pending referral of this customer: there is none.
+				[],
 			],
 			{ strict: true },
 		);
@@ -342,7 +347,7 @@ describe("BillingRepository Stripe", () => {
 		});
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(25);
+		expect(database.queries).toHaveLength(26);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("INSERT INTO subscriptions");
 		expect(queries).not.toContain("INSERT INTO purchases");

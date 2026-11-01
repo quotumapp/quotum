@@ -1,9 +1,14 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
 import { BillingError, NotFoundBillingError } from "../../billing/errors";
 import { generateGiftCode } from "../../billing/gift-codes";
-import { type PromotionEffectKind, promotionError } from "../../billing/promotions";
+import {
+	type PromotionEffectKind,
+	type PromotionTarget,
+	promotionError,
+} from "../../billing/promotions";
 import {
 	type AccountReferralRecord,
+	assertReferralProgramTerms,
 	type CreateReferralProgramInput,
 	generateReferralCode,
 	normalizeReferralCode,
@@ -23,6 +28,7 @@ import {
 	referralError,
 	referralProgramTermsHash,
 	type StoredReferralRewardStatus,
+	sortedTargets,
 } from "../../billing/referrals";
 import type { ProjectInstanceContext } from "../../projects/context";
 import { toIso } from "../../shared/date";
@@ -31,7 +37,7 @@ import { customerHasPaid } from "./customer-payments";
 import { recordBillingEvent } from "./domain-event-facts";
 import { lockCustomerRow } from "./invalidations";
 import type { PromotionRepository } from "./promotions";
-import { executeOne, executeRows } from "./query";
+import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
 type Timestamp = Date | string;
@@ -54,6 +60,8 @@ interface ProgramRow {
 	trigger: ReferralProgramRecord["trigger"];
 	recipient: ReferralProgramRecord["recipient"];
 	max_rewards_per_referrer: number | null;
+	targets: PromotionTarget[];
+	exclude_trial: boolean;
 	terms_hash: string;
 	created_by: string;
 	created_at: Timestamp;
@@ -99,8 +107,8 @@ interface PreparedReward {
 const PROGRAM_COLUMNS = drizzleSql`
 	program.id, program.key, program.name, program.status,
 	promotion.key AS reward_promotion_key, program.trigger, program.recipient,
-	program.max_rewards_per_referrer, program.terms_hash, program.created_by, program.created_at,
-	program.archived_by, program.archived_at
+	program.max_rewards_per_referrer, program.targets, program.exclude_trial, program.terms_hash,
+	program.created_by, program.created_at, program.archived_by, program.archived_at
 `;
 
 export class ReferralRepository extends RepositoryModule implements ReferralServiceLike {
@@ -116,7 +124,9 @@ export class ReferralRepository extends RepositoryModule implements ReferralServ
 		input: CreateReferralProgramInput,
 	): Promise<{ program: ReferralProgramRecord; created: boolean }> {
 		const projectId = project.projectInstanceId;
+		assertReferralProgramTerms(input);
 		const termsHash = referralProgramTermsHash(input);
+		const targets = sortedTargets(input.targets ?? []);
 		return await this.transaction(async (tx) => {
 			// The share lock waits for an archive of the promotion, which rechecks programs under its
 			// own lock, so a program can never be left pointing at a promotion just archived.
@@ -154,15 +164,17 @@ export class ReferralRepository extends RepositoryModule implements ReferralServ
 					"The reward promotion must allow web and have no Apple offers",
 				);
 			}
+			await assertTargetsExist(tx, projectId, targets);
 			await executeRows(
 				tx,
 				drizzleSql`
 					INSERT INTO referral_programs (
 						project_id, key, name, reward_promotion_id, trigger, recipient,
-						max_rewards_per_referrer, terms_hash, created_by
+						max_rewards_per_referrer, targets, exclude_trial, terms_hash, created_by
 					) VALUES (
 						${projectId}, ${input.key}, ${input.name}, ${promotion.id}, ${input.trigger},
-						${input.recipient}, ${input.maxRewardsPerReferrer ?? null}, ${termsHash}, ${input.actor}
+						${input.recipient}, ${input.maxRewardsPerReferrer ?? null}, ${jsonb(targets)},
+						${input.excludeTrial ?? true}, ${termsHash}, ${input.actor}
 					)
 				`,
 			);
@@ -321,16 +333,21 @@ export class ReferralRepository extends RepositoryModule implements ReferralServ
 			const resolved = await executeOne<{
 				program_id: string;
 				status: ReferralProgramStatus;
+				trigger: ReferralProgramRecord["trigger"];
 				recipient: ReferralProgramRecord["recipient"];
+				effect_kind: PromotionEffectKind;
 				referrer_customer_id: string;
 			}>(
 				tx,
 				drizzleSql`
-					SELECT program.id AS program_id, program.status, program.recipient,
-						code.customer_id AS referrer_customer_id
+					SELECT program.id AS program_id, program.status, program.trigger, program.recipient,
+						promotion.effect_kind, code.customer_id AS referrer_customer_id
 					FROM referral_codes code
 					JOIN referral_programs program
 						ON program.project_id = code.project_id AND program.id = code.program_id
+					JOIN promotions promotion
+						ON promotion.project_id = program.project_id
+						AND promotion.id = program.reward_promotion_id
 					WHERE code.project_id = ${projectId} AND code.code = ${code}
 				`,
 			);
@@ -373,24 +390,36 @@ export class ReferralRepository extends RepositoryModule implements ReferralServ
 			if (await customerHasPaid(tx, projectId, account.id)) {
 				throw referralError("REFERRAL_NOT_NEW_CUSTOMER");
 			}
+			// A pending referral is due a first read: a trial may already be running, and a trial
+			// that started before the code was entered writes nothing that would nudge it.
+			const atOnce = resolved.trigger === "redemption";
 			const referral = await executeOne<{ id: string }>(
 				tx,
 				drizzleSql`
 					INSERT INTO referrals (
-						project_id, program_id, referrer_customer_id, customer_id, status, qualified_at
+						project_id, program_id, referrer_customer_id, customer_id, status, qualified_at,
+						check_due_at
 					) VALUES (
 						${projectId}, ${resolved.program_id}, ${resolved.referrer_customer_id}, ${account.id},
-						'qualified', now()
+						${atOnce ? "qualified" : "pending"}, ${atOnce ? drizzleSql`now()` : null},
+						${atOnce ? null : drizzleSql`now()`}
 					)
 					RETURNING id
 				`,
 			);
 			if (referral === null) throw new Error("The referral was not recorded");
-			await createRewards(tx, projectId, {
-				referralId: referral.id,
-				referrerCustomerId: resolved.referrer_customer_id,
-				refereeCustomerId: resolved.recipient === "both" ? account.id : null,
-			});
+			const referee = resolved.recipient === "both" ? account.id : null;
+			if (atOnce) {
+				await createRewards(tx, projectId, {
+					referralId: referral.id,
+					referrerCustomerId: resolved.referrer_customer_id,
+					refereeCustomerId: referee,
+				});
+			} else if (referee !== null && resolved.effect_kind === "discount") {
+				// A discount only helps before the payment that would earn it, so the new customer
+				// gets the code now and the referrer still waits for the payment.
+				await createReward(tx, projectId, referral.id, "referee", referee);
+			}
 			return { referralId: referral.id, duplicate: false };
 		});
 		await this.issueReferralRewards(project, redeemed.referralId);
@@ -460,6 +489,32 @@ export class ReferralRepository extends RepositoryModule implements ReferralServ
 				// The referral is recorded, so the sweep owns this reward from here.
 			}
 		}
+	}
+
+	/**
+	 * Reads the state of every referral with something new to look at, across projects. Each runs
+	 * under the referee's lock, the one a payment's transaction takes to set `check_due_at`, so a
+	 * payment either is seen here or sets it again afterwards. It cannot be cleared unread.
+	 */
+	async qualifyDueReferrals(limit: number): Promise<number> {
+		const due = await executeRows<{ id: string; project_id: string; customer_id: string }>(
+			this.database,
+			drizzleSql`
+				SELECT id, project_id, customer_id
+				FROM referrals
+				WHERE check_due_at IS NOT NULL
+				ORDER BY check_due_at, id
+				LIMIT ${limit}
+			`,
+		);
+		let qualified = 0;
+		for (const row of due) {
+			const earned = await this.transaction((tx) =>
+				qualifyReferral(tx, row.project_id, row.id, row.customer_id),
+			);
+			if (earned) qualified += 1;
+		}
+		return qualified;
 	}
 
 	/** Rewards due an attempt, across projects, oldest first. */
@@ -738,26 +793,111 @@ async function writeRewardOutcome(
 	return row !== null;
 }
 
+/** Qualifies one referral if its referee has now paid; true when it did. */
+async function qualifyReferral(
+	tx: QueryExecutor,
+	projectId: string,
+	referralId: string,
+	customerId: string,
+): Promise<boolean> {
+	await lockCustomerRow(tx, projectId, customerId);
+	const referral = await executeOne<{
+		status: ReferralStatus;
+		referrer_customer_id: string;
+		recipient: ReferralProgramRecord["recipient"];
+		targets: PromotionTarget[];
+		exclude_trial: boolean;
+		erased_at: Timestamp | null;
+	}>(
+		tx,
+		drizzleSql`
+			SELECT referral.status, referral.referrer_customer_id, program.recipient, program.targets,
+				program.exclude_trial, customer.erased_at
+			FROM referrals referral
+			JOIN referral_programs program
+				ON program.project_id = referral.project_id AND program.id = referral.program_id
+			JOIN customers customer
+				ON customer.project_id = referral.project_id AND customer.id = referral.customer_id
+			WHERE referral.project_id = ${projectId} AND referral.id = ${referralId}
+			FOR UPDATE OF referral
+		`,
+	);
+	if (referral === null) return false;
+	const earned =
+		referral.status === "pending" &&
+		referral.erased_at === null &&
+		(await customerHasPaid(tx, projectId, customerId, {
+			targets: referral.targets,
+			countTrials: !referral.exclude_trial,
+		}));
+	await executeRows(
+		tx,
+		drizzleSql`
+			UPDATE referrals
+			SET check_due_at = NULL,
+				status = CASE WHEN ${earned} THEN 'qualified' ELSE status END,
+				qualified_at = CASE WHEN ${earned} THEN now() ELSE qualified_at END,
+				updated_at = now()
+			WHERE project_id = ${projectId} AND id = ${referralId}
+		`,
+	);
+	if (!earned) return false;
+	await createRewards(tx, projectId, {
+		referralId,
+		referrerCustomerId: referral.referrer_customer_id,
+		refereeCustomerId: referral.recipient === "both" ? customerId : null,
+	});
+	return true;
+}
+
 async function createRewards(
 	tx: QueryExecutor,
 	projectId: string,
 	input: { referralId: string; referrerCustomerId: string; refereeCustomerId: string | null },
 ): Promise<void> {
-	await executeRows(
-		tx,
-		drizzleSql`
-			INSERT INTO referral_rewards (project_id, referral_id, recipient, customer_id)
-			VALUES (${projectId}, ${input.referralId}, 'referrer', ${input.referrerCustomerId})
-		`,
-	);
+	await createReward(tx, projectId, input.referralId, "referrer", input.referrerCustomerId);
 	if (input.refereeCustomerId === null) return;
+	await createReward(tx, projectId, input.referralId, "referee", input.refereeCustomerId);
+}
+
+/** A referee's discount already has its row from redemption, so a second insert does nothing. */
+async function createReward(
+	tx: QueryExecutor,
+	projectId: string,
+	referralId: string,
+	recipient: ReferralRole,
+	customerId: string,
+): Promise<void> {
 	await executeRows(
 		tx,
 		drizzleSql`
 			INSERT INTO referral_rewards (project_id, referral_id, recipient, customer_id)
-			VALUES (${projectId}, ${input.referralId}, 'referee', ${input.refereeCustomerId})
+			VALUES (${projectId}, ${referralId}, ${recipient}, ${customerId})
+			ON CONFLICT (project_id, referral_id, recipient) DO NOTHING
 		`,
 	);
+}
+
+/** Refuses a target the catalog does not have, which could never be paid for. */
+async function assertTargetsExist(
+	tx: QueryExecutor,
+	projectId: string,
+	targets: readonly PromotionTarget[],
+): Promise<void> {
+	for (const target of targets) {
+		const found = await executeOne<{ id: unknown }>(
+			tx,
+			target.kind === "plan"
+				? drizzleSql`SELECT id FROM plans WHERE project_id = ${projectId} AND key = ${target.key}`
+				: drizzleSql`SELECT id FROM products WHERE project_id = ${projectId} AND key = ${target.key}`,
+		);
+		if (found === null) {
+			throw referralError(
+				"REFERRAL_PROGRAM_INVALID",
+				`The ${target.kind} ${target.key} does not exist`,
+			);
+		}
+	}
 }
 
 async function lockAccount(
@@ -952,6 +1092,8 @@ function toProgramRecord(row: ProgramRow): ReferralProgramRecord {
 		trigger: row.trigger,
 		recipient: row.recipient,
 		maxRewardsPerReferrer: row.max_rewards_per_referrer,
+		targets: row.targets,
+		excludeTrial: row.exclude_trial,
 		createdBy: row.created_by,
 		createdAt: toIso(row.created_at),
 		archivedBy: row.archived_by,

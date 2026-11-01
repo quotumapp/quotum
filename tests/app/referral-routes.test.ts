@@ -58,6 +58,8 @@ const programRecord = {
 	trigger: "redemption" as const,
 	recipient: "referrer" as const,
 	maxRewardsPerReferrer: null,
+	targets: [],
+	excludeTrial: true,
 	createdBy: "support@example.com",
 	createdAt: "2026-11-01T00:00:00.000Z",
 	archivedBy: null,

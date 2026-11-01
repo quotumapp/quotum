@@ -37,6 +37,11 @@ const createProgramBodySchema = z
 		trigger: z.enum(referralTriggers),
 		recipient: z.enum(referralRecipients),
 		maxRewardsPerReferrer: z.number().int().positive().nullable().optional(),
+		targets: z
+			.array(z.object({ kind: z.enum(["plan", "product"]), key: keySchema }).strict())
+			.max(50)
+			.optional(),
+		excludeTrial: z.boolean().optional(),
 	})
 	.strict();
 

@@ -27,6 +27,8 @@ describe("BillingRepository mutations", () => {
 				[],
 				[],
 				[{ project_id: "project-id" }],
+				// The nudge for a pending referral of this customer: there is none.
+				[],
 			],
 			{ strict: true },
 		);
@@ -38,7 +40,7 @@ describe("BillingRepository mutations", () => {
 		);
 
 		database.assertConsumed();
-		expect(database.queries).toHaveLength(12);
+		expect(database.queries).toHaveLength(13);
 		const queries = database.queries.join("\n");
 		expect(queries).toContain("purchases.status = 'completed' AND EXCLUDED.status <> 'completed'");
 		expect(queries).toMatch(/EXCLUDED\.status = 'completed'\s+AND purchases\.status = 'completed'/);

@@ -32,6 +32,7 @@ const job = (objectId: string, attempts = 1): PromotionStripeSyncJob => ({
 });
 
 const noReferralRewards: ReferralRewardSweep = {
+	qualifyDueReferrals: async () => 0,
 	listDueRewards: async () => [],
 	issueReward: async () => {},
 	deferReward: async () => {},
@@ -111,6 +112,7 @@ describe("PromotionMaintenanceWorker", () => {
 			failed: 1,
 			deferred: 0,
 			leaseSkipped: 0,
+			referralsQualified: 0,
 			referralRewardsProcessed: 0,
 			referralRewardsDeferred: 0,
 		});
@@ -132,6 +134,7 @@ describe("PromotionMaintenanceWorker", () => {
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "worker-1",
 			referralRewards: {
+				qualifyDueReferrals: async () => 3,
 				listDueRewards: async () => [
 					{ rewardId: "fine", projectId: "project-1", projectKey: "acme", attempts: 0 },
 					{ rewardId: "retried", projectId: "project-1", projectKey: "acme", attempts: 0 },
@@ -155,7 +158,11 @@ describe("PromotionMaintenanceWorker", () => {
 		const result = await worker.runOnce();
 
 		expect(issued).toEqual(["acme:fine"]);
-		expect(result).toMatchObject({ referralRewardsProcessed: 1, referralRewardsDeferred: 2 });
+		expect(result).toMatchObject({
+			referralsQualified: 3,
+			referralRewardsProcessed: 1,
+			referralRewardsDeferred: 2,
+		});
 		expect(deferred.map((entry) => entry.rewardId)).toEqual(["retried", "exhausted"]);
 		expect(deferred[0]?.retryDelayMs).toBeGreaterThan(0);
 		expect(deferred[1]?.retryDelayMs).toBeNull();

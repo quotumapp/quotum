@@ -24,18 +24,24 @@ Content-Type: application/json
   "key": "refer-a-friend",
   "name": "Refer a friend",
   "rewardPromotionKey": "referral-credits",
-  "trigger": "redemption",
+  "trigger": "first_payment",
   "recipient": "both",
-  "maxRewardsPerReferrer": 10
+  "maxRewardsPerReferrer": 10,
+  "targets": [{ "kind": "plan", "key": "pro" }]
 }
 ```
 
 | Field | Meaning |
 | --- | --- |
 | `rewardPromotionKey` | The promotion each recipient receives. |
-| `trigger` | When a referral earns its rewards. `redemption` means as soon as the code is entered. |
+| `trigger` | When a referral earns its rewards: `redemption` as soon as the code is entered, or `first_payment` when the new customer [first pays](#when-a-referral-earns-its-rewards). |
 | `recipient` | `referrer`, or `both` for the referrer and the new customer. |
 | `maxRewardsPerReferrer` | How many times one referrer can be rewarded. Omit it for no limit. |
+| `targets` | For `first_payment`, the plans and products that count, each `{ "kind": "plan" \| "product", "key": ... }`. Omit it for any payment. |
+| `excludeTrial` | For `first_payment`, set `false` to count a provider trial starting as the payment. It defaults to `true`. |
+
+`targets` and `excludeTrial` with the `redemption` trigger answer `REFERRAL_PROGRAM_INVALID`, and so
+does a target the catalog does not have.
 
 It returns `201`, or `200` when the same key is sent with the same terms; different terms answer
 `REFERRAL_PROGRAM_KEY_CONFLICT`. A program cannot be edited: archive it and create another.
@@ -114,7 +120,8 @@ Content-Type: application/json
 }
 ```
 
-The SDK call is `client.referrals.redeem(billingAccountId, { code, channel })`. Sending the same code
+With the `first_payment` trigger the referral reads `pending` until it qualifies. The SDK call is
+`client.referrals.redeem(billingAccountId, { code, channel })`. Sending the same code
 again answers the same referral with `duplicate: true` and gives nothing twice, so this call takes
 no `Idempotency-Key`. It is limited per project and client IP like promotion code entry, on a
 counter of its own; see [rate limits](deployment.md#rate-limits).
@@ -129,6 +136,30 @@ counter of its own; see [rate limits](deployment.md#rate-limits).
 | `REFERRAL_NOT_NEW_CUSTOMER` | 409 | The account has already paid. A free trial, a free checkout or a payment refunded in full does not count as paying. |
 | `REFERRAL_PROGRAM_ARCHIVED` | 409 | The program no longer takes redemptions. |
 | `PROMOTION_CODE_CHANNEL_NOT_SUPPORTED` | 409 | `channel` is `ios` and the new customer would receive a reward, as with [direct iOS grants](promotions.md). A program with `recipient: "referrer"` works on every channel. |
+
+## When a referral earns its rewards
+
+With `redemption`, the referral qualifies as the code is entered, and the rewards are issued right
+after.
+
+With `first_payment`, it qualifies when the new customer has paid for something the program
+targets:
+
+| Provider | What counts |
+| --- | --- |
+| Stripe subscription | A paid invoice with money still standing after refunds. |
+| Stripe one-time purchase, Paddle | A completed purchase with money still standing after refunds. |
+| App Store | A completed transaction that is not a free trial, which includes the first renewal after one. |
+| Google Play | A completed purchase that is not a free trial, or an active subscription whose period has run past the end of its trial. |
+
+A free trial and a $0 invoice do not count, unless `excludeTrial` is `false`. A payment refunded in
+full before it was looked at does not count either. The check follows the payment within one pass
+of the promotion maintenance worker, and it reads what is recorded, so a repeated or replayed
+provider event gives nothing twice. A referral from an archived program still qualifies.
+
+A new customer's **discount** is issued when the code is entered, even under `first_payment`,
+because it is only useful before the payment that earns the referrer's reward. Pass it to that
+checkout as `promotionCode`. A paid checkout counts when the discount leaves something to pay.
 
 ## What each side receives
 
@@ -148,8 +179,8 @@ A held reward carries its `code`, and only that account can use it. Once it is u
 `used`. Apple and Google have no server-side discount, so choose credits for customers who pay
 through a store.
 
-Rewards are issued right after the redemption. If that fails, the reward reads `pending` and the
-promotion maintenance worker retries it with backoff; after eight attempts it reads `failed`, with
+If issuing a reward fails, it reads `pending` and the promotion maintenance worker retries it with
+backoff; after eight attempts it reads `failed`, with
 the error in `reason`.
 
 `maxRewardsPerReferrer` counts rewards, not uses. Past the limit the referral is still recorded and
