@@ -121,10 +121,11 @@ consumable is `"kind": "topup"` and has no `billingPeriod`.
 quotum catalog bindings adopt binding.json
 ```
 
-Every field must match what the product already declares, including `externalPriceId` for a Google
-Play product that names a base plan and `billingPeriodCount` when it is not `1`. Anything else
-answers `409 STORE_BINDING_INVALID` with `binding_identity_conflict`, and so does a different price
-on a product that already has one. A new price applies to every payment the summary counts,
-including earlier ones. See
+Every field must match what is already registered, including `externalPriceId` for a Google Play
+product that names a base plan and `billingPeriodCount` when it is not `1`. A mismatch answers
+`409 STORE_BINDING_INVALID`. Its `details.reason` is `product_identity_conflict` when `name`, `kind`,
+`entitlementKey` or `credits` differ or the product is inactive, and `binding_identity_conflict`
+when a store field differs or the product already has a different price. A new price applies to
+every payment the summary counts, including earlier ones. See
 [registering a store product](catalog.md#register-an-app-store-or-google-play-product) for the file
 and the commands' settings.
