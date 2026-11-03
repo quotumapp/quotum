@@ -9,7 +9,7 @@ affiliates yourself.
 
 ## Record a key
 
-Send an optional `affiliateKey` with a purchase call. It takes 1 to 200 letters, digits, dots,
+Send an optional `affiliateKey` with a purchase call. It takes 1 to 200 ASCII letters, digits, dots,
 underscores and hyphens.
 
 | Purchase | Where the key goes |
@@ -82,9 +82,7 @@ Quotum does not store what a store customer actually paid, so a store total is t
 times the number of payments. A free trial is not a payment. A fully refunded payment is left out.
 
 A store product needs a catalog price before it can show an amount. Without one its payments are
-counted on a row with a null `currency` and `amountMinor`. Give an existing product a price with
-[`quotum catalog bindings adopt`](catalog.md#register-an-app-store-or-google-play-product), using
-`currency` and `priceAmountMinor`; the product's other fields must not change.
+counted on a row with a null `currency` and `amountMinor`.
 
 Treat a store total as an estimate:
 
@@ -96,3 +94,38 @@ Treat a store total as an estimate:
 - One refund on a Google Play subscription drops its purchase from the count; a second refund on
   that subscription is not subtracted.
 - A Google Play notification that never arrived is not counted.
+
+## Give a store product a price
+
+A product registered without a price can gain one. `GET /v1/admin/catalog/store-products?provider=apple`
+(or `google`) lists each mapping; a null `priceAmount` means it has none. Take the rest of the
+declaration from that row and `GET /v1/admin/catalog/products`, and write one file per product. A
+consumable is `"kind": "topup"` and has no `billingPeriod`.
+
+```json
+{
+  "provider": "apple",
+  "productKey": "premium-monthly-ios",
+  "name": "Premium monthly on iOS",
+  "kind": "subscription",
+  "entitlementKey": "premium",
+  "credits": 100,
+  "externalProductId": "com.acme.premium.monthly",
+  "billingPeriod": "month",
+  "currency": "USD",
+  "priceAmountMinor": 999
+}
+```
+
+```sh
+quotum catalog bindings adopt binding.json
+```
+
+Every field must match what is already registered, including `externalPriceId` for a Google Play
+product that names a base plan and `billingPeriodCount` when it is not `1`. A mismatch answers
+`409 STORE_BINDING_INVALID`. Its `details.reason` is `product_identity_conflict` when `name`, `kind`,
+`entitlementKey` or `credits` differ or the product is inactive, and `binding_identity_conflict`
+when a store field differs or the product already has a different price. A new price applies to
+every payment the summary counts, including earlier ones. See
+[registering a store product](catalog.md#register-an-app-store-or-google-play-product) for the file
+and the commands' settings.
