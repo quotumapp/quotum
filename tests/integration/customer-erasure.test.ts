@@ -261,6 +261,172 @@ localDescribe("customer erasure", () => {
 		expect(facts.projections).toBe(0);
 	});
 
+	it("leaves nothing that names the account in a redemption's stored results and keys", async () => {
+		const seeded = await seedAccount();
+		const { promotions } = context.repository;
+		await promotions.createPromotion(project, {
+			key: "canary-grant",
+			name: "Canary grant",
+			effect: {
+				kind: "feature_grant",
+				items: [{ featureKey: "ai_credits", quantity: "5", expiresAfterSeconds: null }],
+			},
+			codes: [{ code: "CANARY-GRANT" }],
+			actor,
+		});
+		const redeemed = await promotions.redeemPromotionCode(project, {
+			billingAccountId: canary,
+			code: "CANARY-GRANT",
+			channel: "web",
+			idempotencyKey: `redeem-${canary}`,
+			actor: null,
+		});
+		if (redeemed.redemption === null) throw new Error("the grant was not redeemed");
+		await promotions.revokePromotionRedemption(project, {
+			redemptionId: redeemed.redemption.id,
+			reason: `asked by ${canaryEmail}`,
+			actor,
+			idempotencyKey: `revoke-${canary}`,
+		});
+		await context.sql`
+			INSERT INTO promotion_apple_signature_attempts (
+				project_id, customer_id, redemption_id, idempotency_key, request_hash, result
+			) VALUES (
+				${projectId}, ${seeded.customerId}, ${redeemed.redemption.id}, ${`signature-${canary}`},
+				${"b".repeat(64)}, ${JSON.stringify({ redemption: { billingAccountId: canary } })}::text::jsonb
+			)
+		`;
+		expect(await tablesMentioningCanary()).toContain("promotion_redemptions");
+
+		const accepted = await seeded.erase("erase-redemptions", {
+			acknowledge: ["forfeit_paid_balances"],
+		});
+		expect(accepted.status).toBe(201);
+		await work();
+
+		expect(await tablesMentioningCanary()).toEqual([]);
+		// The ledger stays: what was redeemed and that it was reversed.
+		const [row] = await context.sql`
+			SELECT status, reversed_at FROM promotion_redemptions WHERE customer_id = ${seeded.customerId}
+		`;
+		expect(row.status).toBe("reversed");
+		expect(row.reversed_at).not.toBeNull();
+	});
+
+	it("runs the documented cleanup for redemptions an older erasure left behind", async () => {
+		const guide = await Bun.file("docs/operations.md").text();
+		const batch = (name: string) => {
+			const statement = guide.match(new RegExp(`\`\`\`sql\n(-- ${name}[\\s\\S]*?)\n\`\`\``))?.[1];
+			if (statement === undefined) throw new Error(`Missing ${name} SQL`);
+			return statement;
+		};
+		const seeded = await seedAccount();
+		const { promotions } = context.repository;
+		await promotions.createPromotion(project, {
+			key: "canary-grant",
+			name: "Canary grant",
+			effect: {
+				kind: "feature_grant",
+				items: [{ featureKey: "ai_credits", quantity: "5", expiresAfterSeconds: null }],
+			},
+			codes: [{ code: "CANARY-GRANT" }, { code: "OTHER-GRANT" }],
+			actor,
+		});
+		const redeemed = await promotions.redeemPromotionCode(project, {
+			billingAccountId: canary,
+			code: "CANARY-GRANT",
+			channel: "web",
+			idempotencyKey: "redeem-1",
+			actor: null,
+		});
+		if (redeemed.redemption === null) throw new Error("the grant was not redeemed");
+		// Another account's redemption, which the cleanup must leave alone.
+		await ensureCustomer(context.db as never, projectId, "active-account");
+		await promotions.redeemPromotionCode(project, {
+			billingAccountId: "active-account",
+			code: "OTHER-GRANT",
+			channel: "web",
+			idempotencyKey: "active-redeem",
+			actor: null,
+		});
+		const accepted = await seeded.erase("erase-history", {
+			acknowledge: ["forfeit_paid_balances"],
+		});
+		expect(accepted.status).toBe(201);
+		await work();
+
+		// What an erasure from before the fix leaves in place.
+		const leftover = JSON.stringify({ redemption: { billingAccountId: canary } });
+		await context.sql`
+			UPDATE promotion_redemptions
+			SET idempotency_key = ${`api_redeem:${canary}`}, result = ${leftover}::text::jsonb
+			WHERE customer_id = ${seeded.customerId}
+		`;
+		await context.sql`
+			INSERT INTO promotion_apple_signature_attempts (
+				project_id, customer_id, redemption_id, idempotency_key, request_hash, result
+			) VALUES (
+				${projectId}, ${seeded.customerId}, ${redeemed.redemption.id}, ${`signature-${canary}`},
+				${"c".repeat(64)}, ${leftover}::text::jsonb
+			)
+		`;
+		expect(await tablesMentioningCanary()).toEqual([
+			"promotion_apple_signature_attempts",
+			"promotion_redemptions",
+		]);
+
+		const run = async (statement: string) => {
+			const [row] = await context.sql.unsafe<{ updated: string }[]>(statement);
+			return Number(row?.updated);
+		};
+		expect(await run(batch("Erased redemption cleanup batch"))).toBe(1);
+		expect(await run(batch("Erased signature attempt cleanup batch"))).toBe(1);
+		expect(await run(batch("Erased redemption cleanup batch"))).toBe(0);
+		expect(await run(batch("Erased signature attempt cleanup batch"))).toBe(0);
+
+		expect(await tablesMentioningCanary()).toEqual([]);
+		const [active] = await context.sql`
+			SELECT redemption.idempotency_key, redemption.result IS NOT NULL AS has_result
+			FROM promotion_redemptions redemption
+			JOIN customers customer ON customer.id = redemption.customer_id
+			WHERE customer.billing_account_id = 'active-account'
+		`;
+		expect(active.idempotency_key).toBe("api_redeem:active-redeem");
+		expect(active.has_result).toBe(true);
+	});
+
+	it("finishes for an account that holds a code restricted to it", async () => {
+		const seeded = await seedAccount();
+		await context.repository.promotions.createPromotion(project, {
+			key: "canary-only",
+			name: "Canary only",
+			effect: {
+				kind: "feature_grant",
+				items: [{ featureKey: "ai_credits", quantity: "5", expiresAfterSeconds: null }],
+			},
+			codes: [{ code: "CANARY-ONLY", billingAccountId: canary }],
+			actor,
+		});
+
+		const accepted = await seeded.erase("erase-restricted", {
+			acknowledge: ["forfeit_paid_balances"],
+		});
+		expect(accepted.status).toBe(201);
+		const { erasure } = (await accepted.json()).data;
+		await work();
+
+		const finished = await (await seeded.receipt(erasure.id)).json();
+		expect(finished.data).toMatchObject({ state: "completed", lastError: null });
+		expect(await tablesMentioningCanary()).toEqual([]);
+		const [code] = await context.sql`
+			SELECT active, deactivated_at, deactivated_by FROM promotion_codes
+			WHERE project_id = ${projectId} AND normalized_code = 'CANARY-ONLY'
+		`;
+		expect(code.active).toBe(false);
+		expect(code.deactivated_at).not.toBeNull();
+		expect(code.deactivated_by).toBe("system:customer-erasure");
+	});
+
 	it("replays an erasure by its key and refuses the key for a different request", async () => {
 		const seeded = await seedAccount();
 		const body = { reference: "ticket-1", acknowledge: ["forfeit_paid_balances"] };

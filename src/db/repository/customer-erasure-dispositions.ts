@@ -40,6 +40,7 @@ export const customerErasureDispositions = {
 	entities: { kind: "rewrite" },
 	plan_grants: { kind: "rewrite" },
 	promotion_redemptions: { kind: "rewrite" },
+	promotion_apple_signature_attempts: { kind: "rewrite" },
 	operator_grants: { kind: "rewrite" },
 	administrative_debits: { kind: "rewrite" },
 	store_events: { kind: "scrub" },
@@ -67,10 +68,6 @@ export const customerErasureDispositions = {
 		reason: "commercial terms the merchant authored; RESTRICT keeps the account row",
 	},
 	plan_versions: { kind: "retain", reason: "customer-specific catalog history" },
-	promotion_apple_signature_attempts: {
-		kind: "retain",
-		reason: "signature attempts the redemption ledger references; RESTRICT keeps the account row",
-	},
 } as const satisfies Record<string, CustomerErasureDisposition>;
 
 export type CustomerErasureTable = keyof typeof customerErasureDispositions;
@@ -219,7 +216,10 @@ export const rewriteBatches: CustomerErasureBatch[] = [
 	updateBatch(
 		"promotion_codes",
 		(context) => drizzleSql`
-			billing_account_id = ${erasedMarker(context)}, active = false, updated_at = now()`,
+			billing_account_id = ${erasedMarker(context)}, active = false,
+			deactivated_at = COALESCE(target.deactivated_at, now()),
+			deactivated_by = COALESCE(target.deactivated_by, 'system:customer-erasure'),
+			updated_at = now()`,
 		ofAccount,
 	),
 	updateBatch(
@@ -231,14 +231,25 @@ export const rewriteBatches: CustomerErasureBatch[] = [
 		(context) =>
 			drizzleSql`${ofCustomer(context)} AND (actor = ${`billing-account:${context.subjectId}`} OR metadata <> '{}'::jsonb)`,
 	),
+	// The ledger of what was redeemed stays. The stored replies repeat the account id, and the keys
+	// and reasons are the caller's, so they can carry a user id. An erased account has nothing to
+	// replay, so neither reply is needed again.
 	updateBatch(
 		"promotion_redemptions",
 		(context) => drizzleSql`
 			actor = CASE WHEN target.actor = ${`billing-account:${context.subjectId}`}
 				THEN ${erasedMarker(context)} ELSE target.actor END,
-			reason = NULL, updated_at = now()`,
-		(context) =>
-			drizzleSql`${ofCustomer(context)} AND (actor = ${`billing-account:${context.subjectId}`} OR reason IS NOT NULL)`,
+			reason = NULL, reversal_reason = NULL, result = NULL, reversal_result = NULL,
+			idempotency_key = 'erased:' || target.id::text,
+			reversal_idempotency_key = CASE WHEN target.reversal_idempotency_key IS NULL
+				THEN NULL ELSE 'erased:' || target.id::text END,
+			updated_at = now()`,
+		(context) => drizzleSql`${ofCustomer(context)} AND idempotency_key NOT LIKE 'erased:%'`,
+	),
+	updateBatch(
+		"promotion_apple_signature_attempts",
+		() => drizzleSql`idempotency_key = 'erased:' || target.id::text, result = '{}'::jsonb`,
+		(context) => drizzleSql`${ofCustomer(context)} AND idempotency_key NOT LIKE 'erased:%'`,
 	),
 	// The source key is the caller's idempotency key for a grant, so it can carry a user id. The
 	// quantities and what was consumed from them stay; the key is only an address.
@@ -440,6 +451,15 @@ export async function residualRows(
 			UNION ALL SELECT 'billing_invoices', count(*) FROM billing_invoices
 				WHERE project_id = ${context.projectId} AND customer_id = ${context.customerId}
 					AND position(${context.subjectId} in raw_payload::text) > 0
+			UNION ALL SELECT 'promotion_redemptions', count(*) FROM promotion_redemptions
+				WHERE project_id = ${context.projectId} AND customer_id = ${context.customerId}
+					AND position(${context.subjectId} in concat(
+						idempotency_key, reversal_idempotency_key, result::text, reversal_result::text
+					)) > 0
+			UNION ALL SELECT 'promotion_apple_signature_attempts', count(*)
+				FROM promotion_apple_signature_attempts
+				WHERE project_id = ${context.projectId} AND customer_id = ${context.customerId}
+					AND position(${context.subjectId} in concat(idempotency_key, result::text)) > 0
 		) residual
 		WHERE count > 0
 	`);
