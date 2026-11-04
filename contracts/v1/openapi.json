@@ -791,6 +791,18 @@
           "type": "string"
         }
       },
+      "QueryRole": {
+        "in": "query",
+        "name": "role",
+        "required": false,
+        "schema": {
+          "enum": [
+            "referrer",
+            "referee"
+          ],
+          "type": "string"
+        }
+      },
       "QuerySource": {
         "in": "query",
         "name": "source",
@@ -37020,6 +37032,250 @@
         ]
       }
     },
+    "/api/billing/admin/billing-accounts/{billingAccountId}/referrals": {
+      "get": {
+        "description": "Requires billing.read in sandbox and billing.read in production.  ",
+        "operationId": "merchantGetV1BillingAccountsReferrals",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PathBillingAccountId3"
+          },
+          {
+            "$ref": "#/components/parameters/QueryLimit"
+          },
+          {
+            "$ref": "#/components/parameters/QueryCursor3"
+          },
+          {
+            "$ref": "#/components/parameters/QueryRole"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumOrganization"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumProject"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumEnvironment"
+          },
+          {
+            "$ref": "#/components/parameters/HeaderXQuotumStepUpGrant"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "properties": {
+                          "counterpartBillingAccountId": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "programKey": {
+                            "type": "string"
+                          },
+                          "qualifiedAt": {
+                            "type": [
+                              "null",
+                              "string"
+                            ]
+                          },
+                          "rewards": {
+                            "items": {
+                              "properties": {
+                                "code": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "effectKind": {
+                                  "enum": [
+                                    "discount",
+                                    "feature_grant",
+                                    "plan_grant"
+                                  ],
+                                  "type": "string"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "issuedAt": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "promotionKey": {
+                                  "type": "string"
+                                },
+                                "reason": {
+                                  "type": [
+                                    "null",
+                                    "string"
+                                  ]
+                                },
+                                "recipient": {
+                                  "enum": [
+                                    "referrer",
+                                    "referee"
+                                  ],
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "enum": [
+                                    "pending",
+                                    "issued",
+                                    "held",
+                                    "used",
+                                    "skipped",
+                                    "failed"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "recipient",
+                                "status",
+                                "reason",
+                                "promotionKey",
+                                "effectKind",
+                                "code",
+                                "issuedAt"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "role": {
+                            "enum": [
+                              "referrer",
+                              "referee"
+                            ],
+                            "type": "string"
+                          },
+                          "status": {
+                            "enum": [
+                              "pending",
+                              "qualified"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "programKey",
+                          "role",
+                          "counterpartBillingAccountId",
+                          "status",
+                          "qualifiedAt",
+                          "createdAt",
+                          "rewards"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "pagination": {
+                      "properties": {
+                        "nextCursor": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "nextCursor"
+                      ],
+                      "type": "object"
+                    },
+                    "success": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "data",
+                    "pagination"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/QuotumError400"
+          },
+          "401": {
+            "$ref": "#/components/responses/QuotumError401"
+          },
+          "403": {
+            "$ref": "#/components/responses/QuotumError403"
+          },
+          "404": {
+            "$ref": "#/components/responses/QuotumError404"
+          },
+          "409": {
+            "$ref": "#/components/responses/QuotumError409"
+          },
+          "410": {
+            "$ref": "#/components/responses/QuotumError410"
+          },
+          "413": {
+            "$ref": "#/components/responses/QuotumError413"
+          },
+          "415": {
+            "$ref": "#/components/responses/QuotumError415"
+          },
+          "422": {
+            "$ref": "#/components/responses/QuotumError422"
+          },
+          "429": {
+            "$ref": "#/components/responses/QuotumError429"
+          },
+          "500": {
+            "$ref": "#/components/responses/QuotumError500"
+          },
+          "501": {
+            "$ref": "#/components/responses/QuotumError501"
+          },
+          "502": {
+            "$ref": "#/components/responses/QuotumError502"
+          },
+          "503": {
+            "$ref": "#/components/responses/QuotumError503"
+          }
+        },
+        "security": [
+          {
+            "merchantSession": [],
+            "serviceToken": []
+          }
+        ],
+        "summary": "GET /api/billing/admin/billing-accounts/{billingAccountId}/referrals",
+        "tags": [
+          "merchant-billing"
+        ]
+      }
+    },
     "/api/billing/admin/billing-accounts/{billingAccountId}/refunds": {
       "get": {
         "description": "Requires billing.read in sandbox and billing.read in production.  ",
@@ -66788,16 +67044,7 @@
             "$ref": "#/components/parameters/QueryCursor3"
           },
           {
-            "in": "query",
-            "name": "role",
-            "required": false,
-            "schema": {
-              "enum": [
-                "referrer",
-                "referee"
-              ],
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/QueryRole"
           }
         ],
         "responses": {

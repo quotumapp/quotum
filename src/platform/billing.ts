@@ -33,7 +33,7 @@ const readPatterns = [
 	"admin/usage-events",
 	"admin/catalog(?:/(?:products|store-products))?",
 	"admin/providers/capabilities",
-	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|available-actions|controls|usage/(?:events|series)|promotion-redemptions|refunds|invoices(?:/${id})?)`,
+	`admin/billing-accounts/${account}/(?:billing-summary|billing-account|available-actions|controls|usage/(?:events|series)|promotion-redemptions|referrals|refunds|invoices(?:/${id})?)`,
 	`admin/promotions(?:/${account}(?:/(?:codes|redemptions))?)?`,
 	`admin/webhook-endpoints(?:/${id})?`,
 	"admin/webhook-deliveries",

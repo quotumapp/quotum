@@ -65,7 +65,7 @@ const listProgramsQuerySchema = z
 
 const listLedgerQuerySchema = z.object({ limit: limitQuery, cursor: z.uuid().optional() }).strict();
 
-const listAccountQuerySchema = z
+export const listAccountReferralsQuerySchema = z
 	.object({
 		limit: limitQuery,
 		cursor: z.uuid().optional(),
@@ -268,7 +268,7 @@ export function registerReferralRoutes({
 		},
 		{
 			params: accountParams,
-			query: listAccountQuerySchema,
+			query: listAccountReferralsQuerySchema,
 			detail: operationDetail({
 				operationId: "getV1BillingAccountsReferrals",
 				tags: ["referrals"],

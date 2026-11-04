@@ -46,6 +46,7 @@ import {
 	requireProviderMethod,
 	requireStripeBillingService,
 } from "../app/provider-services";
+import { listAccountReferralsQuerySchema } from "../app/referral-routes";
 import type { ProjectProviderServiceResolver } from "../app/types";
 import { refuseEmbeddedCheckout, refuseRefund } from "../billing/commercial";
 import {
@@ -527,6 +528,16 @@ export function createMerchantBillingPort(input: {
 					await repo.promotions.listAccountRedemptions(project, account(), {
 						limit: input.limit,
 						cursor: input.cursor ?? null,
+					}),
+				);
+			}
+			case "account.referrals": {
+				const input = parse(listAccountReferralsQuerySchema, command.query);
+				return list(
+					await repo.referrals.listAccountReferrals(project, account(), {
+						limit: input.limit,
+						cursor: input.cursor ?? null,
+						role: input.role ?? null,
 					}),
 				);
 			}
