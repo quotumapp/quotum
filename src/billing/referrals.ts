@@ -2,12 +2,15 @@ import type { ProjectInstanceContext } from "../projects/context";
 import { sha256Hex, stableJson } from "./decimal";
 import { BillingError } from "./errors";
 import { drawCodeSymbols, type RandomBytes } from "./gift-codes";
-import type { PromotionChannel, PromotionEffectKind } from "./promotions";
+import type { PromotionChannel, PromotionEffectKind, PromotionTarget } from "./promotions";
 
 export const referralRecipients = ["referrer", "both"] as const;
 export type ReferralRecipient = (typeof referralRecipients)[number];
-/** When a referral earns its rewards. `redemption` means as soon as the code is entered. */
-export const referralTriggers = ["redemption"] as const;
+/**
+ * When a referral earns its rewards: `redemption` as soon as the code is entered, `first_payment`
+ * when the new customer first pays for something the program targets.
+ */
+export const referralTriggers = ["redemption", "first_payment"] as const;
 export type ReferralTrigger = (typeof referralTriggers)[number];
 export type ReferralProgramStatus = "active" | "archived";
 export type ReferralStatus = "pending" | "qualified";
@@ -33,6 +36,10 @@ export interface CreateReferralProgramInput {
 	recipient: ReferralRecipient;
 	/** How many times one referrer can be rewarded; null means no limit. */
 	maxRewardsPerReferrer?: number | null;
+	/** The plans and products whose payment counts for `first_payment`; empty means any. */
+	targets?: PromotionTarget[];
+	/** Whether a provider trial starting is not yet a payment. True unless set otherwise. */
+	excludeTrial?: boolean;
 	actor: string;
 }
 
@@ -44,6 +51,8 @@ export interface ReferralProgramRecord {
 	trigger: ReferralTrigger;
 	recipient: ReferralRecipient;
 	maxRewardsPerReferrer: number | null;
+	targets: PromotionTarget[];
+	excludeTrial: boolean;
 	createdBy: string;
 	createdAt: string;
 	archivedBy: string | null;
@@ -215,6 +224,28 @@ export function referralProgramTermsHash(input: CreateReferralProgramInput): str
 			trigger,
 			recipient,
 			maxRewardsPerReferrer: maxRewardsPerReferrer ?? null,
+			targets: sortedTargets(input.targets ?? []),
+			excludeTrial: input.excludeTrial ?? true,
 		}),
 	);
+}
+
+/** One order for a program's targets, so sending them in another order is the same terms. */
+export function sortedTargets(targets: readonly PromotionTarget[]): PromotionTarget[] {
+	return [...targets].sort(
+		(left, right) =>
+			left.kind.localeCompare(right.kind) ||
+			(left.key < right.key ? -1 : left.key > right.key ? 1 : 0),
+	);
+}
+
+/** Refuses terms that say something the trigger cannot do. */
+export function assertReferralProgramTerms(input: CreateReferralProgramInput): void {
+	if (input.trigger === "first_payment") return;
+	if ((input.targets?.length ?? 0) > 0 || input.excludeTrial === false) {
+		throw referralError(
+			"REFERRAL_PROGRAM_INVALID",
+			"targets and excludeTrial apply only to the first_payment trigger",
+		);
+	}
 }

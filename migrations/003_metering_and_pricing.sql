@@ -2987,11 +2987,14 @@ CREATE TABLE IF NOT EXISTS referral_programs (
 	name TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 200),
 	status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
 	reward_promotion_id UUID NOT NULL,
-	trigger TEXT NOT NULL CHECK (trigger IN ('redemption')),
+	trigger TEXT NOT NULL CHECK (trigger IN ('redemption', 'first_payment')),
 	recipient TEXT NOT NULL CHECK (recipient IN ('referrer', 'both')),
 	max_rewards_per_referrer INTEGER CHECK (
 		max_rewards_per_referrer IS NULL OR max_rewards_per_referrer > 0
 	),
+	-- The plans and products whose payment counts for `first_payment`; empty means any.
+	targets JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(targets) = 'array'),
+	exclude_trial BOOLEAN NOT NULL DEFAULT true,
 	terms_hash TEXT COLLATE "C" NOT NULL CHECK (char_length(terms_hash) = 64),
 	created_by TEXT NOT NULL CHECK (char_length(created_by) BETWEEN 1 AND 200),
 	archived_by TEXT CHECK (archived_by IS NULL OR char_length(archived_by) BETWEEN 1 AND 200),
@@ -3040,6 +3043,8 @@ CREATE TABLE IF NOT EXISTS referrals (
 	customer_id UUID NOT NULL,
 	status TEXT NOT NULL CHECK (status IN ('pending', 'qualified')),
 	qualified_at TIMESTAMPTZ,
+	-- Set when a fact about the referee was written, so the sweep reads its state again.
+	check_due_at TIMESTAMPTZ,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	CONSTRAINT referrals_project_id_id_unique UNIQUE (project_id, id),
@@ -3063,6 +3068,14 @@ CREATE INDEX IF NOT EXISTS idx_billing_referrals_referrer_created
 
 CREATE INDEX IF NOT EXISTS idx_billing_referrals_customer_created
 	ON referrals (project_id, customer_id, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_billing_referrals_pending_customer
+	ON referrals (project_id, customer_id)
+	WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_billing_referrals_check_due
+	ON referrals (check_due_at, id)
+	WHERE check_due_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS referral_rewards (
 	id UUID PRIMARY KEY DEFAULT uuidv7(),

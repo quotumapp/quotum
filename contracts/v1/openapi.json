@@ -58371,6 +58371,9 @@
                           "createdBy": {
                             "type": "string"
                           },
+                          "excludeTrial": {
+                            "type": "boolean"
+                          },
                           "key": {
                             "type": "string"
                           },
@@ -58400,9 +58403,32 @@
                             ],
                             "type": "string"
                           },
+                          "targets": {
+                            "items": {
+                              "properties": {
+                                "key": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "plan",
+                                    "product"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "key"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
                           "trigger": {
                             "enum": [
-                              "redemption"
+                              "redemption",
+                              "first_payment"
                             ],
                             "type": "string"
                           }
@@ -58415,6 +58441,8 @@
                           "trigger",
                           "recipient",
                           "maxRewardsPerReferrer",
+                          "targets",
+                          "excludeTrial",
                           "createdBy",
                           "createdAt",
                           "archivedBy",
@@ -58528,6 +58556,9 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "excludeTrial": {
+                    "type": "boolean"
+                  },
                   "key": {
                     "maxLength": 120,
                     "minLength": 1,
@@ -58557,9 +58588,36 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "targets": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "key": {
+                          "maxLength": 120,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "kind": {
+                          "enum": [
+                            "plan",
+                            "product"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "key"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 50,
+                    "type": "array"
+                  },
                   "trigger": {
                     "enum": [
-                      "redemption"
+                      "redemption",
+                      "first_payment"
                     ],
                     "type": "string"
                   }
@@ -58603,6 +58661,9 @@
                         "createdBy": {
                           "type": "string"
                         },
+                        "excludeTrial": {
+                          "type": "boolean"
+                        },
                         "key": {
                           "type": "string"
                         },
@@ -58632,9 +58693,32 @@
                           ],
                           "type": "string"
                         },
+                        "targets": {
+                          "items": {
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "plan",
+                                  "product"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "key"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
                         "trigger": {
                           "enum": [
-                            "redemption"
+                            "redemption",
+                            "first_payment"
                           ],
                           "type": "string"
                         }
@@ -58647,6 +58731,8 @@
                         "trigger",
                         "recipient",
                         "maxRewardsPerReferrer",
+                        "targets",
+                        "excludeTrial",
                         "createdBy",
                         "createdAt",
                         "archivedBy",
@@ -58696,6 +58782,9 @@
                         "createdBy": {
                           "type": "string"
                         },
+                        "excludeTrial": {
+                          "type": "boolean"
+                        },
                         "key": {
                           "type": "string"
                         },
@@ -58725,9 +58814,32 @@
                           ],
                           "type": "string"
                         },
+                        "targets": {
+                          "items": {
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "plan",
+                                  "product"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "key"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
                         "trigger": {
                           "enum": [
-                            "redemption"
+                            "redemption",
+                            "first_payment"
                           ],
                           "type": "string"
                         }
@@ -58740,6 +58852,8 @@
                         "trigger",
                         "recipient",
                         "maxRewardsPerReferrer",
+                        "targets",
+                        "excludeTrial",
                         "createdBy",
                         "createdAt",
                         "archivedBy",
@@ -58857,6 +58971,9 @@
                         "createdBy": {
                           "type": "string"
                         },
+                        "excludeTrial": {
+                          "type": "boolean"
+                        },
                         "key": {
                           "type": "string"
                         },
@@ -58886,9 +59003,32 @@
                           ],
                           "type": "string"
                         },
+                        "targets": {
+                          "items": {
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "plan",
+                                  "product"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "key"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
                         "trigger": {
                           "enum": [
-                            "redemption"
+                            "redemption",
+                            "first_payment"
                           ],
                           "type": "string"
                         }
@@ -58901,6 +59041,8 @@
                         "trigger",
                         "recipient",
                         "maxRewardsPerReferrer",
+                        "targets",
+                        "excludeTrial",
                         "createdBy",
                         "createdAt",
                         "archivedBy",
@@ -59022,6 +59164,9 @@
                         "createdBy": {
                           "type": "string"
                         },
+                        "excludeTrial": {
+                          "type": "boolean"
+                        },
                         "key": {
                           "type": "string"
                         },
@@ -59051,9 +59196,32 @@
                           ],
                           "type": "string"
                         },
+                        "targets": {
+                          "items": {
+                            "properties": {
+                              "key": {
+                                "type": "string"
+                              },
+                              "kind": {
+                                "enum": [
+                                  "plan",
+                                  "product"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "key"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
                         "trigger": {
                           "enum": [
-                            "redemption"
+                            "redemption",
+                            "first_payment"
                           ],
                           "type": "string"
                         }
@@ -59066,6 +59234,8 @@
                         "trigger",
                         "recipient",
                         "maxRewardsPerReferrer",
+                        "targets",
+                        "excludeTrial",
                         "createdBy",
                         "createdAt",
                         "archivedBy",

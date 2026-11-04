@@ -8,6 +8,7 @@ import type {
 	ProviderSubscriptionReconciliationRow,
 	StoreEventReplayJobRow,
 } from "../../src/db/repository";
+import { ensureCustomer } from "../../src/db/repository/identities";
 import { PaddleClient } from "../../src/providers/paddle/client";
 import type { PaddleSubscription } from "../../src/providers/paddle/schemas";
 import { PaddleBillingService } from "../../src/providers/paddle/service";
@@ -608,6 +609,48 @@ localDescribe("Paddle fixed subscription persistence", () => {
 			transactionId: session.sessionId,
 			productKey: "paddle_test",
 		});
+	});
+
+	it("qualifies a referral on a completed transaction, however often it repeats", async () => {
+		const h = harness();
+		const { promotions, referrals } = context.repository;
+		await promotions.createPromotion(project, {
+			key: "reward",
+			name: "Reward",
+			effect: {
+				kind: "discount",
+				discount: { type: "percent", percentOffBps: 1000, duration: "once", durationMonths: null },
+			},
+			actor: "referral-test",
+		});
+		await referrals.createProgram(project, {
+			key: "friends",
+			name: "Friends",
+			rewardPromotionKey: "reward",
+			trigger: "first_payment",
+			recipient: "referrer",
+			actor: "referral-test",
+		});
+		await ensureCustomer(context.db as never, project.projectInstanceId, "referrer");
+		await ensureCustomer(context.db as never, project.projectInstanceId, h.billingAccountId);
+		const { code } = await referrals.getOrCreateCode(project, {
+			billingAccountId: "referrer",
+			programKey: "friends",
+		});
+		await referrals.redeemCode(project, {
+			billingAccountId: h.billingAccountId,
+			code,
+			channel: "web",
+		});
+		await h.create();
+		expect(await referrals.qualifyDueReferrals(10)).toBe(0);
+
+		const event = h.rawEvent("transaction.completed");
+		await h.deliver(event);
+		await h.deliver(event);
+
+		expect(await referrals.qualifyDueReferrals(10)).toBe(1);
+		expect(await referrals.qualifyDueReferrals(10)).toBe(0);
 	});
 
 	it("rejects forged signatures before accepting an event", async () => {

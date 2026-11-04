@@ -642,7 +642,31 @@ export async function enqueueProjectionSyncJob(
 			payload,
 		});
 	}
+	await markReferralCheckDue(executor, customer.project_id, input.customerId);
 	return enqueued;
+}
+
+/**
+ * Asks the referral sweep to read this customer's state again. Every provider writes through here
+ * in the transaction that records a payment, so no provider has to know about referrals, and the
+ * sweep decides what counts from state, which makes a replayed or repeated event harmless.
+ */
+async function markReferralCheckDue(
+	executor: QueryExecutor,
+	projectId: string,
+	customerId: string,
+): Promise<void> {
+	await executeRows(
+		executor,
+		drizzleSql`
+			UPDATE referrals
+			SET check_due_at = now()
+			WHERE project_id = ${projectId}
+				AND customer_id = ${customerId}
+				AND status = 'pending'
+				AND check_due_at IS NULL
+		`,
+	);
 }
 
 /** Inserts or refreshes the per-key projection job for a payload the caller already built. */
