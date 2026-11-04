@@ -368,4 +368,23 @@ export const domainEventExamples: DomainEventExample[] = [
 			},
 		),
 	},
+	{
+		description: "A friend's redemption earned the referrer the program's free credits.",
+		event: event(
+			"0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e20",
+			"referral.reward_issued",
+			"2026-10-21T09:00:00.000Z",
+			{
+				reward: {
+					id: "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e21",
+					referralId: "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e22",
+					programKey: "refer-a-friend",
+					recipient: "referrer",
+					status: "issued",
+					promotionKey: "referral-credits",
+					effectKind: "feature_grant",
+				},
+			},
+		),
+	},
 ];

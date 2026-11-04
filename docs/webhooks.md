@@ -30,6 +30,7 @@ a list of types, or to every type when the list is empty, including types added 
 | `trial.ending`, `trial.ended` | A trial ends within three days, or a trial without a paid successor ended | `trial`, as the projection carries it |
 | `plan_grant.ending`, `plan_grant.ended` | The plan a redeemed promotion code gave ends within three days, or ended | `planGrant`, as the projection carries it |
 | `usage_alert.triggered` | Usage crosses an alert's threshold in a window | `alert`, `window`, the `threshold` in units, `currentValue` and the window's `crossing` count |
+| `referral.reward_issued` | A [referral](referrals.md) reward reached its recipient (`issued`), or waits as a code (`held`) | `reward`: its id, referral, program, recipient, status, promotion and effect kind. It names no other account and carries no code |
 | `auto_topup.succeeded` | An automatic top-up charged and added its credits | `autoTopup`: job, policy, feature, top-up, amounts, currency, provider ids |
 | `auto_topup.failed` | An automatic top-up failed for good, or its charge exceeded the policy's safety budget and was voided; the policy may be suspended | `autoTopup` with `error` |
 | `auto_topup.action_required` | An automatic top-up needs the customer, such as a purchase in a store app or authentication | `autoTopup` with `error` |

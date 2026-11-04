@@ -274,6 +274,7 @@ function composeBillingRuntime(env: BillingEnv, dependencies: BillingRuntimeDepe
 	const promotionMaintenanceWorker = new PromotionMaintenanceWorker({
 		batchSize: tuning.promotionMaintenanceBatchSize,
 		workerId: env.workerId,
+		referralRewards: billingRepository.referrals,
 		repository: {
 			releaseExpiredPromotionReservations: (limit) =>
 				billingRepository.promotions.releaseExpiredPromotionReservations(limit),

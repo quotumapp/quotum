@@ -12,12 +12,14 @@ type HolderRow = {
 	| { kind: "subscription"; plan_key: string; version: number }
 	| { kind: "plan_grant"; plan_key: string; version: number; origin: PlanGrantOrigin }
 	| { kind: "promotion_feature_grant"; promotion_key: string }
+	| { kind: "referral_reward"; promotion_key: string }
 );
 
 type FeatureHolder = { count: number } & (
 	| { kind: "subscription"; planKey: string; planVersion: number }
 	| { kind: "plan_grant"; planKey: string; planVersion: number; origin: PlanGrantOrigin }
 	| { kind: "promotion_feature_grant"; promotionKey: string }
+	| { kind: "referral_reward"; promotionKey: string }
 );
 
 /**
@@ -92,6 +94,35 @@ export async function assertRetiringFeaturesAreNotHeld(
 					-- Held credits still belong to a holder even when none are free to spend.
 					AND allocation.quantity > allocation.consumed_quantity + allocation.reversed_quantity
 				GROUP BY feature.key, promotion.key
+
+				UNION ALL
+
+				-- A running program still promises the feature, and so does a reward not yet issued
+				-- from an archived one. Redeeming either after retirement could only fail.
+				SELECT feature.key, 'referral_reward'::text, NULL::text, NULL::text,
+					NULL::integer, promotion.key, count(DISTINCT program.id)::integer
+				FROM referral_programs program
+				JOIN promotions promotion
+					ON promotion.project_id = program.project_id
+					AND promotion.id = program.reward_promotion_id
+				JOIN promotion_grant_items item
+					ON item.project_id = promotion.project_id AND item.promotion_id = promotion.id
+				JOIN retiring_features feature ON feature.id = item.feature_id
+				WHERE program.project_id = ${projectId}
+					AND (
+						program.status = 'active'
+						OR EXISTS (
+							SELECT 1
+							FROM referrals referral
+							JOIN referral_rewards reward
+								ON reward.project_id = referral.project_id
+								AND reward.referral_id = referral.id
+							WHERE referral.project_id = program.project_id
+								AND referral.program_id = program.id
+								AND reward.status = 'pending'
+						)
+					)
+				GROUP BY feature.key, promotion.key
 			)
 			SELECT * FROM holders
 			ORDER BY feature_key, kind, origin, plan_key, version, promotion_key
@@ -110,7 +141,7 @@ export async function assertRetiringFeaturesAreNotHeld(
 
 function toFeatureHolder(row: HolderRow): FeatureHolder {
 	const count = Number(row.count);
-	if (row.kind === "promotion_feature_grant") {
+	if (row.kind === "promotion_feature_grant" || row.kind === "referral_reward") {
 		return { kind: row.kind, promotionKey: row.promotion_key, count };
 	}
 	const plan = { planKey: row.plan_key, planVersion: row.version, count };
@@ -135,8 +166,11 @@ function retirementMessage(featureKey: string, holders: readonly FeatureHolder[]
 		if (holder.kind === "promotion_feature_grant") {
 			return `${holder.count} redeemed feature grant${holder.count === 1 ? "" : "s"} from promotion ${holder.promotionKey}`;
 		}
+		if (holder.kind === "referral_reward") {
+			return `${holder.count} referral program${holder.count === 1 ? "" : "s"} rewarding with promotion ${holder.promotionKey}`;
+		}
 		const kind = holder.kind === "subscription" ? "subscription" : `${holder.origin} plan grant`;
 		return `${holder.count} live ${kind}${holder.count === 1 ? "" : "s"} through plan ${holder.planKey} version ${holder.planVersion}`;
 	});
-	return `Feature ${featureKey} cannot be retired: held by ${sources.join(", ")}; migrate subscriptions, end plan grants, or consume, revoke or let promotion credits expire before retiring it`;
+	return `Feature ${featureKey} cannot be retired: held by ${sources.join(", ")}; migrate subscriptions, end plan grants, archive referral programs, or consume, revoke or let promotion credits expire before retiring it`;
 }

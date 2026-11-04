@@ -22,6 +22,8 @@ export const operatorKeyPaths = {
 	controls: (path: string): boolean => CONTROLS_OPERATOR_PATH_PATTERN.test(path),
 	/** Promotion administration and redemption review. */
 	promotions: (path: string): boolean => path.startsWith("/v1/admin/promotion"),
+	/** Referral program administration and its who-referred-whom ledger. */
+	referrals: (path: string): boolean => path.startsWith("/v1/admin/referral-programs"),
 	/** Operator grants and administrative debits change balances. */
 	balanceAdjustments: (path: string): boolean =>
 		path.startsWith("/v1/admin/operator-grants/") ||

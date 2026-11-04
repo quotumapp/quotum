@@ -41,6 +41,15 @@ export const customerErasureDispositions = {
 	plan_grants: { kind: "rewrite" },
 	promotion_redemptions: { kind: "rewrite" },
 	promotion_apple_signature_attempts: { kind: "rewrite" },
+	referral_codes: { kind: "delete" },
+	referrals: {
+		kind: "retain",
+		reason: "who referred whom, by internal customer ids that no longer name anyone",
+	},
+	referral_rewards: {
+		kind: "retain",
+		reason: "reward outcomes by internal ids; the sweep skips an erased recipient",
+	},
 	operator_grants: { kind: "rewrite" },
 	administrative_debits: { kind: "rewrite" },
 	store_events: { kind: "scrub" },
@@ -160,6 +169,7 @@ const digestOfId = drizzleSql`encode(sha256(convert_to(target.id::text, 'UTF8'))
 export const deleteBatches: CustomerErasureBatch[] = [
 	deleteBatch("projection_sync_jobs", ofCustomer),
 	deleteBatch("domain_events", ofCustomer),
+	deleteBatch("referral_codes", ofCustomer),
 	deleteBatch("checkout_requests", ofCustomer),
 	deleteBatch("payment_setup_sessions", ofCustomer),
 	deleteBatch("client_idempotency_claims", ofCustomer),

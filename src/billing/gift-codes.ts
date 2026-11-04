@@ -19,15 +19,14 @@ const cryptoRandomBytes: RandomBytes = (length) => crypto.getRandomValues(new Ui
  */
 const ACCEPT_BELOW = 256 - (256 % GIFT_CODE_ALPHABET.length);
 
-/**
- * One gift code such as `K7Q2-M9XD-4TRW-P8HB-3NCF`: twenty symbols in five hyphenated groups. It
- * satisfies the promotion code pattern, so it redeems like any other code. Draws use rejection
- * sampling; `randomBytes` exists so a test can feed known bytes.
- */
-export function generateGiftCode(randomBytes: RandomBytes = cryptoRandomBytes): string {
+/** `count` symbols of the alphabet, by rejection sampling. */
+export function drawCodeSymbols(
+	count: number,
+	randomBytes: RandomBytes = cryptoRandomBytes,
+): string[] {
 	const symbols: string[] = [];
-	while (symbols.length < GIFT_CODE_SYMBOLS) {
-		const wanted = GIFT_CODE_SYMBOLS - symbols.length;
+	while (symbols.length < count) {
+		const wanted = count - symbols.length;
 		const bytes = randomBytes(wanted);
 		if (bytes.length !== wanted) {
 			throw new Error("The random source returned an unexpected number of bytes");
@@ -37,6 +36,16 @@ export function generateGiftCode(randomBytes: RandomBytes = cryptoRandomBytes): 
 			symbols.push(GIFT_CODE_ALPHABET.charAt(byte % GIFT_CODE_ALPHABET.length));
 		}
 	}
+	return symbols;
+}
+
+/**
+ * One gift code such as `K7Q2-M9XD-4TRW-P8HB-3NCF`: twenty symbols in five hyphenated groups. It
+ * satisfies the promotion code pattern, so it redeems like any other code. `randomBytes` exists so
+ * a test can feed known bytes.
+ */
+export function generateGiftCode(randomBytes: RandomBytes = cryptoRandomBytes): string {
+	const symbols = drawCodeSymbols(GIFT_CODE_SYMBOLS, randomBytes);
 	const groups: string[] = [];
 	for (let start = 0; start < GIFT_CODE_SYMBOLS; start += GIFT_CODE_GROUP_SIZE) {
 		groups.push(symbols.slice(start, start + GIFT_CODE_GROUP_SIZE).join(""));

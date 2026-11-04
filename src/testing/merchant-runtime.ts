@@ -214,6 +214,7 @@ export async function createMerchantTestRuntime(
 					if (request.method === "POST" && url.pathname === "/promotions/run") {
 						const worker = new PromotionMaintenanceWorker({
 							workerId: "merchant-e2e-promotions",
+							referralRewards: promotionRepository.referrals,
 							projectContextResolver: new PostgresProjectInstanceContextResolver(database),
 							adapterForJob: promotionProviders.promotionMaintenance,
 							logger: { error() {} },

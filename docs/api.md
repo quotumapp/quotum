@@ -25,6 +25,8 @@ admin routes. Each billing topic has its own guide:
 - [Promotions](promotions.md): discounts, reward codes, validation, redemption and revocation.
 - [Trials, default plan and operator grants](grants.md): plan grants without a provider, support
   credit and administrative debits.
+- [Referral programs](referrals.md): rewarding a customer who brings another, with a shareable code
+  and a record of who referred whom.
 - [Affiliate tracking](affiliates.md): recording an affiliate key on a purchase, and each
   affiliate's customers and revenue.
 - [Provider capability errors and reads](provider-capabilities.md): capability errors, the

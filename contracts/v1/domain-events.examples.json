@@ -446,5 +446,29 @@
       "type": "auto_topup.action_required",
       "version": 1
     }
+  },
+  {
+    "description": "A friend's redemption earned the referrer the program's free credits.",
+    "event": {
+      "billingAccountId": "user_42",
+      "createdAt": "2026-10-21T09:00:00.000Z",
+      "data": {
+        "reward": {
+          "effectKind": "feature_grant",
+          "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e21",
+          "programKey": "refer-a-friend",
+          "promotionKey": "referral-credits",
+          "recipient": "referrer",
+          "referralId": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e22",
+          "status": "issued"
+        }
+      },
+      "environment": "production",
+      "id": "0192f3a1-7c4e-7b1a-9d3e-5a6b7c8d9e20",
+      "occurredAt": "2026-10-21T09:00:00.000Z",
+      "projectKey": "acme",
+      "type": "referral.reward_issued",
+      "version": 1
+    }
   }
 ]

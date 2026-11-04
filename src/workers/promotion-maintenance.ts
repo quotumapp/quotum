@@ -1,4 +1,5 @@
 import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../billing/promotions";
+import type { ReferralRewardJob } from "../billing/referrals";
 import type { BillingProvider } from "../billing/types";
 import {
 	type BillingMetrics,
@@ -34,6 +35,17 @@ export interface PromotionMaintenanceRepository {
 	): Promise<void>;
 }
 
+/** What the worker needs to issue referral rewards that are due. */
+export interface ReferralRewardSweep {
+	listDueRewards(limit: number): Promise<ReferralRewardJob[]>;
+	issueReward(project: ProjectInstanceContext, rewardId: string): Promise<void>;
+	deferReward(
+		projectId: string,
+		rewardId: string,
+		input: { error: string; retryDelayMs: number | null },
+	): Promise<void>;
+}
+
 export interface PromotionStripeProvider {
 	syncPromotionStripeObject(job: PromotionStripeSyncJob): Promise<PromotionStripeSyncOutcome>;
 }
@@ -52,6 +64,8 @@ export interface PromotionMaintenanceRunResult {
 	failed: number;
 	deferred: number;
 	leaseSkipped: number;
+	referralRewardsProcessed: number;
+	referralRewardsDeferred: number;
 }
 
 type PromotionJobOutcome = "ready" | "retired" | "retryScheduled" | "failed" | "deferred";
@@ -74,6 +88,7 @@ export class PromotionMaintenanceWorker {
 			leaseHeartbeatTimers?: LeaseHeartbeatTimers;
 			maxAttempts?: number;
 			repository: PromotionMaintenanceRepository;
+			referralRewards: ReferralRewardSweep;
 			projectContextResolver: ProjectInstanceContextResolver;
 			/** Null when the project has no connection for the provider; the job is deferred. */
 			adapterForJob(
@@ -104,7 +119,10 @@ export class PromotionMaintenanceWorker {
 			failed: 0,
 			deferred: 0,
 			leaseSkipped: 0,
+			referralRewardsProcessed: 0,
+			referralRewardsDeferred: 0,
 		};
+		await this.issueReferralRewards(batchSize, result);
 		const staleAfterMs = this.dependencies.staleAfterMs ?? 5 * 60_000;
 		const jobs = await repository.claimStripeObjects(
 			this.dependencies.workerId,
@@ -147,6 +165,42 @@ export class PromotionMaintenanceWorker {
 		}
 
 		return result;
+	}
+
+	/**
+	 * Issues rewards in turn. Issuing is safe to repeat, so a reward needs no lease: two workers on
+	 * one reward serialize on the recipient's lock, and the second finds it settled.
+	 */
+	private async issueReferralRewards(
+		batchSize: number,
+		result: PromotionMaintenanceRunResult,
+	): Promise<void> {
+		const { referralRewards, projectContextResolver, logger, maxAttempts } = this.dependencies;
+		for (const job of await referralRewards.listDueRewards(batchSize)) {
+			try {
+				const project = await resolveClaimedProjectInstance(projectContextResolver, {
+					projectInstanceId: job.projectId,
+					projectInstanceKey: job.projectKey,
+				});
+				await referralRewards.issueReward(project, job.rewardId);
+				result.referralRewardsProcessed += 1;
+				this.record("referral_reward", "processed");
+			} catch (error) {
+				logger.error("Referral reward could not be issued", error, {
+					projectKey: job.projectKey,
+					rewardId: job.rewardId,
+				});
+				await referralRewards.deferReward(job.projectId, job.rewardId, {
+					error: normalizeWorkerError(error),
+					retryDelayMs: calculateRetryDelayMs({
+						attempts: job.attempts,
+						maxAttempts: maxAttempts ?? DEFAULT_MAX_ATTEMPTS,
+					}),
+				});
+				result.referralRewardsDeferred += 1;
+				this.record("referral_reward", "deferred");
+			}
+		}
 	}
 
 	private async sync(

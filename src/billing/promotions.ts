@@ -379,7 +379,7 @@ export interface PromotionServiceLike {
 			limit: number;
 			cursor?: string | null;
 			active?: boolean | null;
-			source?: "operator" | "gift" | null;
+			source?: "operator" | "gift" | "referral" | null;
 		},
 	): Promise<PromotionListResult<PromotionCodeRecord>>;
 	deactivatePromotionCode(
@@ -524,6 +524,11 @@ const promotionErrorDefinitions = [
 		status: 409,
 		message:
 			"Promotion backs a gift that is still sold or gift codes that are neither redeemed nor expired",
+	},
+	{
+		code: "PROMOTION_HAS_ACTIVE_REFERRAL_PROGRAM",
+		status: 409,
+		message: "Promotion is the reward of an active referral program",
 	},
 	{ code: "PROMOTION_TERMS_INVALID", status: 400, message: "Promotion terms are invalid" },
 	{ code: "PROMOTION_TARGET_NOT_FOUND", status: 400, message: "Promotion target was not found" },
