@@ -82,7 +82,10 @@ export function wrapStripeService(
 							return { ...result, timing: stripeAutoTopupTiming(result) };
 						},
 					},
-		promotions: adapterGroup({ syncObject: service.syncPromotionStripeObject?.bind(service) }),
+		promotions: adapterGroup({
+			syncObject: service.syncPromotionStripeObject?.bind(service),
+			addSubscriptionDiscount: service.addSubscriptionDiscount?.bind(service),
+		}),
 		reads: adapterGroup({
 			catalog: service.getCatalog?.bind(service),
 			billingAccount: service.getBillingAccount?.bind(service),

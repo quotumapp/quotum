@@ -8,7 +8,12 @@ import type {
 	AutoTopupCheckpoint,
 	AutoTopupJob,
 } from "../billing/auto-topup";
-import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../billing/promotions";
+import type {
+	PromotionStripeSyncJob,
+	PromotionStripeSyncOutcome,
+	SubscriptionDiscountInput,
+	SubscriptionDiscountOutcome,
+} from "../billing/promotions";
 import type { SubscriptionChangeOperation, UsageInvoiceJob } from "../billing/recurring";
 import type { WebBillingService } from "../billing/web-provider";
 import type { ProjectScopedBillingRepository } from "../db/repository";
@@ -162,6 +167,8 @@ export interface ProviderTopupGroup {
 
 export interface ProviderPromotionGroup {
 	syncObject(job: PromotionStripeSyncJob): Promise<PromotionStripeSyncOutcome>;
+	/** Adds a promotion's discount to a live subscription from its next invoice. */
+	addSubscriptionDiscount?(input: SubscriptionDiscountInput): Promise<SubscriptionDiscountOutcome>;
 }
 
 export interface ProviderReadGroup {

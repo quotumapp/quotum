@@ -36,6 +36,10 @@ const noReferralRewards: ReferralRewardSweep = {
 	listDueRewards: async () => [],
 	issueReward: async () => {},
 	deferReward: async () => {},
+	listHeldDiscounts: async () => [],
+	prepareDiscount: async () => null,
+	completeDiscount: async () => {},
+	postponeDiscount: async () => {},
 };
 
 const resolver = projectContextResolver({
@@ -115,6 +119,7 @@ describe("PromotionMaintenanceWorker", () => {
 			referralsQualified: 0,
 			referralRewardsProcessed: 0,
 			referralRewardsDeferred: 0,
+			referralDiscountsApplied: 0,
 		});
 		expect(outcomes.map((entry) => [entry.objectId, entry.outcome.kind])).toEqual([
 			["ready", "ready"],
@@ -134,6 +139,7 @@ describe("PromotionMaintenanceWorker", () => {
 		const worker = new PromotionMaintenanceWorker({
 			workerId: "worker-1",
 			referralRewards: {
+				...noReferralRewards,
 				qualifyDueReferrals: async () => 3,
 				listDueRewards: async () => [
 					{ rewardId: "fine", projectId: "project-1", projectKey: "acme", attempts: 0 },

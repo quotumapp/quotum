@@ -1,4 +1,5 @@
 import { type SQL as DrizzleSQL, sql as drizzleSql } from "drizzle-orm";
+import { sha256Hex, stableJson } from "../../billing/decimal";
 import { BillingError, NotFoundBillingError } from "../../billing/errors";
 import { generateGiftCode } from "../../billing/gift-codes";
 import {
@@ -15,6 +16,7 @@ import {
 	REFERRAL_DISCOUNT_HELD_REASON,
 	REFERRAL_REWARD_ACTOR,
 	type ReferralCodeRecord,
+	type ReferralDiscountApplication,
 	type ReferralLedgerRecord,
 	type ReferralPage,
 	type ReferralProgramRecord,
@@ -36,7 +38,7 @@ import { RepositoryModule } from "./base";
 import { customerHasPaid } from "./customer-payments";
 import { recordBillingEvent } from "./domain-event-facts";
 import { lockCustomerRow } from "./invalidations";
-import type { PromotionRepository } from "./promotions";
+import { applyPromotionRedemptionInTx, type PromotionRepository } from "./promotions";
 import { executeOne, executeRows, jsonb } from "./query";
 import type { QueryExecutor } from "./types";
 
@@ -44,6 +46,14 @@ type Timestamp = Date | string;
 
 /** A collision needs two draws of about 40 bits to meet, so a handful of attempts is generous. */
 const CODE_ATTEMPTS = 5;
+
+/**
+ * As long as Stripe keeps an idempotency key, so a worker that stopped after the Stripe call can
+ * still recognize its own coupon. A write normally settles this within the same pass.
+ */
+const DISCOUNT_RESERVATION_MS = 24 * 60 * 60_000;
+/** A subscription's discount lasts at least until its next invoice, so look again a day later. */
+const DISCOUNT_RECHECK_MS = 24 * 60 * 60_000;
 
 /** A refusal that says the account cannot take the plan now. The code stays usable for later. */
 const HELD_REFUSALS: ReadonlySet<string> = new Set([
@@ -114,7 +124,14 @@ const PROGRAM_COLUMNS = drizzleSql`
 export class ReferralRepository extends RepositoryModule implements ReferralServiceLike {
 	constructor(
 		database: ConstructorParameters<typeof RepositoryModule>[0],
-		private readonly promotions: Pick<PromotionRepository, "redeemPromotionCode">,
+		private readonly promotions: Pick<
+			PromotionRepository,
+			| "redeemPromotionCode"
+			| "resolveCommercialPromotion"
+			| "ensureSubscriptionDiscountAvailable"
+			| "reservePromotionRedemption"
+			| "releasePromotionRedemption"
+		>,
 	) {
 		super(database);
 	}
@@ -543,7 +560,10 @@ export class ReferralRepository extends RepositoryModule implements ReferralServ
 		}));
 	}
 
-	/** Puts a reward off after an unexpected failure; a null delay gives up on it. */
+	/**
+	 * Puts a reward off after an unexpected failure. A null delay gives up on it: a pending reward
+	 * fails, and a held discount stays a code that the sweep stops trying to apply.
+	 */
 	async deferReward(
 		projectId: string,
 		rewardId: string,
@@ -554,11 +574,249 @@ export class ReferralRepository extends RepositoryModule implements ReferralServ
 			drizzleSql`
 				UPDATE referral_rewards
 				SET attempts = attempts + 1,
-					status = CASE WHEN ${input.retryDelayMs === null} THEN 'failed' ELSE status END,
-					reason = ${input.error.slice(0, 500)},
+					status = CASE
+						WHEN status = 'pending' AND ${input.retryDelayMs === null} THEN 'failed' ELSE status
+					END,
+					reason = CASE
+						WHEN status = 'pending' THEN ${input.error.slice(0, 500)} ELSE reason
+					END,
 					next_attempt_at = now() + ${input.retryDelayMs ?? 0} * interval '1 millisecond',
 					updated_at = now()
-				WHERE project_id = ${projectId} AND id = ${rewardId} AND status = 'pending'
+				WHERE project_id = ${projectId} AND id = ${rewardId} AND status IN ('pending', 'held')
+			`,
+		);
+	}
+
+	/**
+	 * Held discounts whose code is unspent and whose recipient has a live Stripe subscription, so a
+	 * referrer who subscribes later is picked up with no extra work.
+	 */
+	async listHeldDiscounts(limit: number, maxAttempts: number): Promise<ReferralRewardJob[]> {
+		const rows = await executeRows<{
+			id: string;
+			project_id: string;
+			project_key: string;
+			attempts: number;
+		}>(
+			this.database,
+			drizzleSql`
+				SELECT reward.id, reward.project_id, project.key AS project_key, reward.attempts
+				FROM referral_rewards reward
+				JOIN projects project ON project.id = reward.project_id
+				JOIN promotion_codes code
+					ON code.project_id = reward.project_id AND code.id = reward.promotion_code_id
+				JOIN promotions promotion
+					ON promotion.project_id = code.project_id AND promotion.id = code.promotion_id
+				WHERE reward.status = 'held'
+					AND reward.next_attempt_at <= now()
+					AND reward.attempts < ${maxAttempts}
+					AND promotion.effect_kind = 'discount'
+					AND code.active
+					AND code.redeemed_count = 0
+					AND EXISTS (
+						SELECT 1
+						FROM subscriptions subscription
+						WHERE subscription.project_id = reward.project_id
+							AND subscription.customer_id = reward.customer_id
+							AND subscription.provider = 'stripe'
+							AND subscription.status = 'active'
+							AND NOT subscription.cancel_at_period_end
+					)
+				ORDER BY reward.next_attempt_at, reward.id
+				LIMIT ${limit}
+			`,
+		);
+		return rows.map((row) => ({
+			rewardId: row.id,
+			projectId: row.project_id,
+			projectKey: row.project_key,
+			attempts: Number(row.attempts),
+		}));
+	}
+
+	/**
+	 * Checks a held discount can go on the recipient's subscription and reserves its code. Null
+	 * means not now: the reward stays held with the reason, and the sweep looks again later.
+	 */
+	async prepareDiscount(
+		project: ProjectInstanceContext,
+		rewardId: string,
+	): Promise<ReferralDiscountApplication | null> {
+		const projectId = project.projectInstanceId;
+		const reward = await executeOne<{
+			customer_id: string;
+			billing_account_id: string;
+			recipient: ReferralRole;
+			referral_id: string;
+			program_key: string;
+			promotion_id: string;
+			promotion_key: string;
+			promotion_code_id: string;
+			code: string;
+			redemption_id: string | null;
+			redemption_status: string | null;
+		}>(
+			this.database,
+			drizzleSql`
+				SELECT reward.customer_id, customer.billing_account_id, reward.recipient,
+					reward.referral_id, program.key AS program_key, promotion.id AS promotion_id,
+					promotion.key AS promotion_key, code.id AS promotion_code_id, code.code,
+					redemption.id AS redemption_id, redemption.status AS redemption_status
+				FROM referral_rewards reward
+				JOIN customers customer
+					ON customer.project_id = reward.project_id AND customer.id = reward.customer_id
+				JOIN referrals referral
+					ON referral.project_id = reward.project_id AND referral.id = reward.referral_id
+				JOIN referral_programs program
+					ON program.project_id = referral.project_id AND program.id = referral.program_id
+				JOIN promotion_codes code
+					ON code.project_id = reward.project_id AND code.id = reward.promotion_code_id
+				JOIN promotions promotion
+					ON promotion.project_id = code.project_id AND promotion.id = code.promotion_id
+				LEFT JOIN promotion_redemptions redemption
+					ON redemption.project_id = reward.project_id
+					AND redemption.customer_id = reward.customer_id
+					AND redemption.idempotency_key = ${discountKey(rewardId)}
+				WHERE reward.project_id = ${projectId} AND reward.id = ${rewardId}
+					AND reward.status = 'held' AND customer.erased_at IS NULL
+			`,
+		);
+		if (reward === null) return null;
+		const subscription = await executeOne<{
+			external_subscription_id: string;
+			plan_key: string | null;
+			change_pending: boolean;
+		}>(
+			this.database,
+			drizzleSql`
+				SELECT subscription.external_subscription_id, plan.key AS plan_key, EXISTS (
+					SELECT 1 FROM subscription_changes change
+					WHERE change.project_id = subscription.project_id
+						AND change.subscription_id = subscription.id
+						AND change.status IN ('pending', 'processing')
+				) AS change_pending
+				FROM subscriptions subscription
+				LEFT JOIN plan_versions version
+					ON version.project_id = subscription.project_id
+					AND version.id = subscription.plan_version_id
+				LEFT JOIN plans plan
+					ON plan.project_id = version.project_id AND plan.id = version.plan_id
+				WHERE subscription.project_id = ${projectId}
+					AND subscription.customer_id = ${reward.customer_id}
+					AND subscription.provider = 'stripe'
+					AND subscription.status = 'active'
+					AND NOT subscription.cancel_at_period_end
+				ORDER BY subscription.created_at DESC
+				LIMIT 1
+			`,
+		);
+		if (subscription === null) return null;
+		const application = {
+			rewardId,
+			customerId: reward.customer_id,
+			recipient: reward.recipient,
+			referralId: reward.referral_id,
+			programKey: reward.program_key,
+			promotionId: reward.promotion_id,
+			promotionKey: reward.promotion_key,
+			externalSubscriptionId: subscription.external_subscription_id,
+		};
+		// This reward's own reservation counts against its code and looks like a stacked discount, so
+		// a retry must not run the checks that would refuse it.
+		if (reward.redemption_status === "reserved" && reward.redemption_id !== null) {
+			return { ...application, redemptionId: reward.redemption_id, retry: true };
+		}
+		// Both rewrite the subscription's discount list, so the change goes first.
+		if (subscription.change_pending) {
+			await this.recheckDiscount(projectId, rewardId, "SUBSCRIPTION_CHANGE_PENDING");
+			return null;
+		}
+		if (subscription.plan_key === null) {
+			await this.recheckDiscount(projectId, rewardId, "PROMOTION_CODE_NOT_APPLICABLE");
+			return null;
+		}
+		try {
+			const promotion = await this.promotions.resolveCommercialPromotion(project, {
+				billingAccountId: reward.billing_account_id,
+				code: reward.code,
+				target: { kind: "plan", key: subscription.plan_key },
+			});
+			await this.promotions.ensureSubscriptionDiscountAvailable(
+				project,
+				subscription.external_subscription_id,
+			);
+			const effectSnapshot = {
+				kind: "discount",
+				promotionKey: promotion.promotionKey,
+				discount: promotion.discount,
+			};
+			const { redemption } = await this.promotions.reservePromotionRedemption(project, {
+				customerId: reward.customer_id,
+				billingAccountId: reward.billing_account_id,
+				promotionCodeId: reward.promotion_code_id,
+				channel: "web",
+				provider: "stripe",
+				source: "commercial_action",
+				idempotencyKey: discountKey(rewardId),
+				requestHash: sha256Hex(stableJson({ rewardId })),
+				reservedUntil: new Date(Date.now() + DISCOUNT_RESERVATION_MS),
+				effectSnapshot,
+				actor: REFERRAL_REWARD_ACTOR,
+				externalSubscriptionId: subscription.external_subscription_id,
+			});
+			return { ...application, redemptionId: redemption.id, retry: false };
+		} catch (error) {
+			if (!(error instanceof BillingError)) throw error;
+			await this.recheckDiscount(projectId, rewardId, error.code);
+			return null;
+		}
+	}
+
+	/** Records that the discount went on: the use is counted and the reward is issued together. */
+	async completeDiscount(
+		project: ProjectInstanceContext,
+		discount: ReferralDiscountApplication,
+	): Promise<void> {
+		const projectId = project.projectInstanceId;
+		await this.transaction(async (tx) => {
+			await lockCustomerRow(tx, projectId, discount.customerId);
+			await applyPromotionRedemptionInTx(tx, projectId, {
+				redemptionId: discount.redemptionId,
+				externalSubscriptionId: discount.externalSubscriptionId,
+			});
+			await settleReward(
+				tx,
+				projectId,
+				{ ...discount, effectKind: "discount" },
+				{ status: "issued" },
+				"held",
+			);
+		});
+	}
+
+	/** Gives the reservation back and leaves the reward held, to look at again later. */
+	async postponeDiscount(
+		project: ProjectInstanceContext,
+		discount: ReferralDiscountApplication,
+		reason: string,
+	): Promise<void> {
+		await this.promotions.releasePromotionRedemption(project, discount.redemptionId);
+		await this.recheckDiscount(project.projectInstanceId, discount.rewardId, reason);
+	}
+
+	private async recheckDiscount(
+		projectId: string,
+		rewardId: string,
+		reason: string,
+	): Promise<void> {
+		await executeRows(
+			this.database,
+			drizzleSql`
+				UPDATE referral_rewards
+				SET reason = ${reason},
+					next_attempt_at = now() + ${DISCOUNT_RECHECK_MS} * interval '1 millisecond',
+					updated_at = now()
+				WHERE project_id = ${projectId} AND id = ${rewardId} AND status = 'held'
 			`,
 		);
 	}
@@ -744,15 +1002,29 @@ async function mintRewardCode(
 	throw new Error("A reward code could not be minted without a collision");
 }
 
+function discountKey(rewardId: string): string {
+	return `referral_discount:${rewardId}`;
+}
+
 /** Step B's result, recorded with its event. Only the first settlement of a reward counts. */
 async function settleReward(
 	tx: QueryExecutor,
 	projectId: string,
-	reward: PreparedReward,
+	reward: Pick<
+		PreparedReward,
+		| "rewardId"
+		| "customerId"
+		| "recipient"
+		| "referralId"
+		| "programKey"
+		| "promotionKey"
+		| "effectKind"
+	>,
 	outcome: RewardOutcome,
+	from: "pending" | "held" = "pending",
 ): Promise<void> {
 	await lockCustomerRow(tx, projectId, reward.customerId);
-	const settled = await writeRewardOutcome(tx, projectId, reward.rewardId, outcome);
+	const settled = await writeRewardOutcome(tx, projectId, reward.rewardId, outcome, from);
 	if (!settled || outcome.status === "failed" || outcome.status === "skipped") return;
 	await recordBillingEvent(tx, projectId, {
 		type: "referral.reward_issued",
@@ -778,6 +1050,7 @@ async function writeRewardOutcome(
 	projectId: string,
 	rewardId: string,
 	outcome: RewardOutcome,
+	from: "pending" | "held" = "pending",
 ): Promise<boolean> {
 	const reason = outcome.status === "issued" ? null : outcome.reason;
 	const row = await executeOne<{ id: string }>(
@@ -786,7 +1059,7 @@ async function writeRewardOutcome(
 			UPDATE referral_rewards
 			SET status = ${outcome.status}, reason = ${reason},
 				issued_at = CASE WHEN ${outcome.status === "issued"} THEN now() END, updated_at = now()
-			WHERE project_id = ${projectId} AND id = ${rewardId} AND status = 'pending'
+			WHERE project_id = ${projectId} AND id = ${rewardId} AND status = ${from}
 			RETURNING id
 		`,
 	);

@@ -1,5 +1,10 @@
-import type { PromotionStripeSyncJob, PromotionStripeSyncOutcome } from "../billing/promotions";
-import type { ReferralRewardJob } from "../billing/referrals";
+import type {
+	PromotionStripeSyncJob,
+	PromotionStripeSyncOutcome,
+	SubscriptionDiscountInput,
+	SubscriptionDiscountOutcome,
+} from "../billing/promotions";
+import type { ReferralDiscountApplication, ReferralRewardJob } from "../billing/referrals";
 import type { BillingProvider } from "../billing/types";
 import {
 	type BillingMetrics,
@@ -45,10 +50,25 @@ export interface ReferralRewardSweep {
 		rewardId: string,
 		input: { error: string; retryDelayMs: number | null },
 	): Promise<void>;
+	listHeldDiscounts(limit: number, maxAttempts: number): Promise<ReferralRewardJob[]>;
+	prepareDiscount(
+		project: ProjectInstanceContext,
+		rewardId: string,
+	): Promise<ReferralDiscountApplication | null>;
+	completeDiscount(
+		project: ProjectInstanceContext,
+		discount: ReferralDiscountApplication,
+	): Promise<void>;
+	postponeDiscount(
+		project: ProjectInstanceContext,
+		discount: ReferralDiscountApplication,
+		reason: string,
+	): Promise<void>;
 }
 
 export interface PromotionStripeProvider {
 	syncPromotionStripeObject(job: PromotionStripeSyncJob): Promise<PromotionStripeSyncOutcome>;
+	addSubscriptionDiscount(input: SubscriptionDiscountInput): Promise<SubscriptionDiscountOutcome>;
 }
 
 /** The adapter group a promotion object sync needs from its own provider. */
@@ -68,6 +88,7 @@ export interface PromotionMaintenanceRunResult {
 	referralsQualified: number;
 	referralRewardsProcessed: number;
 	referralRewardsDeferred: number;
+	referralDiscountsApplied: number;
 }
 
 type PromotionJobOutcome = "ready" | "retired" | "retryScheduled" | "failed" | "deferred";
@@ -124,8 +145,10 @@ export class PromotionMaintenanceWorker {
 			referralsQualified: await this.dependencies.referralRewards.qualifyDueReferrals(batchSize),
 			referralRewardsProcessed: 0,
 			referralRewardsDeferred: 0,
+			referralDiscountsApplied: 0,
 		};
 		await this.issueReferralRewards(batchSize, result);
+		await this.applyHeldDiscounts(batchSize, result);
 		const staleAfterMs = this.dependencies.staleAfterMs ?? 5 * 60_000;
 		const jobs = await repository.claimStripeObjects(
 			this.dependencies.workerId,
@@ -204,6 +227,67 @@ export class PromotionMaintenanceWorker {
 				this.record("referral_reward", "deferred");
 			}
 		}
+	}
+
+	/**
+	 * Puts held discounts on live subscriptions. Like issuing, each attempt is safe to repeat, so
+	 * none needs a lease: the reservation, the Stripe key and the settled status make a second
+	 * worker on one reward arrive at the same result.
+	 */
+	private async applyHeldDiscounts(
+		batchSize: number,
+		result: PromotionMaintenanceRunResult,
+	): Promise<void> {
+		const { referralRewards, projectContextResolver, logger } = this.dependencies;
+		const maxAttempts = this.dependencies.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+		for (const job of await referralRewards.listHeldDiscounts(batchSize, maxAttempts)) {
+			try {
+				const project = await resolveClaimedProjectInstance(projectContextResolver, {
+					projectInstanceId: job.projectId,
+					projectInstanceKey: job.projectKey,
+				});
+				if (await this.applyHeldDiscount(project, job.rewardId)) {
+					result.referralDiscountsApplied += 1;
+					this.record("referral_discount", "applied");
+				}
+			} catch (error) {
+				logger.error("Referral discount could not be applied", error, {
+					projectKey: job.projectKey,
+					rewardId: job.rewardId,
+				});
+				await referralRewards.deferReward(job.projectId, job.rewardId, {
+					error: normalizeWorkerError(error),
+					retryDelayMs: calculateRetryDelayMs({ attempts: job.attempts, maxAttempts }),
+				});
+				this.record("referral_discount", "deferred");
+			}
+		}
+	}
+
+	private async applyHeldDiscount(
+		project: ProjectInstanceContext,
+		rewardId: string,
+	): Promise<boolean> {
+		const { referralRewards, adapterForJob } = this.dependencies;
+		const discount = await referralRewards.prepareDiscount(project, rewardId);
+		if (discount === null) return false;
+		const adapter = await adapterForJob(project, "stripe");
+		if (adapter?.promotions?.addSubscriptionDiscount === undefined) {
+			await referralRewards.postponeDiscount(project, discount, "STRIPE_NOT_CONFIGURED");
+			return false;
+		}
+		const outcome = await adapter.promotions.addSubscriptionDiscount({
+			promotionId: discount.promotionId,
+			externalSubscriptionId: discount.externalSubscriptionId,
+			idempotencyKey: `billing:referral-reward:${discount.rewardId}`,
+			retry: discount.retry,
+		});
+		if (outcome === "already_discounted") {
+			await referralRewards.postponeDiscount(project, discount, "SUBSCRIPTION_HAS_DISCOUNT");
+			return false;
+		}
+		await referralRewards.completeDiscount(project, discount);
+		return true;
 	}
 
 	private async sync(

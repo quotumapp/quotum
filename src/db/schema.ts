@@ -6723,6 +6723,9 @@ export const referralRewards = pgTable(
 		index("idx_billing_referral_rewards_due")
 			.on(table.nextAttemptAt, table.id)
 			.where(sql`${table.status} = 'pending'`),
+		index("idx_billing_referral_rewards_held")
+			.on(table.nextAttemptAt, table.id)
+			.where(sql`${table.status} = 'held'`),
 		index("idx_billing_referral_rewards_customer").on(
 			table.projectId,
 			table.customerId,

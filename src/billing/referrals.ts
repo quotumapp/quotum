@@ -118,6 +118,21 @@ export interface ReferralRewardJob {
 	attempts: number;
 }
 
+/** A held discount with its reservation taken, ready to be added to a live subscription. */
+export interface ReferralDiscountApplication {
+	rewardId: string;
+	customerId: string;
+	recipient: ReferralRole;
+	referralId: string;
+	programKey: string;
+	promotionId: string;
+	promotionKey: string;
+	externalSubscriptionId: string;
+	redemptionId: string;
+	/** True when an earlier attempt took this reservation, so the coupon may be attached already. */
+	retry: boolean;
+}
+
 export interface ReferralPage<T> {
 	items: T[];
 	nextCursor: string | null;
