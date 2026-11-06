@@ -2,6 +2,7 @@ import type { BillingChannel, BillingProvider } from "../billing/types";
 import type { ProjectInstanceContext } from "../projects/context";
 import type { CatalogProviderCompatibility } from "../providers/catalog-compatibility-types";
 import type { BillingCadenceUnit, CadenceUnit } from "../shared/cadence";
+import type { PreviewOptions } from "../shared/preview-lifetime";
 
 export interface CatalogFeatureIntent {
 	key: string;
@@ -468,7 +469,11 @@ export interface PublishedCatalog {
 
 export interface CatalogControlPlaneLike {
 	getPublished?(project: ProjectInstanceContext): Promise<PublishedCatalog>;
-	preview(project: ProjectInstanceContext, input: CatalogPreviewInput): Promise<CatalogPreview>;
+	preview(
+		project: ProjectInstanceContext,
+		input: CatalogPreviewInput,
+		options?: PreviewOptions,
+	): Promise<CatalogPreview>;
 	publish(
 		project: ProjectInstanceContext,
 		input: CatalogPublishInput,

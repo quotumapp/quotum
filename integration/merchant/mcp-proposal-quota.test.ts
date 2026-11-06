@@ -1,8 +1,9 @@
-import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeEach, describe, expect, it, spyOn } from "bun:test";
 import type { BillingChangesPort } from "../../src/platform/application/billing-changes";
 import { McpChanges } from "../../src/platform/mcp/changes";
 import { MCP_RESULT_BYTES } from "../../src/platform/mcp/proposal-limits";
 import { PlatformRetentionSweep } from "../../src/platform/retention";
+import type { PreviewOptions } from "../../src/shared/preview-lifetime";
 import { createDeferred } from "../../tests/helpers/deferred";
 import { MerchantBrowser, merchantFixture, onboard } from "./fixture";
 
@@ -15,6 +16,8 @@ let before: unknown = {};
 let prepareWait: Promise<void> | undefined;
 let started: () => void = () => {};
 let previewError = false;
+let previewOptions: PreviewOptions | undefined;
+let previewExpiresAt: string | undefined;
 const port: BillingChangesPort = {
 	actions: [
 		{
@@ -27,12 +30,13 @@ const port: BillingChangesPort = {
 	async inspect() {
 		return {};
 	},
-	async prepare(_context, input) {
+	async prepare(_context, input, options) {
+		previewOptions = options;
 		prepareCalls++;
 		started();
 		await prepareWait;
 		if (previewError) throw new Error("preview failed");
-		return { input, before, after: input.body, fingerprint: "test" };
+		return { input, before, after: input.body, fingerprint: "test", expiresAt: previewExpiresAt };
 	},
 	async apply() {
 		applyCalls++;
@@ -93,8 +97,52 @@ beforeEach(async () => {
 	prepareWait = undefined;
 	started = () => {};
 	previewError = false;
+	previewOptions = undefined;
+	previewExpiresAt = undefined;
+	if (f.store.config.mcp) f.store.config.mcp.proposalTtlSeconds = undefined;
 	limits();
 });
+
+describe("proposal review lifetime", () => {
+	it.each([undefined, 7200])(
+		"uses the default or configured lifetime %s and expires at its deadline",
+		async (ttlSeconds) => {
+			const who = await grant();
+			const config = f.store.config.mcp;
+			if (!config) throw new Error("Missing MCP config");
+			config.proposalTtlSeconds = ttlSeconds;
+			let now = f.store.now();
+			const clock = spyOn(f.store, "now").mockImplementation(() => now);
+			try {
+				const saved = await changes.prepare(who.id, target, input("review-lifetime"));
+				const duration = ttlSeconds ?? 3600;
+				expect(previewOptions).toEqual({ ttlSeconds: duration });
+				expect(saved.expiresAt).toBe(new Date(now.getTime() + duration * 1000).toISOString());
+				now = new Date(now.getTime() + 31 * 60_000);
+				expect((await changes.get(who.id, saved.id)).status).toBe("pending");
+				config.proposalTtlSeconds = 60;
+				const replay = await changes.prepare(who.id, target, input("review-lifetime"));
+				expect(replay.expiresAt).toBe(saved.expiresAt);
+				expect(prepareCalls).toBe(1);
+				now = new Date(Date.parse(saved.expiresAt) - 1);
+				expect((await changes.get(who.id, saved.id)).status).toBe("pending");
+				now = new Date(saved.expiresAt);
+				expect((await changes.get(who.id, saved.id)).status).toBe("expired");
+				expect((await changes.decide(who.identity, saved.id, true, null)).status).toBe("expired");
+				expect(applyCalls).toBe(0);
+			} finally {
+				clock.mockRestore();
+			}
+		},
+	);
+	it("preserves an earlier preview deadline", async () => {
+		const who = await grant();
+		previewExpiresAt = new Date(f.store.now().getTime() + 600_000).toISOString();
+		const saved = await changes.prepare(who.id, target, input("preview-cap"));
+		expect(saved.expiresAt).toBe(previewExpiresAt);
+	});
+});
+
 describe("organization proposal quotas", () => {
 	it("admits only the available concurrent slots before expensive preview and rejects duplicate in-flight keys", async () => {
 		const who = await grant();

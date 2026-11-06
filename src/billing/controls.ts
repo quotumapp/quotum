@@ -1,5 +1,6 @@
 import type { ProjectInstanceContext } from "../projects/context";
 import type { CadenceUnit } from "../shared/cadence";
+import type { PreviewOptions } from "../shared/preview-lifetime";
 import type { BillingProvider } from "./types";
 
 export type ControlKind = "spend_limit" | "usage_limit";
@@ -253,6 +254,7 @@ export interface ControlsEnterpriseRepositoryLike {
 	previewEnterpriseContract(
 		project: ProjectInstanceContext,
 		input: EnterpriseContractInput,
+		options?: PreviewOptions,
 	): Promise<EnterpriseContractPreview>;
 	publishEnterpriseContract(
 		project: ProjectInstanceContext,
@@ -271,6 +273,7 @@ export interface ControlsEnterpriseRepositoryLike {
 	previewCatalogMigration(
 		project: ProjectInstanceContext,
 		input: CatalogMigrationInput,
+		options?: PreviewOptions,
 	): Promise<CatalogMigrationPreview>;
 	publishCatalogMigration(
 		project: ProjectInstanceContext,

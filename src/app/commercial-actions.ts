@@ -10,6 +10,7 @@ import { BillingError, NotConfiguredError } from "../billing/errors";
 import type { WebBillingService } from "../billing/web-provider";
 import type { ProjectInstanceContext } from "../projects/context";
 import { parsePaddleCommercialContext } from "../providers/paddle/plan";
+import type { PreviewOptions } from "../shared/preview-lifetime";
 import type { ProjectProviderServiceResolver } from "./types";
 
 export interface CommercialPreviewReader {
@@ -49,7 +50,11 @@ async function service(
 }
 
 export async function previewCommercial(
-	input: Routing & { provider: "stripe" | "paddle"; intent: CommercialActionIntent },
+	input: Routing & {
+		provider: "stripe" | "paddle";
+		intent: CommercialActionIntent;
+		previewOptions?: PreviewOptions;
+	},
 ) {
 	const selected = await service(input, input.provider);
 	if (!selected.previewCommercialAction)
@@ -60,6 +65,7 @@ export async function previewCommercial(
 	return selected.previewCommercialAction({
 		billingAccountId: input.billingAccountId,
 		intent: input.intent,
+		previewOptions: input.previewOptions,
 	});
 }
 

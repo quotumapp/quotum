@@ -10,7 +10,9 @@ POST /v1/billing-accounts/:billingAccountId/commercial-actions
 Commercial preview accepts an optional `provider` (`stripe` by default, or `paddle`) and one complete intent. Stripe accepts (`checkout_plan`, `checkout_product`,
 `subscription_change`, `cancel`, `uncancel`, or `setup_payment`) and returns exact or
 provider-calculated amounts
-valid for 15 minutes. Execution accepts only the `previewToken` with an `Idempotency-Key` and
+valid for 15 minutes for direct API and ordinary console previews. Fresh previews prepared for MCP
+proposals use `QUOTUM_MCP_PROPOSAL_TTL_SECONDS` (one hour by default; see [MCP proposals](mcp.md)).
+Execution accepts only the `previewToken` with an `Idempotency-Key` and
 rejects expired previews, catalog or customer drift, or a changed target. A durable
 subscription-change result is HTTP 202; every other result, including a cancellation, is HTTP 200.
 

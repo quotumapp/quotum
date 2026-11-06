@@ -245,7 +245,11 @@ export function createMerchantBillingPort(input: {
 				return ok(await capabilityReads.environment(project));
 			case "catalog.preview":
 				return ok(
-					await repo.previewCatalog(project, { ...parse(previewSchema, command.body), actor }),
+					await repo.previewCatalog(
+						project,
+						{ ...parse(previewSchema, command.body), actor },
+						command.previewOptions,
+					),
 				);
 			case "catalog.publish":
 				return ok(
@@ -427,7 +431,13 @@ export function createMerchantBillingPort(input: {
 					actor,
 				};
 				if (command.operation === "contracts.preview")
-					return ok(await repo.controlsEnterprise.previewEnterpriseContract(project, contract));
+					return ok(
+						await repo.controlsEnterprise.previewEnterpriseContract(
+							project,
+							contract,
+							command.previewOptions,
+						),
+					);
 				return ok(
 					await repo.controlsEnterprise.publishEnterpriseContract(project, {
 						...contract,
@@ -440,10 +450,11 @@ export function createMerchantBillingPort(input: {
 			}
 			case "migrations.preview":
 				return ok(
-					await repo.controlsEnterprise.previewCatalogMigration(project, {
-						...parse(migrationBody, command.body),
-						actor,
-					}),
+					await repo.controlsEnterprise.previewCatalogMigration(
+						project,
+						{ ...parse(migrationBody, command.body), actor },
+						command.previewOptions,
+					),
 				);
 			case "migrations.publish":
 				return ok(
@@ -589,6 +600,7 @@ export function createMerchantBillingPort(input: {
 						billingAccountId: account(),
 						provider: body.provider ?? "stripe",
 						intent: body.intent,
+						previewOptions: command.previewOptions,
 					}),
 				);
 			}

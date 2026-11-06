@@ -262,7 +262,10 @@ allowlist), a `/v1` route that opts into read-only credentials
 allowlist. Remote proposal tools are separately gated by `QUOTUM_MCP_WRITES_ENABLED` (default
 false), explicit `quotum.billing.write` consent and current permissions. They use the injected
 change port to prepare immutable proposals; execution requires the merchant browser decision
-routes and applicable step-up authentication. Deploy matching merchant UI before enabling them. Proposal preparation reserves organization-wide
+routes and applicable step-up authentication. `QUOTUM_MCP_PROPOSAL_TTL_SECONDS` defaults to 3600
+and sets the review window for new proposals and fresh MCP domain previews; saved proposals and
+reused previews retain their stored expiry. Direct API and ordinary console preview defaults stay
+unchanged. Deploy matching merchant UI before enabling them. Proposal preparation reserves organization-wide
 capacity before expensive previews: live count, UTC daily attempts, whole-envelope bytes and
 retained JSON are bounded by the `QUOTUM_MCP_MAX_*` settings. Preserve immutable review snapshots;
 oversized execution responses use explicit bounded receipts after the operation commits.
