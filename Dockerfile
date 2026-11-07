@@ -31,7 +31,7 @@ FROM oven/bun:1.4.2-slim AS release
 RUN apt-get update \
     && apt-get install -y --no-install-recommends --only-upgrade \
         apt gzip libapt-pkg7.0 libpcre2-8-0 libsqlite3-0 libssl3t64 openssl \
-        openssl-provider-legacy perl-base \
+        openssl-provider-legacy perl-base zlib1g \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /usr/src/app
 

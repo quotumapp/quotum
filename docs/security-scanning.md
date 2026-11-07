@@ -68,8 +68,8 @@ or database download; a failed scan stays failed even when report generation suc
 The first image scan found fixed vulnerabilities in four Debian packages and the Go-based
 TypeScript compiler installed through Elysia's optional peer dependency. The Dockerfile upgrades
 `apt` and `libapt-pkg7.0`, `gzip`, `libpcre2-8-0`, `libsqlite3-0`, the OpenSSL packages
-(`libssl3t64`, `openssl`, `openssl-provider-legacy`) and `perl-base` from Debian's configured
-repositories and removes the
+(`libssl3t64`, `openssl`, `openssl-provider-legacy`), `perl-base` and `zlib1g` from Debian's
+configured repositories and removes the
 development-only compiler from production dependencies. The build keeps the compiler
 for development checks; the runtime uses Bun directly. CI verifies the compiler is absent from
 the final image and runs the operator commands and headless Compose smoke test.
